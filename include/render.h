@@ -7,9 +7,9 @@
 #include "sim.h"
 
 // Rendering constants
-#define WINDOW_SIZE_WIDTH 1600
-#define WINDOW_SIZE_HEIGHT 1600
-#define PIXELS_PER_METER 7.0  // Scale factor for converting meters to pixels
+#define WINDOW_SIZE_WIDTH 1000
+#define WINDOW_SIZE_HEIGHT 1000
+#define PIXELS_PER_METER 4.2  // Scale factor for converting meters to pixels
 #define SCALE PIXELS_PER_METER
 
 // Lane visualization constants

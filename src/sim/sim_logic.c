@@ -49,7 +49,7 @@ void simulate(Simulation* self, Seconds time_period) {
                 lane = lane->adjacent_right;
                 lane_change_intent = INDICATOR_NONE;
             } else {
-                lane = lane;
+                // Do nothing
             }
 
             MetersPerSecondSquared a = car_get_acceleration(car);

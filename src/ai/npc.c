@@ -125,6 +125,7 @@ void npc_car_make_decisions(Car* self) {
         // printf("3. But, approaching intersection\n");
         TrafficLight light = situation.light_for_turn[turn_indicator];
         bool is_emergency_braking_possible = (situation.braking_distance.capable <= distance_to_stop_line + meters(1) + 1e-6); // meters(1) for a buffer -- such that it is ok to overshoot by 1m when emergency braking.
+        bool is_comfy_braking_possible = (situation.braking_distance.preferred_smooth <= distance_to_stop_line + 1e-6);
 
         switch (light) {
         case TRAFFIC_LIGHT_STOP:
@@ -150,7 +151,6 @@ void npc_car_make_decisions(Car* self) {
             break;
         case TRAFFIC_LIGHT_YELLOW:
             // TODO: incorporate situation.intersection->countdown
-            bool is_comfy_braking_possible = (situation.braking_distance.preferred_smooth <= distance_to_stop_line + 1e-6);
             if (is_comfy_braking_possible) {
                 // printf("7. We can stop comfortably. Let's do that\n");
                 should_brake = true;
