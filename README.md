@@ -8,6 +8,12 @@ First, ensure you have `gcc` and the SDL2 libraries installed. On Ubuntu, you ca
 sudo apt install libsdl2-dev libsdl2-ttf-dev libsdl2-gfx-dev
 ```
 
+On macOS, you can use Homebrew (probably):
+
+```bash
+brew install sdl2 sdl2_ttf sdl2_gfx
+```
+
 ## Running the Simulator
 
 To compile and launch the simulator, run:
