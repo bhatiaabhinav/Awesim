@@ -92,7 +92,7 @@ void lane_set_exit_lane(Lane* self, const Lane* lane, const double start, const 
 // Lane Queries
 //
 
-int lane_num_connections(const Lane* self) {
+int lane_get_num_connections(const Lane* self) {
     int count = 0;
     if (self->for_straight_connects_to) count++;
     if (self->for_left_connects_to) count++;
@@ -100,14 +100,14 @@ int lane_num_connections(const Lane* self) {
     return count;
 }
 
-const Lane* first_connection(const Lane* self) {
+const Lane* lane_get_first_connection(const Lane* self) {
     if (self->for_straight_connects_to) return self->for_straight_connects_to;
     if (self->for_left_connects_to) return self->for_left_connects_to;
     if (self->for_right_connects_to) return self->for_right_connects_to;
     return NULL;
 }
 
-const Lane* last_connection(const Lane* self) {
+const Lane* lane_get_last_connection(const Lane* self) {
     if (self->for_right_connects_to) return self->for_right_connects_to;
     if (self->for_left_connects_to) return self->for_left_connects_to;
     if (self->for_straight_connects_to) return self->for_straight_connects_to;
@@ -151,14 +151,18 @@ void lane_set_road(Lane* self, const Road* road) {
 // Merge / Exit Checks
 //
 
-bool lane_check_merge_available(const Lane* self) {
+bool lane_is_merge_available(const Lane* self) {
     return self->merges_into != NULL;
 }
 
-bool lane_check_exit_lane_available(const Lane* self, const double progress) {
+bool lane_is_exit_lane_available(const Lane* self, const double progress) {
     return self->exit_lane != NULL &&
            self->exit_lane_start <= progress &&
            progress <= self->exit_lane_end;
+}
+
+bool lane_is_exit_lane_eventually_available(const Lane* self, double progress) {
+    return self->exit_lane && (self->exit_lane_start > progress);
 }
 
 //
@@ -175,7 +179,7 @@ void lane_free(Lane* self) {
             break;
         default:
             fprintf(stderr, "Unknown lane type\n");
-            exit(1);
+            exit(EXIT_FAILURE);
     }
 }
 
@@ -235,7 +239,7 @@ LinearLane* linear_lane_create_from_center_dir_len(
     LinearLane* lane = malloc(sizeof(LinearLane));
     if (!lane) {
         fprintf(stderr, "Memory allocation failed for LinearLane\n");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 
     lane_init(&lane->base, LINEAR_LANE, direction, width, speed_limit, grip, degradations);
@@ -294,7 +298,7 @@ QuarterArcLane* quarter_arc_lane_create_from_start_end(
     QuarterArcLane* lane = malloc(sizeof(QuarterArcLane));
     if (!lane) {
         fprintf(stderr, "Memory allocation failed for QuarterArcLane\n");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 
     lane_init(&lane->base, QUARTER_ARC_LANE, direction, width, speed_limit, grip, degradations);

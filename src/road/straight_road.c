@@ -16,7 +16,7 @@ StraightRoad* straight_road_create_from_center_dir_len(Coordinates center, Direc
     StraightRoad* road = malloc(sizeof(StraightRoad));
     if (!road) {
         fprintf(stderr, "Memory allocation failed for StraightRoad\n");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 
     road->base.type = STRAIGHT;

@@ -38,8 +38,10 @@ int main(int argc, char* argv[]) {
     bool quit = false;
     SDL_Event event;
     
-    Seconds dt = 0.02;                  // time resolution for integration.
-    Simulation* sim = awesim(dt);
+    int num_cars = 16;                               // number of cars to simulate
+    Seconds dt = 0.02;                              // time resolution for integration.
+    Seconds seconds_to_simulate = 1e9;              // total time (in sim) to simulate, after which the program will exit.
+    Simulation* sim = awesim(num_cars, dt);
 
     double t0 = get_sys_time_seconds();
     double simulation_speedup = 2;       // we will simulate simultation_speedup seconds per wall-second.
@@ -61,9 +63,9 @@ int main(int argc, char* argv[]) {
         double wall_time = (get_sys_time_seconds() - t0);
         double virtual_time = simulation_speedup * wall_time;
         double delta_t = virtual_time - sim->time;  // the sim is lagging behind by these many virtual seconds
-        simulate(sim, delta_t);                     // make sim catch up to virtual time. This is will cause delta_t / dt transition updates.
-
-
+        if (virtual_time < seconds_to_simulate) {
+            simulate(sim, delta_t);                     // make sim catch up to virtual time. This is will cause delta_t / dt transition updates.
+        }
     }
     
     sim_deep_free(sim);

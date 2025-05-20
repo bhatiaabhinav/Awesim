@@ -30,6 +30,9 @@ int rand_int_range(int min, int max);
 // Returns a random integer in the range [0, max). Assumes max > 0.
 int rand_int(int max);
 
+// Returns the value clamped between min and max.
+double fclamp(double value, double min, double max);
+
 //
 // System Utilities
 //

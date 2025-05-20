@@ -63,6 +63,7 @@ struct Lane {
 
 // Initialization
 void lane_init(Lane* self, LaneType type, Direction direction, Meters width, MetersPerSecond speed_limit, double grip, Degradations degradations);
+void lane_free(Lane* self);
 
 // Lane Connections
 void lane_connect_to_straight(Lane* self, const Lane* lane);
@@ -73,19 +74,14 @@ void lane_set_adjacent_left(Lane* self, const Lane* left);
 void lane_set_adjacent_right(Lane* self, const Lane* right);
 void lane_set_merges_into(Lane* self, const Lane* lane, double start, double end);
 void lane_set_exit_lane(Lane* self, const Lane* lane, double start, double end);
+void lane_set_speed_limit(Lane* self, MetersPerSecond speed_limit);
+void lane_set_grip(Lane* self, double grip);
+void lane_set_degradations(Lane* self, Degradations degradations);
+void lane_set_road(Lane* self, const Road* road);
 
 // Lane Vehicle Management
 void lane_add_car(Lane* self, const Car* car);
 void lane_remove_car(Lane* self, const Car* car);
-
-// Lane Query
-int lane_num_connections(const Lane* self);
-const Lane* first_connection(const Lane* self);
-const Lane* last_connection(const Lane* self);
-bool lane_check_merge_available(const Lane* self);
-bool lane_check_exit_lane_available(const Lane* self, double progress);
-void lane_set_road(Lane* self, const Road* road);
-void lane_free(Lane* self);
 
 // Lane Getters
 LaneType lane_get_type(const Lane* self);
@@ -101,11 +97,13 @@ int lane_get_num_cars(const Lane* self);
 const Car* lane_get_car(const Lane* self, int index);
 const Road* lane_get_road(const Lane* self);
 Degradations lane_get_degradations(const Lane* self);
+int lane_get_num_connections(const Lane* self);
+const Lane* lane_get_first_connection(const Lane* self);
+const Lane* lane_get_last_connection(const Lane* self);
+bool lane_is_merge_available(const Lane* self);
+bool lane_is_exit_lane_available(const Lane* self, double progress);
+bool lane_is_exit_lane_eventually_available(const Lane* self, double progress);
 
-// Lane Setters
-void lane_set_speed_limit(Lane* self, MetersPerSecond speed_limit);
-void lane_set_grip(Lane* self, double grip);
-void lane_set_degradations(Lane* self, Degradations degradations);
 
 // Linear Lane
 typedef struct {
@@ -145,8 +143,6 @@ struct Road {
 
 // Frees the road and all its lanes.
 void road_free(Road* self);
-const Lane* road_leftmost_lane(const Road* self);
-const Lane* road_rightmost_lane(const Road* self);
 
 // Road Getters
 RoadType road_get_type(const Road* self);
@@ -155,6 +151,11 @@ const Lane* road_get_lane(const Road* self, int index);
 MetersPerSecond road_get_speed_limit(const Road* self);
 double road_get_grip(const Road* self);
 Coordinates road_get_center(const Road* self);
+const Lane* road_get_leftmost_lane(const Road* self);
+const Lane* road_get_rightmost_lane(const Road* self);
+bool road_is_merge_available(const Road* self);
+bool road_is_exit_road_available(const Road* self, double progress);
+bool road_is_exit_road_eventually_available(const Road* self, double progress);
 
 // Straight Road
 typedef struct {

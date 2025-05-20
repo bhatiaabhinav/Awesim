@@ -1,4 +1,5 @@
 #include "sim.h"
+#include "ai.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -33,20 +34,20 @@ void simulate(Simulation* self, Seconds time_period) {
         for(int car_id=0; car_id < self->num_cars; car_id++) {
             // bool is_NPC = car_id > 0;
             Car* car = self->cars[car_id];
-            NPC_car_make_decisions(car, self);
+            npc_car_make_decisions(car);
             const Lane* lane = car_get_lane(car);
             double progress = car_get_lane_progress(car);
             Meters s = car_get_lane_progress_meters(car);
-            DirectionIntent lane_change_intent = car_get_lane_change_intent(car);
-            if(lane_change_intent == INTENT_LEFT && lane->adjacent_left && lane->adjacent_left->direction == lane->direction) {
+            CarIndictor lane_change_intent = car_get_indicator_lane(car);
+            if(lane_change_intent == INDICATOR_LEFT && lane->adjacent_left && lane->adjacent_left->direction == lane->direction) {
                 // TODO: ignore lane change if this is an NPC if a collision is possible with another vehicle
                 lane = lane->adjacent_left;
-                lane_change_intent = INTENT_STRAIGHT;   // Important: To mark lane change intent already executed, so that merge is ignored if a merge is available on the new lane.
-            } else if (lane_change_intent == INTENT_RIGHT && lane->adjacent_right) {
+                lane_change_intent = INDICATOR_NONE;   // Important: To mark lane change intent already executed, so that merge is ignored if a merge is available on the new lane.
+            } else if (lane_change_intent == INDICATOR_RIGHT && lane->adjacent_right) {
                 assert(lane->adjacent_right->direction == lane->direction && "How did this happen? Map error!");
                 // TODO: ignore lane change if this is an NPC if a collision is possible with another vehicle
                 lane = lane->adjacent_right;
-                lane_change_intent = INTENT_STRAIGHT;
+                lane_change_intent = INDICATOR_NONE;
             } else {
                 lane = lane;
             }
@@ -72,7 +73,7 @@ void simulate(Simulation* self, Seconds time_period) {
 
             // --------------- handle approaching dead end ---------------
             // -----------------------------------------------------------
-            bool approaching_dead_end = lane_num_connections(lane) == 0 && s >= lane->length - meters(8.0);
+            bool approaching_dead_end = lane_get_num_connections(lane) == 0 && s >= lane->length - meters(8.0);
             if (approaching_dead_end) {
                 // teleport to the leftmost lane, to have a chance at merging into something.    
                 while (lane->adjacent_left && lane->adjacent_left->direction == lane->direction) {
@@ -83,24 +84,24 @@ void simulate(Simulation* self, Seconds time_period) {
 
             // ------------ handle merge --------------------
             // ----------------------------------------------
-            bool merge_available = lane_check_merge_available(lane);
-            bool merge_intent = lane_change_intent == INTENT_LEFT || approaching_dead_end;
+            bool merge_available = lane_is_merge_available(lane);
+            bool merge_intent = lane_change_intent == INDICATOR_LEFT || approaching_dead_end;
             bool is_merge_safe = true;  // todo
             if (merge_available && merge_intent && is_merge_safe) {
                 s += lane->merges_into_start * lane->merges_into->length;
                 lane = lane->merges_into;
                 progress = s / lane->length;
-                lane_change_intent = INTENT_STRAIGHT;
+                lane_change_intent = INDICATOR_NONE;
             }
 
             // ---------- handle turn -----------------------
             // ----------------------------------------------
             while (s > lane->length) {
                 s -= lane->length;
-                DirectionIntent turn_intent = car->turn_intent;
-                if (turn_intent == INTENT_LEFT && lane->for_left_connects_to) {
+                CarIndictor turn_intent = car_get_indicator_turn(car);
+                if (turn_intent == INDICATOR_LEFT && lane->for_left_connects_to) {
                     lane = lane->for_left_connects_to;
-                } else if (turn_intent == INTENT_RIGHT && lane->for_right_connects_to) {
+                } else if (turn_intent == INDICATOR_RIGHT && lane->for_right_connects_to) {
                     lane = lane->for_right_connects_to;
                 } else {
                     lane = lane->for_straight_connects_to;
@@ -110,9 +111,9 @@ void simulate(Simulation* self, Seconds time_period) {
 
             // ------------ handle exit ---------------------
             // --------------------------------------------
-            bool exit_intent = lane_change_intent == INTENT_RIGHT;
-            exit_intent = true; // ! for debugging
-            bool exit_available = lane_check_exit_lane_available(lane, progress);
+            bool exit_intent = lane_change_intent == INDICATOR_RIGHT;
+            // exit_intent = true; // ! for debugging
+            bool exit_available = lane_is_exit_lane_available(lane, progress);
             if (exit_intent && exit_available) {
                 s = (progress - lane->exit_lane_start) * lane->length;
                 lane = lane->exit_lane;

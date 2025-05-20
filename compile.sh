@@ -24,8 +24,6 @@ gcc \
 # Check if compilation was successful
 if [ $? -eq 0 ]; then
     echo "✅ Compilation successful. Executable created at: ./bin/play"
-    echo "Launching the simulation..."
-    ./bin/play
 else
     echo "❌ Compilation failed. Please check the errors above."
     exit 1

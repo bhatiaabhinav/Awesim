@@ -15,18 +15,30 @@ void road_free(Road* self) {
     }
 }
 
-const Lane* road_leftmost_lane(const Road* self) {
+const Lane* road_get_leftmost_lane(const Road* self) {
     if (self->num_lanes == 0) {
         return NULL;
     }
     return self->lanes[0];
 }
 
-const Lane* road_rightmost_lane(const Road* self) {
+const Lane* road_get_rightmost_lane(const Road* self) {
     if (self->num_lanes == 0) {
         return NULL;
     }
     return self->lanes[self->num_lanes - 1];
+}
+
+bool road_is_merge_available(const Road* self) {
+    return self->type != INTERSECTION && lane_is_merge_available(road_get_leftmost_lane(self));
+}
+
+bool road_is_exit_road_available(const Road* self, double progress) {
+    return self->type != INTERSECTION && lane_is_exit_lane_available(road_get_rightmost_lane(self), progress);
+}
+
+bool road_is_exit_road_eventually_available(const Road* self, double progress) {
+    return self->type != INTERSECTION && lane_is_exit_lane_eventually_available(road_get_rightmost_lane(self), progress);
 }
 
 //

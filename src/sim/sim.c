@@ -16,7 +16,7 @@ ClockReading clock_reading(const Days days, const Hours hours, const Minutes min
 ClockReading clock_reading_from_seconds(const Seconds seconds) {
     if (seconds < 0) {
         fprintf(stderr, "Error: seconds cannot be negative\n");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
     ClockReading clock;
     Seconds seconds_remaining = seconds;

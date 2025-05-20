@@ -5,4 +5,4 @@
 
 Map* awesim_map();
 
-Simulation* awesim(const Seconds dt);
+Simulation* awesim(int num_cars, Seconds dt);

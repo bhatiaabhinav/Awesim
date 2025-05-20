@@ -63,7 +63,7 @@ Intersection* intersection_create_and_form_connections(
     Intersection* intersection = malloc(sizeof(Intersection));
     if (!intersection) {
         fprintf(stderr, "Memory allocation failed for Intersection\n");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 
     intersection->base.type = INTERSECTION;
@@ -94,9 +94,9 @@ Intersection* intersection_create_and_form_connections(
         Road* road_from = (Road*)roads_from[dir_id];
 
         // Right turn
-        Lane* lane_from = (Lane*)road_rightmost_lane(road_from);
+        Lane* lane_from = (Lane*)road_get_rightmost_lane(road_from);
         Road* road_to = (Road*)roads_to[(dir_id + 1) % 4];
-        const Lane* lane_to = road_rightmost_lane(road_to);
+        const Lane* lane_to = road_get_rightmost_lane(road_to);
         Lane* right_turn_lane = (Lane*)quarter_arc_lane_create_from_start_end(
             lane_from->end_point, lane_to->start_point, DIRECTION_CW,
             lane_from->width, speed_limit, grip, DEGRADATIONS_ZERO);
@@ -106,9 +106,9 @@ Intersection* intersection_create_and_form_connections(
         intersection->base.lanes[lanes_count++] = right_turn_lane;
 
         // Left turn
-        lane_from = (Lane*)road_leftmost_lane(road_from);
+        lane_from = (Lane*)road_get_leftmost_lane(road_from);
         road_to = (Road*)roads_to[(dir_id + 3) % 4];
-        lane_to = road_leftmost_lane(road_to);
+        lane_to = road_get_leftmost_lane(road_to);
         Lane* left_turn_lane = (Lane*)quarter_arc_lane_create_from_start_end(
             lane_from->end_point, lane_to->start_point, DIRECTION_CCW,
             lane_from->width, speed_limit, grip, DEGRADATIONS_ZERO);

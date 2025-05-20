@@ -9,8 +9,9 @@ double get_sys_time_seconds() {
 }
 
 int main(int argc, char** argv) {
-    const Seconds dt = 0.02;                      // time resolution for integration.
-    Simulation* sim = awesim(dt);
+    int num_cars = 16;                               // number of cars to simulate
+    const Seconds dt = 0.02;                        // time resolution for integration.
+    Simulation* sim = awesim(num_cars, dt);
     const int benchmark_n_transitions = 1000000;
 
     double t0 = get_sys_time_seconds();

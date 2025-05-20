@@ -4,20 +4,20 @@
 #include <stdio.h>
 
 
-Simulation* awesim(const Seconds dt) {
+Simulation* awesim(int num_cars, Seconds dt) {
     Map* map = awesim_map();
     Simulation* sim = sim_create(map, dt);
-    const int num_cars = 32;
     for(int i = 0; i < num_cars; i++) {
-        Car* car = car_create(car_dimensions_random_preset(), car_capable_max(), preferences_random());
+        Car* car = car_create(car_dimensions_get_random_preset(), (CarCapabilities){CAR_ACC_PROFILE_SPORTS_CAR, from_mph(120), 0.0}, preferences_sample_random());
         const Road* random_road = map->roads[rand_int_range(0, map->num_roads - 1)];
         const Lane* random_lane = random_road->lanes[rand_int_range(0, random_road->num_lanes - 1)];
         lane_add_car((Lane*)random_lane, car);
         car_set_lane(car, random_lane);
-        car_set_lane_progress(car, rand_uniform(0.25, 0.75));
+        car_set_lane_progress(car, rand_uniform(0.5, 0.5));
         // car_set_speed(car, random_lane->speed_limit + car->preferences.average_speed_offset);
         car_set_speed(car, 0);
         sim_add_car(sim, car);
+        // TODO: ensure that new cars are not spawned already crashed into other cars
     }
     printf("Created an awesome simulator!\n");
     return sim;

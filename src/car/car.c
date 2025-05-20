@@ -1,42 +1,14 @@
-#include <stdio.h>
-#include <math.h>
-#include <stdlib.h>
-#include <assert.h>
-#include <unistd.h>
+#include "utils.h"
 #include "car.h"
+#include <stdlib.h>
+#include <stdio.h>
 
 
-MetersPerSecond acceleration_mode_settling_time(AccelerationMode mode) {
-    // based on 60kmph to 0kmph stopping time
-    switch (mode) {
-        case CHILL_MODE:        // a ~ 2.5 m/s^2    k = 0.36.
-            return 6.66;
-        case STANDARD_MODE:     // a ~ 5.0 m/s^2    k = 1.44
-            return 3.33;
-        case SPORT_MODE:        // a ~ 7.5 m/s^2    k = 3.24
-            return 2.22;
-        case EMERGENCY_MODE:    // a ~ 10.0 m/s^2   k = 5.76
-            return 1.66;
-        default:
-            return 0.0; // Invalid mode
-    }
-}
-
-double pid_k_for_stopping_time(const Seconds settling_time) {
-    return 16.0 / (settling_time * settling_time);
-}
-
-double acceleration_mode_pid_k(AccelerationMode mode) {
-    double t = acceleration_mode_settling_time(mode);
-    return pid_k_for_stopping_time(t);
-}
-
-
-Car* car_create(const Dimensions dimensions, const CarCapabilities capabilities, const PreferenceProfile preferences) {
+Car* car_create(Dimensions dimensions, CarCapabilities capabilities, CarPersonality preferences) {
     Car* car = (Car*)malloc(sizeof(Car));
     if (!car) {
         fprintf(stderr, "Memory allocation failed for Car\n");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
     car->dimensions = dimensions;
     car->capabilities = capabilities;
@@ -44,133 +16,79 @@ Car* car_create(const Dimensions dimensions, const CarCapabilities capabilities,
     car->lane = NULL;
     car->lane_progress = 0.0;
     car->speed = 0.0;
-    car->acceleration = 0.0;
-    car->turn_intent = INTENT_STRAIGHT;
-    car->lane_change_intent = INTENT_STRAIGHT;
     car->damage = 0.0;
-    car->npc_state = (NPCState){false, false, false, 0, 0, 0};
+    car->acceleration = 0.0;
+    car->indicator_turn = INDICATOR_NONE;
+    car->indicator_lane = INDICATOR_NONE;
     return car;
 }
 
-
-// ---------------- setters ----------------
-
-void car_set_lane(Car* self, const Lane* lane) {
-    self->lane = lane;
-
-}
-
-void car_set_lane_progress(Car* self, const double progress) {
-    if (progress < 0.0 || progress > 1.0) {
-        fprintf(stderr, "Lane progress must be between 0.0 and 1.0. You are trying to set it to %f\n", progress);
-        self->lane_progress = fmax(0.0, fmin(1.0, progress)); // Clip to [0.0, 1.0]
-    } else if (self->lane != NULL) {
-        self->lane_progress = progress;
-    } else {
-        fprintf(stderr, "Car is not in a lane\n");
+void car_free(Car* self) {
+    if (self) {
+        free(self);
     }
 }
 
-void car_set_speed(Car* self, const MetersPerSecond speed) {
+Dimensions car_get_dimensions(const Car* self) { return self->dimensions; }
+Meters car_get_length(const Car* self) { return self->dimensions.y; }
+Meters car_get_width(const Car* self) { return self->dimensions.x; }
+CarCapabilities car_get_capabilities(const Car* self) { return self->capabilities; }
+CarPersonality car_get_preferences(const Car* self) { return self->preferences; }
+const Lane* car_get_lane(const Car* self) { return self->lane; }
+double car_get_lane_progress(const Car* self) { return self->lane_progress; }
+Meters car_get_lane_progress_meters(const Car* self) {
+    return self->lane ? self->lane->length * self->lane_progress : 0.0;
+}
+MetersPerSecond car_get_speed(const Car* self) { return self->speed; }
+double car_get_damage(const Car* self) { return self->damage; }
+MetersPerSecondSquared car_get_acceleration(const Car* self) { return self->acceleration; }
+CarIndictor car_get_indicator_turn(const Car* self) { return self->indicator_turn; }
+CarIndictor car_get_indicator_lane(const Car* self) { return self->indicator_lane; }
+
+void car_set_lane(Car* self, const Lane* lane) {
+    self->lane = lane;
+}
+
+void car_set_lane_progress(Car* self, double progress) {
+    if (progress < 0.0 || progress > 1.0) {
+        // fprintf(stderr, "WARN: Lane progress must be between 0.0 and 1.0. You are trying to set it to %f. Clipping.\n", progress);
+    }
+    progress = fclamp(progress, 0.0, 1.0);
+    self->lane_progress = progress;
+}
+
+void car_set_speed(Car* self, MetersPerSecond speed) {
     if (speed > self->capabilities.top_speed) {
-        fprintf(stderr, "Speed exceeds car's top speed. Clipping to top speed.\n");
+        fprintf(stderr, "WARN: Speed exceeds car's top speed. You are trying to set it to %f. Clipping.\n", speed);
         self->speed = self->capabilities.top_speed;
     } else {
         self->speed = speed;
     }
 }
 
-void car_set_acceleration(Car* self, const MetersPerSecondSquared acceleration) {
-    if (acceleration > self->capabilities.max_acceleration) {
-        fprintf(stderr, "Acceleration exceeds car's maximum acceleration capability. Clipping to max acceleration.\n");
-        self->acceleration = self->capabilities.max_acceleration;
-    } else if (acceleration < -self->capabilities.max_deceleration) {
-        fprintf(stderr, "Deceleration exceeds car's maximum deceleration (braking) capability. Clipping to max deceleration.\n");
-        self->acceleration = -self->capabilities.max_deceleration;
-    } else {
-        self->acceleration = acceleration;
+void car_set_acceleration(Car* self, MetersPerSecondSquared acceleration) {
+    CarAccelProfile* profile = &self->capabilities.accel_profile;
+    if (self->speed >= 0.0) {
+        if (acceleration > profile->max_acceleration) acceleration = profile->max_acceleration;     // gas
+        if (acceleration < -profile->max_deceleration) acceleration = -profile->max_deceleration;   // braking
+    } else {    // reverse gear
+        if (acceleration < -profile->max_acceleration_reverse_gear) acceleration = -profile->max_acceleration_reverse_gear;                                                     // gas with reverse gear
+        if (acceleration > profile->max_deceleration) acceleration = profile->max_deceleration;     // braking
     }
-}
-
-void car_set_turn_intent(Car* self, const DirectionIntent intent, bool auto_correct) {
-    if (is_turn_possible(self->lane, intent) || intent == INTENT_NA) {
-        self->turn_intent = intent;
-    } else if (auto_correct) {
-        self->turn_intent = get_legitimate_turn_intent_closest_to(self->lane, intent);
-    } else {
-        fprintf(stderr, "Turn intent %d not possible and auto-correction is disabled.\n", intent);
-        exit(1);
-    }
-}
-
-void car_set_lane_change_intent(Car* self, const DirectionIntent intent) {
-    self->lane_change_intent = intent;
+    self->acceleration = acceleration;
 }
 
 void car_set_damage(Car* self, const double damage) {
     if (damage < 0.0 || damage > 1.0) {
-        fprintf(stderr, "Damage must be between 0.0 and 1.0\n");
-        exit(1);
+        fprintf(stderr, "WARN: Damage must be between 0.0 and 1.0. You are trying to set it to %f. Clipping.\n", damage);
     }
-    self->damage = damage;
+    self->damage = fclamp(damage, 0.0, 1.0);
 }
 
-
-// ---------------- getters ----------------
-
-Meters car_get_length(const Car* self) {
-    return self->dimensions.y;
-}
-Meters car_get_width(const Car* self) {
-    return self->dimensions.x;
-}
-const Lane* car_get_lane(const Car* self) {
-    // assert(self->lane != NULL && "Car is not in a lane");
-    return self->lane;
-}
-double car_get_lane_progress(const Car* self) {
-    // assert(self->lane_progress >= 0.0 && self->lane_progress <= 1.0 && "Lane progress must be between 0.0 and 1.0. How did this happen?");
-    return self->lane_progress;
-}
-Meters car_get_lane_progress_meters(const Car* self) {
-    return car_get_lane(self)->length * car_get_lane_progress(self);
-}
-MetersPerSecond car_get_speed(const Car* self) {
-    // assert(self->speed <= self->capabilities.top_speed && "Speed exceeds car's top speed. How did this happen?");
-    return self->speed;
-}
-MetersPerSecondSquared car_get_acceleration(const Car* self) {
-    // assert(self->acceleration <= self->capabilities.max_acceleration && "Acceleration exceeds car's maximum acceleration capability. How did this happen?");
-    // assert(self->acceleration >= -self->capabilities.max_deceleration && "Deceleration exceeds car's maximum deceleration (braking) capability. How did this happen?");
-    return self->acceleration;
-}
-DirectionIntent car_get_turn_intent(const Car* self) {
-    return self->turn_intent;
-}
-DirectionIntent car_get_lane_change_intent(const Car* self) {
-    return self->lane_change_intent;
-}
-double car_get_damage(const Car* self) {
-    // assert(self->damage >= 0.0 && self->damage <= 1.0 && "Damage must be between 0.0 and 1.0. How did this happen?");
-    return self->damage;
+void car_set_indicator_turn(Car* self, CarIndictor indicator) {
+    self->indicator_turn = indicator;
 }
 
-
-// ---------------- decision-making functions ----------------
-
-
-
-
-
-void player_car_make_decision(Car* self, Simulation* sim) {
-    printf("Player car decision-making logic not implemented\n");
+void car_set_indicator_lane(Car* self, CarIndictor indicator) {
+    self->indicator_lane = indicator;
 }
-
-
-void car_free(Car* self) {
-    free(self);
-}
-
-
-
-

@@ -8,7 +8,7 @@ Turn* turn_create_and_set_connections_and_adjacents(StraightRoad* from, Straight
     Turn* turn = malloc(sizeof(Turn));
     if (!turn) {
         fprintf(stderr, "Memory allocation failed for Turn\n");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 
     turn->base.type = TURN;
