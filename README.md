@@ -8,25 +8,29 @@ First, ensure you have `gcc` and the SDL2 libraries installed. On Ubuntu, you ca
 sudo apt install libsdl2-dev libsdl2-ttf-dev libsdl2-gfx-dev
 ```
 
-On macOS, you can use Homebrew (probably):
+On macOS, you can use Homebrew:
 
 ```bash
 brew install sdl2 sdl2_ttf sdl2_gfx
 ```
+
+On Windows, you would typically use minGW or a similar toolchain. Make sure to install the SDL2 libraries and set up your environment accordingly.
 
 ## Running the Simulator
 
 To compile and launch the simulator, run:
 
 ```bash
-sh play.sh
+sh scripts/linux/play.sh
 ```
+For macOS, use `sh scripts/mac/play.sh`. For Windows, run `scripts/windows/play.bat`.
 
 To benchmark the number of transitions per second:
 
 ```bash
-sh benchmark.sh
+sh scripts/linux/benchmark.sh
 ```
+For macOS, use `sh scripts/mac/benchmark.sh`. For Windows, run `scripts/windows/benchmark.bat`.
 
 ## Exploring the Codebase
 

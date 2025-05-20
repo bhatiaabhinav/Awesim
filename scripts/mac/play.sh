@@ -1,0 +1,28 @@
+#!/bin/sh
+# Compile all source files into the play executable.
+# Includes necessary SDL2 libraries and math/time support.
+# -Wall enables general warnings, and -Wunused-variable helps catch potential dead code.
+# You can add -Werror to treat warnings as errors during CI.
+echo “Compiling source files...”
+mkdir -p bin
+# Check if the bin directory was created successfully
+if [ $? -ne 0 ]; then
+    echo “:x: Failed to create bin directory. Please check permissions.”
+    exit 1
+fi
+gcc \
+    -Iinclude \
+    src/*.c src/utils/*.c src/road/*.c src/render/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c \
+    -o ./bin/play \
+    `sdl2-config --cflags --libs` `pkg-config --cflags --libs sdl2_ttf` \
+    -lSDL2 -lSDL2_gfx -lSDL2_ttf -lm \
+    -Wall -Wunused-variable
+# Check if compilation was successful
+if [ $? -eq 0 ]; then
+    echo “:white_check_mark: Compilation successful. Executable created at: ./bin/play”
+    echo “Launching the simulation...”
+    ./bin/play
+else
+    echo “:x: Compilation failed. Please check the errors above.”
+    exit 1
+fi
