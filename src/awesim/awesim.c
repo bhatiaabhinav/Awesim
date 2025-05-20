@@ -35,10 +35,11 @@ Map* awesim_map() {
     const Meters city_height = city_width;
     const Meters city_width_half = city_width / 2;
     const Meters city_height_half = city_height / 2;
-    const MetersPerSecond interstate_speed_limit = from_mph(65);
-    const MetersPerSecond interstate_turn_speed_limit = from_mph(60);
-    const MetersPerSecond state_speed_limit = from_mph(55);
-    const MetersPerSecond state_turn_speed_limit = from_mph(50);
+    const MetersPerSecond interstate_speed_limit = from_mph(55);
+    const MetersPerSecond interstate_turn_speed_limit = from_mph(50);
+    const MetersPerSecond state_speed_limit = from_mph(45);
+    const MetersPerSecond state_turn_speed_limit = from_mph(40);
+    const MetersPerSecond exit_ramp_speed_limit = from_mph(35);
     const MetersPerSecond local_speed_limit = from_mph(35);
     const MetersPerSecond local_turn_speed_limit = from_mph(25);
     const Meters state_turn_radius = 5;
@@ -413,7 +414,7 @@ Map* awesim_map() {
         lane_set_exit_lane((Lane*)exit_pairs[i].hwy->base.lanes[exit_pairs[i].hwy->base.num_lanes - 1], exit_shoulders[i]->base.lanes[0],
                            (exit_pairs[i].hwy->length / 2 - (ramp_length + 2 * exit_pairs[i].perp_rd->width)) / exit_pairs[i].hwy->length,
                            (exit_pairs[i].hwy->length / 2 - (2 * exit_pairs[i].perp_rd->width)) / exit_pairs[i].hwy->length);
-        exit_ramps[i] = turn_create_and_set_connections_and_adjacents(exit_shoulders[i], exit_pairs[i].perp_rd, DIRECTION_CW, state_turn_speed_limit, 1.0, NULL);
+        exit_ramps[i] = turn_create_and_set_connections_and_adjacents(exit_shoulders[i], exit_pairs[i].perp_rd, DIRECTION_CW, exit_ramp_speed_limit, 1.0, NULL);
         map_add_straight_road(map, exit_shoulders[i]);
         map_add_turn(map, exit_ramps[i]);
 

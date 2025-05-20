@@ -36,7 +36,6 @@ void npc_car_make_decisions(Car* self) {
                 turn_indicator = turn_sample_possible(&situation);
             }
             lane_change_indicator = INDICATOR_NONE;
-            speed_at_target = 0;
         } else {
             // We are not close to the end of the lane.
             turn_indicator = turn_sample_possible(&situation);
@@ -94,7 +93,7 @@ void npc_car_make_decisions(Car* self) {
         accel += situation.lead_vehicle->acceleration; // add the lead vehicle's acceleration to our acceleration to account for the fact that we are following it and it may be accelerating or braking.
 
         // If are already within 2.0 feet of the lead vehicle, let's try to change lanes to avoid rear-ending it.
-        if (situation.distance_to_lead_vehicle - (car_half_length + car_get_length(situation.lead_vehicle) / 2) < from_feet(2.0)) {
+        if (situation.distance_to_lead_vehicle - (car_half_length + car_get_length(situation.lead_vehicle) / 2) < from_feet(2.0)) { // TODO: make it depend on more variables
             // printf("Emergency lane change maneuver to avoid rear-ending the next car.\n");
             if (lane_change_indicator == INDICATOR_NONE) {
                 lane_change_indicator = lane_change_sample_possible(&situation);
@@ -106,7 +105,7 @@ void npc_car_make_decisions(Car* self) {
         }
     } else {
         if (!situation.is_approaching_dead_end && (situation.is_close_to_end_of_lane || situation.braking_distance.preferred_smooth >= distance_to_stop_line)) {
-            // start slowing down to the speed limit of the next lane
+            // start changing speed to match speed limit of the next lane
             accel = car_compute_acceleration_cruise(self, lane_get_speed_limit(situation.lane_next_after_turn[turn_indicator]) + self->preferences.average_speed_offset);
         } else {
             accel = car_compute_acceleration_cruise(self, speed_cruise);
@@ -150,7 +149,7 @@ void npc_car_make_decisions(Car* self) {
             }
             break;
         case TRAFFIC_LIGHT_YELLOW:
-            // TODO: incorporate situation.intersection->countdown
+            // TODO: incorporate "situation.intersection->countdown"
             if (is_comfy_braking_possible) {
                 // printf("7. We can stop comfortably. Let's do that\n");
                 should_brake = true;
@@ -178,8 +177,8 @@ void npc_car_make_decisions(Car* self) {
         position_target = car_position + distance_to_stop_line;
         position_target_overshoot_buffer = meters(1);
         speed_at_target = 0;
-        MetersPerSecondSquared _accel = car_compute_acceleration_chase_target(self, position_target, speed_at_target, position_target_overshoot_buffer, speed_cruise);
-        accel = fmin(accel, _accel); // take the minimum of the two accelerations
+        MetersPerSecondSquared accel_to_stop_at_lane_end = car_compute_acceleration_chase_target(self, position_target, speed_at_target, position_target_overshoot_buffer, speed_cruise);
+        accel = fmin(accel, accel_to_stop_at_lane_end); // take the minimum of the two accelerations
     }
 
     // Set the decision variables

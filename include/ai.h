@@ -18,8 +18,8 @@ typedef enum {
 
 
 struct BrakingDistance {
-    Meters capable;            // Braking distance with full capable braking
-    Meters preferred;          // Braking distance with preferred max braking
+    Meters capable;            // Braking distance with full capable braking. = (v^2)/ (2 * dec_max)
+    Meters preferred;          // Braking distance with preferred max braking = (v^2) / (2 * dec_preffered)
     Meters preferred_smooth;   // Braking distance with preferred max braking using PD controller
 };
 typedef struct BrakingDistance BrakingDistance;
@@ -37,16 +37,16 @@ struct SituationalAwareness {
     const Lane* lane_right;                 // if exists
     Meters distance_to_intersection;        // Distance to the next intersection
     Meters distance_to_end_of_lane;         // Distance to the lane’s end
-    bool is_close_to_end_of_lane;           // Is the distance to the lane’s end less than 5m?
+    bool is_close_to_end_of_lane;           // Is the distance to the lane’s end less than 10 m?
     bool is_on_leftmost_lane;             // Is this the leftmost lane?
     bool is_on_rightmost_lane;            // Is this the rightmost lane?
     double lane_progress;                  // Progress in the lane (0.0 to 1.0)
     Meters lane_progress_m;                // Progress in the lane in meters
 
     // Intent and Feasibility
-    bool is_turn_possible[3];               // does this lane have a left, right or straight connection?  
-    TrafficLight light_for_turn[3];         // Traffic light for the turn indicator (left, right, none)
-    const Lane* lane_next_after_turn[3];    // Next lane for the turn indicator (left, right, none)
+    bool is_turn_possible[3];               // does this lane have a left, straight, right connection?  
+    TrafficLight light_for_turn[3];         // Traffic light for the turn indicator (left, none, right)
+    const Lane* lane_next_after_turn[3];    // Next lane for the turn indicator (left, none, right)
     bool is_lane_change_left_possible;      // Is there a lane to left that goes in the same direction?
     bool is_lane_change_right_possible;     // Is there a lane to right that goes in the same direction?
     bool is_merge_possible;                 // Is there a merge possible?
@@ -56,12 +56,12 @@ struct SituationalAwareness {
     bool is_exit_available_eventually;      // Is there an exit ramp available soon? i.e., does the rightmost lane exit into something eventually?
     const Lane* merges_into_lane;           // Lane that this lane merges into
     const Lane* exit_lane;                  // Lane that this lane exits into
-    const Lane* lane_target_for_indicator[3];   // Potential target lane for the lane change indicator (left, right, none)
+    const Lane* lane_target_for_indicator[3];   // Potential target lane for the lane change indicator (left, none, right)
     
 
     // Surrounding Vehicles
-    bool is_vehicle_ahead;                 // Is there a vehicle ahead of us? 
-    bool is_vehicle_behind;                // Is there a vehicle behind us?
+    bool is_vehicle_ahead;                 // Is there a vehicle ahead of us (on the same lane)
+    bool is_vehicle_behind;                // Is there a vehicle behind us (on the same lane)
     const Car* lead_vehicle;               // Vehicle ahead in the same lane
     const Car* following_vehicle;          // Vehicle behind in the same lane
     Meters distance_to_lead_vehicle;       // Distance to the lead vehicle
@@ -78,8 +78,12 @@ typedef struct SituationalAwareness SituationalAwareness;
 void npc_car_make_decisions(Car* self);
 SituationalAwareness situational_awareness_build(const Car* car);
 
+// sample a turn that is feasible from the current lane
 CarIndictor turn_sample_possible(const SituationalAwareness* situation);
+
+// sample a lane change intent that is feasible in terms of existence of such lanes
 CarIndictor lane_change_sample_possible(const SituationalAwareness* situation);
+
 bool car_is_lane_change_dangerous(const Car* car, const SituationalAwareness* situation, CarIndictor lane_change_indicator);
 
 MetersPerSecondSquared car_compute_acceleration_chase_target(const Car* car, Meters position_target, MetersPerSecond speed_target, Meters position_target_overshoot_buffer, MetersPerSecond speed_limit);

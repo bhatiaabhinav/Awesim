@@ -46,10 +46,11 @@ double get_sys_time_seconds(void);
 //
 
 // Represents a 2D vector or point in space.
-typedef struct Vec2D {
+struct Vec2D {
     double x;
     double y;
-} Vec2D;
+};
+typedef struct Vec2D Vec2D;
 
 // Creates a 2D vector with given x and y.
 Vec2D vec_create(double x, double y);
