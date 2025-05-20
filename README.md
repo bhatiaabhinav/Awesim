@@ -30,9 +30,10 @@ To understand how the simulator works, begin by reviewing the header files in th
 2. `road.h`
 3. `map.h`
 4. `car.h`
-5. `sim.h`
-6. `awesim.h`
-7. `render.h`
+5. `ai.h`
+6. `sim.h`
+7. `awesim.h`
+8. `render.h`
 
 Each header file is implemented in a corresponding folder within the `src/` directory. For example, the `render.h` file is implemented in `src/render/`, with source files like:
 
