@@ -92,6 +92,38 @@ int main(int argc, char* argv[]) {
                 PAN_X = (int)(x * SCALE + width / 2 - mx);
                 PAN_Y = (int)(y * SCALE + height / 2 - my);
             }
+            else if (event.type == SDL_MULTIGESTURE) {
+                SDL_TouchID touch_id = event.mgesture.touchId;
+                int num_fingers = SDL_GetNumTouchFingers(touch_id);
+
+                if (num_fingers >= 2) {  // Ensure at least two fingers for pinch-to-zoom
+                    double sum_x = 0.0, sum_y = 0.0;
+                    double width = WINDOW_SIZE_WIDTH;
+                    double height = WINDOW_SIZE_HEIGHT;
+                    // Sum the positions of all fingers
+                    for (int i = 0; i < num_fingers; i++) {
+                        SDL_Finger* finger = SDL_GetTouchFinger(touch_id, i);
+                        if (finger) {
+                            sum_x += finger->x * width;  // Convert normalized to pixel coordinates
+                            sum_y += finger->y * height;
+                        }
+                    }
+                    // Calculate the mean gesture center in pixel coordinates
+                    double gesture_x = sum_x / num_fingers;
+                    double gesture_y = sum_y / num_fingers;
+                    // Convert gesture center to world coordinates before scaling
+                    double world_x = (gesture_x + PAN_X - width / 2) / SCALE;
+                    double world_y = (gesture_y + PAN_Y - height / 2) / SCALE;
+                    // Apply zoom based on distance change
+                    double sensitivity = 2.0;  // Adjusted lower for finesse
+                    double scale_factor = 1.0 + event.mgesture.dDist * sensitivity;
+                    SCALE *= scale_factor;
+                    SCALE = fclamp(SCALE, 1.0, 50.0);  // Clamp scale between 1x and 50x
+                    // Update panning to keep the gesture center stable
+                    PAN_X = (int)(world_x * SCALE + width / 2 - gesture_x);
+                    PAN_Y = (int)(world_y * SCALE + height / 2 - gesture_y);
+                }
+            }
         }
         
         double _t = get_sys_time_seconds();
