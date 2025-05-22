@@ -2,6 +2,9 @@
 #include "render.h"
 #include <stdio.h>
 #include <sys/time.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 
 double get_sys_time_seconds() {
@@ -10,7 +13,15 @@ double get_sys_time_seconds() {
     return (double)((long long)tv.tv_sec * 1000000LL + (long long)tv.tv_usec) / 1000000.0; // Convert milliseconds to seconds
 }
 
+int mouse_start_x, mouse_start_y;
+bool dragging = false;
+
 int main(int argc, char* argv[]) {
+
+    #ifdef _WIN32
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    #endif
+
     // Initialize SDL
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         fprintf(stderr, "SDL could not initialize! SDL_Error: %s\n", SDL_GetError());
@@ -31,30 +42,60 @@ int main(int argc, char* argv[]) {
         SDL_Quit();
         return -1;
     }
-    
+
 
 
     // Main rendering loop
     bool quit = false;
     SDL_Event event;
     
-    int num_cars = 16;                               // number of cars to simulate
+    int num_cars = 256;                               // number of cars to simulate
     Seconds dt = 0.02;                              // time resolution for integration.
     Seconds seconds_to_simulate = 1e9;              // total time (in sim) to simulate, after which the program will exit.
     Simulation* sim = awesim(num_cars, dt);
 
     double t0 = get_sys_time_seconds();
-    double simulation_speedup = 2;       // we will simulate simultation_speedup seconds per wall-second.
+    double simulation_speedup = 1;       // we will simulate simultation_speedup seconds per wall-second.
     double render_fps = 0;              // to measure render FPS
     while (!quit) {
         while (SDL_PollEvent(&event)) {
-            if (event.type == SDL_QUIT) {
-                quit = true;
+            if (event.type == SDL_QUIT) quit = true;
+            else if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT) {
+                mouse_start_x = event.button.x;
+                mouse_start_y = event.button.y;
+                dragging = true;
+            }
+            else if (event.type == SDL_MOUSEBUTTONUP && event.button.button == SDL_BUTTON_LEFT) {
+                dragging = false;
+            }
+            else if (event.type == SDL_MOUSEMOTION && dragging) {
+                int dx = event.motion.x - mouse_start_x;
+                int dy = event.motion.y - mouse_start_y;
+                PAN_X -= dx;
+                PAN_Y -= dy;
+                mouse_start_x = event.motion.x;
+                mouse_start_y = event.motion.y;
+            }
+            else if (event.type == SDL_MOUSEWHEEL && event.wheel.y != 0) {
+                double width = WINDOW_SIZE_WIDTH;
+                double height = WINDOW_SIZE_HEIGHT;
+                int mx, my;
+                SDL_GetMouseState(&mx, &my);
+                // find x under mouse in world coordinates
+                double x = (mx + PAN_X - width / 2) / SCALE;
+                double y = (my + PAN_Y - height / 2) / SCALE;
+                // find new scale
+                if (event.wheel.y > 0) SCALE *= 1.04f;
+                else SCALE /= 1.04f;
+                SCALE = fclamp(SCALE, 1.0f, 50.0f);
+                // Adjust pan to keep the mouse under the same world coordinates
+                PAN_X = (int)(x * SCALE + width / 2 - mx);
+                PAN_Y = (int)(y * SCALE + height / 2 - my);
             }
         }
         
         double _t = get_sys_time_seconds();
-        render_sim(renderer, sim, true, true, true, true, false);
+        render_sim(renderer, sim, true, true, false, true, false);
         SDL_RenderPresent(renderer);
         double render_time = get_sys_time_seconds() - _t; // time taken to render the simulation
         render_fps = 0.9 * render_fps + 0.1 / render_time; // exponential smoothing
