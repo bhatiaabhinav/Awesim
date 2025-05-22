@@ -2,6 +2,7 @@
 #include "render.h"
 #include <stdio.h>
 #include <sys/time.h>
+#include <SDL2/SDL_image.h>
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -33,6 +34,15 @@ int main(int argc, char* argv[]) {
         fprintf(stderr, "Window could not be created! SDL_Error: %s\n", SDL_GetError());
         SDL_Quit();
         return -1;
+    }
+    // Add icon
+    // SDL_Surface *icon = SDL_LoadBMP("icon.bmp");
+    SDL_Surface* icon = IMG_Load("icon.png");
+    if (icon == NULL) {
+        SDL_Log("Unable to load icon: %s", SDL_GetError());
+    } else {
+        SDL_SetWindowIcon(window, icon);
+        SDL_FreeSurface(icon);
     }
     // Create renderer
     SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);

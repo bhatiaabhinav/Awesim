@@ -1,17 +1,23 @@
+<div style="text-align: center;">
+  <img src="icon.png" alt="icon" width="200" height="200">
+</div>
+
 # Awesome 2D AV Simulator
+
+Welcome to the Awesome 2D AV Simulator!
 
 ## Installation
 
 First, ensure you have `gcc` and the SDL2 libraries installed. On Ubuntu, you can install the necessary dependencies with:
 
 ```bash
-sudo apt install libsdl2-dev libsdl2-ttf-dev libsdl2-gfx-dev
+sudo apt install libsdl2-dev libsdl2-ttf-dev libsdl2-gfx-dev libsdl2-image-dev
 ```
 
 On macOS, you can use Homebrew:
 
 ```bash
-brew install sdl2 sdl2_ttf sdl2_gfx
+brew install sdl2 sdl2_ttf sdl2_gfx sdl2_image
 ```
 
 On Windows, you would typically use minGW or a similar toolchain. Make sure to install the SDL2 libraries and set up your environment accordingly.
