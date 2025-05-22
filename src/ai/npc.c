@@ -38,9 +38,12 @@ void npc_car_make_decisions(Car* self) {
             lane_change_indicator = INDICATOR_NONE;
         } else {
             // We are not close to the end of the lane.
-            turn_indicator = turn_sample_possible(&situation);
+            turn_indicator = (rand_0_to_1() < 0.02/4) ? turn_sample_possible(&situation) : car_get_indicator_turn(self);
+            if (!situation.is_turn_possible[turn_indicator]) {
+                turn_indicator = turn_sample_possible(&situation);
+            }
             // printf("Turn indicator: %d\n", turn_indicator);
-            lane_change_indicator = (rand_0_to_1() < 0.02) ? lane_change_sample_possible(&situation) : INDICATOR_NONE;
+            lane_change_indicator = (rand_0_to_1() < 0.02/5) ? lane_change_sample_possible(&situation) : INDICATOR_NONE;
             // printf("Lane change indicator: %d\n", lane_change_indicator);
             // printf("0. Intersection upcoming: sampled turn indicator and lane change indicator: %d, %d\n", turn_indicator, lane_change_indicator);
         }
@@ -90,7 +93,7 @@ void npc_car_make_decisions(Car* self) {
         position_target_overshoot_buffer = target_distance_from_next_car - car_lengths_offset - from_feet(1.0); // let's call being within 1.0 feet of the next car as a crash.
         speed_at_target = car_get_speed(situation.lead_vehicle);
         accel = car_compute_acceleration_chase_target(self, position_target, speed_at_target, position_target_overshoot_buffer, speed_cruise);
-        accel += situation.lead_vehicle->acceleration; // add the lead vehicle's acceleration to our acceleration to account for the fact that we are following it and it may be accelerating or braking.
+        // accel += situation.lead_vehicle->acceleration; // add the lead vehicle's acceleration to our acceleration to account for the fact that we are following it and it may be accelerating or braking.
 
         // If are already within 2.0 feet of the lead vehicle, let's try to change lanes to avoid rear-ending it.
         if (situation.distance_to_lead_vehicle - (car_half_length + car_get_length(situation.lead_vehicle) / 2) < from_feet(2.0)) { // TODO: make it depend on more variables
@@ -154,14 +157,16 @@ void npc_car_make_decisions(Car* self) {
                 // printf("7. We can stop comfortably. Let's do that\n");
                 should_brake = true;
             } else {
-                // printf("7. We can't stop comfortably\n");
+                // printf("7. We can't stop comfortably. ");
                 should_brake = !self->preferences.run_yellow_light;  // run the yellow if the user prefers it
                 if (should_brake) {
-                    // printf("8. But, we don't mind braking hard to stop at the yellow light\n");
+                    // printf("But, we don't mind braking hard to stop at the yellow light\n");
                     if (!is_emergency_braking_possible) {
                         // printf("9. But, we are not able to stop in time with emergency braking, so we jump the yellow light.\n");
                         should_brake = false;
                     }
+                } else {
+                    // printf("And we don't like to brake hard. So, we jump the yellow light.\n");
                 }
             }
             break;
@@ -183,6 +188,7 @@ void npc_car_make_decisions(Car* self) {
 
     // Set the decision variables
     // printf("11. Setting acceleration to %f\n\n", accel);
+    accel = 0.95 * accel + 0.05 * car_get_acceleration(self); // smooth the acceleration
     car_set_acceleration(self, accel);
     car_set_indicator_turn(self, turn_indicator);
     car_set_indicator_lane(self, lane_change_indicator);
@@ -209,7 +215,7 @@ SituationalAwareness situational_awareness_build(const Car* car) {
     } else {
         situation.is_on_intersection = false;
         situation.is_approaching_intersection = intersection != NULL;
-        situation.is_stopped_at_intersection = intersection && (fabs(car_get_speed(car)) < 0.001) && (distance_to_end_of_lane < 10.0);
+        situation.is_stopped_at_intersection = intersection && (fabs(car_get_speed(car)) < 0.001) && (distance_to_end_of_lane < 50.0);
     }
     situation.road = road;
     situation.lane = lane;
@@ -217,7 +223,7 @@ SituationalAwareness situational_awareness_build(const Car* car) {
     situation.lane_right = lane->adjacent_right;
     situation.distance_to_intersection = intersection ? distance_to_end_of_lane : 1e6;
     situation.distance_to_end_of_lane = distance_to_end_of_lane;
-    situation.is_close_to_end_of_lane = distance_to_end_of_lane < 10.0;
+    situation.is_close_to_end_of_lane = distance_to_end_of_lane < 50.0;
     situation.is_on_leftmost_lane = lane == road_get_leftmost_lane(road);
     situation.is_on_rightmost_lane = lane == road_get_rightmost_lane(road);
     situation.lane_progress = lane_progress;

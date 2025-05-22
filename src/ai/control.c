@@ -20,10 +20,10 @@ MetersPerSecondSquared control_speed_compute_pd_accel(ControlError error, double
 
 
 MetersPerSecondSquared control_compute_const_accel(ControlError error) {
-    if (error.position * error.speed > 0) {
-        fprintf(stderr, "Error: Moving away from equilibrium (Δv ⋅ Δx ≥ 0)\n");
-        exit(EXIT_FAILURE);
-    }
+    // if (error.position * error.speed > 0) {
+    //     fprintf(stderr, "Error: Moving away from equilibrium (Δv ⋅ Δx ≥ 0)\n");
+    //     exit(EXIT_FAILURE);
+    // }
     return error.speed * error.speed / (2 * error.position + 1e-9); // Avoid division by zero
 }
 
@@ -37,35 +37,41 @@ MetersPerSecondSquared control_compute_bounded_accel(ControlError error, MetersP
         fprintf(stderr, "Error: max_speed must be positive\n");
         exit(EXIT_FAILURE);
     }
-    if (error.position * error.speed > 0) {
-        fprintf(stderr, "Error: Moving away from equilibrium (Δv ⋅ Δx ≥ 0)\n");
-        exit(EXIT_FAILURE);
-    }
+    // if (error.position * error.speed > 0) {
+    //     fprintf(stderr, "Error: Moving away from equilibrium (Δv ⋅ Δx ≥ 0)\n");
+    //     exit(EXIT_FAILURE);
+    // }
     MetersPerSecond v_0 = max_speed / 4;
     double k = (max_accel / v_0) * (max_accel / v_0);
     // double ratio = (error.speed * error.speed) / (error.position * error.position + 1e-9);
-    Meters x_0 = v_0 / sqrt(k);
+    // Meters x_0 = v_0 / sqrt(k);
+    // if (ratio < 1.5 * k) {
+    //     return 0;
+    // }
     // printf("ratio and k: %f, %f\n", ratio, k);
-    Meters braking_distance;
-    if (fabs(error.speed) <= v_0) {
-        braking_distance = fabs(error.speed) / sqrt(k);
-    } else {
-        braking_distance = (error.speed * error.speed - v_0 * v_0) / (2 * max_accel) + x_0;     // linear phase + PD phase
-    }
+    // Meters braking_distance;
+    // if (fabs(error.speed) <= v_0) {
+    //     braking_distance = fabs(error.speed) / sqrt(k);
+    // } else {
+    //     braking_distance = (error.speed * error.speed - v_0 * v_0) / (2 * max_accel) + x_0;     // linear phase + PD phase
+    // }
 
     // printf("braking_distance and position error and difference: %f, %f, %f\n", braking_distance, error.position, fabs(error.position) - braking_distance);
     // printf("v_0 and speed: %f, %f\n", v_0, fabs(error.speed));
     
     MetersPerSecondSquared accel;
-    if (braking_distance * 1.1 < fabs(error.position)) {    // that 1.1 is a buffer to start braking early
-        // printf("Too far. Not braking yet.\n");
-        accel = 0;
-    } else {
-        // printf("Applying PD control.\n");
-        accel = control_compute_pd_accel(error, k);
-    }
+    // if (braking_distance * 1.01 < fabs(error.position)) {    // that 1.1 is a buffer to start braking early
+    // if (ratio < k / 4) {
+    //     // printf("Too far. Not braking yet.\n");
+    //     accel = 0;
+    // } else {
+    //     // printf("Applying PD control.\n");
+    //     accel = control_compute_pd_accel(error, k);
+    // }
+    accel = control_compute_pd_accel(error, k);
     // printf("accel and max_accel: %f, %f\n", accel, max_accel);
     accel = fclamp(accel, -max_accel, max_accel);
+    // accel = error.speed > 0 ? fclamp(accel, -max_accel, 0) : fclamp(accel, 0, max_accel);
     return accel;
 }
 
@@ -104,28 +110,18 @@ MetersPerSecondSquared car_compute_acceleration_chase_target(const Car* car, Met
 
     if (position_current <= position_target) { // target in front of us
         // printf("Target in front of us\n");
-        if (speed_current >= 0 ) {    // we are travelling forward
-            // printf("We are travelling forward\n");
-            if (speed_current >= speed_target) {                     // already catching up. we need to slow down at some point
-                MetersPerSecondSquared const_accel = control_compute_const_accel(error);
-                // printf("const_accel: %f\n", const_accel);
-                if (const_accel < -preferred.max_deceleration) {    // can't brake in time with preferred profile. So, we brake max.
-                    // printf("Can't brake in time with preferred profile. So, we brake max.\n");
-                    accel = fmax(const_accel, -capable.max_deceleration);
-                } else {
-                    // printf("Can brake in time with preferred profile.\n");
-                    accel = control_compute_bounded_accel(error, preferred.max_deceleration, MPH_60);
-                    if (accel == 0) {   // we are still too far to brake. Cruise to a higher speed.
-                        // printf("But, we are still too far to brake. Cruising to a higher speed or speed limit.\n");
-                        accel = control_speed_compute_bounded_accel((ControlError){0, speed_current - speed_limit}, preferred.max_acceleration, MPH_60);
-                    }
+        if (speed_current >= 0 ) {    // we are travelling forward            // already catching up. we need to slow down at some point
+            MetersPerSecondSquared const_accel = control_compute_const_accel(error);
+            if (const_accel < -preferred.max_deceleration) {    // can't brake in time with preferred profile. So, we brake max.
+                // printf("Can't brake in time with preferred profile. So, we brake max.\n");
+                accel = fmax(const_accel, -capable.max_deceleration);
+            } else {
+                accel = control_compute_bounded_accel(error, preferred.max_deceleration, MPH_60);
+                if (accel > 0) {   // we are still too far to brake if the braking controller is suggesting acceleration. Cruise to a higher speed using the acceleration controller.
+                    accel = control_speed_compute_bounded_accel((ControlError){0, speed_current - speed_limit}, preferred.max_acceleration, MPH_60);
                 }
-            } else {    // gap in increasing. We need to speed up to match the speed. But also, cannot go over speed limit.
-                // printf("Gap is increasing. We need to speed up to match the speed (but not exceed speed limit).\n");
-                accel = control_speed_compute_bounded_accel((ControlError){0.0, speed_current - fmin(speed_limit, speed_target)}, preferred.max_acceleration, MPH_60) + acc_eps; // add a small constant since standard critical damping never fully reaches equilibrium
             }
         } else {    // we are in reverse gear, even though the target is ahead. We need to bring speed to 0 using brakes as soon as possible within comfort.
-            // printf("We are in reverse gear even though the target is ahead. We need to bring speed to 0 using brakes as soon as possible within comfort.\n");
             accel = control_speed_compute_bounded_accel((ControlError){0, speed_current}, capable.max_deceleration, MPH_60) + acc_eps;
         }
     } else {    // target already left behind. We are in overshot situation.
@@ -140,7 +136,6 @@ MetersPerSecondSquared car_compute_acceleration_chase_target(const Car* car, Met
             if (speed_current > 0) {    // and we are moving forward.
                 // printf("And we are moving forward.\n");
                 if (speed_current > speed_target) { // and moving forward at a faster pace than the target speed. Gap decreasing from the final crash point and increasing from where we should be.
-                    // printf("And moving forward at a faster pace than the target speed. Gap decreasing from the final crash point and increasing from where we should be.\n");
                     MetersPerSecondSquared const_acc_to_prevent_crash = control_compute_const_accel((ControlError){position_current - (position_target + position_target_overshoot_buffer), speed_current});
                     if (const_acc_to_prevent_crash < -preferred.max_deceleration) { // our preferred profile can't avoid the crash
                         // printf("Our preferred profile can't avoid the crash\n");
@@ -175,7 +170,7 @@ MetersPerSecondSquared car_compute_acceleration_chase_target(const Car* car, Met
                     } else {    // brake smoothly
                         // printf("Brake smoothly\n");
                         accel = control_compute_bounded_accel(error, capable.max_deceleration, MPH_60);
-                        if (accel == 0) {   // we are too far. Let us reverse faster.
+                        if (accel > 0) {   // we are too far. Let us reverse faster.
                             // printf("We are too far. Let us reverse faster.\n");
                             accel = control_speed_compute_bounded_accel((ControlError){0, speed_current + speed_limit}, preferred.max_acceleration_reverse_gear, MPH_60);
                         }
@@ -202,8 +197,10 @@ MetersPerSecondSquared car_compute_acceleration_cruise(const Car* car, MetersPer
     ControlError error = {0, speed_current - speed_target};
     if (speed_current > speed_target) {
         accel = control_speed_compute_bounded_accel(error, preferred.max_deceleration, MPH_60);
+        // printf("Shedding speed: %f\r", accel);
     } else {
         accel = control_speed_compute_bounded_accel(error, preferred.max_acceleration, MPH_60);
+        // printf("Gaining speed: %f\r", accel);
     }
     return accel;
 }
