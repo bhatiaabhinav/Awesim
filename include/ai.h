@@ -90,7 +90,7 @@ MetersPerSecondSquared car_compute_acceleration_chase_target(const Car* car, Met
 MetersPerSecondSquared car_compute_acceleration_cruise(const Car* car, MetersPerSecond speed_target);
 BrakingDistance car_compute_braking_distance(const Car* car);
 
-
+bool car_should_yield_at_intersection(const Car* car, const SituationalAwareness* situation, CarIndictor turn_indicator);
 
 
 

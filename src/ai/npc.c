@@ -1,6 +1,7 @@
 #include "ai.h"
 #include "road.h"
 #include "math.h"
+#include "utils.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -124,60 +125,104 @@ void npc_car_make_decisions(Car* self) {
     }
 
     if (situation.is_approaching_intersection) {
-        // printf("3. But, approaching intersection\n");
         TrafficLight light = situation.light_for_turn[turn_indicator];
-        bool is_emergency_braking_possible = (situation.braking_distance.capable <= distance_to_stop_line + meters(1) + 1e-6); // meters(1) for a buffer -- such that it is ok to overshoot by 1m when emergency braking.
+        bool is_emergency_braking_possible = (situation.braking_distance.capable <= distance_to_stop_line + meters(1) + 1e-6);
         bool is_comfy_braking_possible = (situation.braking_distance.preferred_smooth <= distance_to_stop_line + 1e-6);
 
         switch (light) {
         case TRAFFIC_LIGHT_STOP:
-            // printf("6. Stop sign\n");
             should_brake = true;
             if (!is_emergency_braking_possible) {
-                // printf("7. Distance to stop line: %f and with buffer: %f\n", distance_to_stop_line, distance_to_stop_line + meters(1) + 1e-6);
-                // printf("8. Braking distances: capable, preferred, smooth: %f, %f, %f\n", situation.braking_distance.capable, situation.braking_distance.preferred, situation.braking_distance.preferred_smooth);
-                // printf("9. But, we are not able to stop in time with emergency braking, so we jump the stop sign.\n");
                 should_brake = false;
             }
             break;
         case TRAFFIC_LIGHT_RED:
-            // printf("6. Red light\n");
-            // printf("7. Emergency braking possible: %d\n", is_emergency_braking_possible);
             should_brake = true;
             if (!is_emergency_braking_possible) {
-                // printf("7. Distance to stop line: %f and with buffer: %f\n", distance_to_stop_line, distance_to_stop_line + meters(1) + 1e-6);
-                // printf("8. Braking distances: capable, preferred, smooth: %f, %f, %f\n", situation.braking_distance.capable, situation.braking_distance.preferred, situation.braking_distance.preferred_smooth);
                 should_brake = false;
-                // printf("9. But, we are not able to stop in time with emergency braking, so we jump the red light.\n");
             }
             break;
         case TRAFFIC_LIGHT_YELLOW:
-            // TODO: incorporate "situation.intersection->countdown"
             if (is_comfy_braking_possible) {
-                // printf("7. We can stop comfortably. Let's do that\n");
                 should_brake = true;
             } else {
-                // printf("7. We can't stop comfortably. ");
-                should_brake = !self->preferences.run_yellow_light;  // run the yellow if the user prefers it
-                if (should_brake) {
-                    // printf("But, we don't mind braking hard to stop at the yellow light\n");
-                    if (!is_emergency_braking_possible) {
-                        // printf("9. But, we are not able to stop in time with emergency braking, so we jump the yellow light.\n");
-                        should_brake = false;
-                    }
-                } else {
-                    // printf("And we don't like to brake hard. So, we jump the yellow light.\n");
+                should_brake = !self->preferences.run_yellow_light;
+                if (should_brake && !is_emergency_braking_possible) {
+                    should_brake = false;
                 }
             }
             break;
+
+        case TRAFFIC_LIGHT_GREEN_YIELD:
+        case TRAFFIC_LIGHT_YELLOW_YIELD:
+            if (light == TRAFFIC_LIGHT_YELLOW_YIELD) {
+                bool try_to_stop_for_yellow = true;
+                if (is_comfy_braking_possible) {
+                    try_to_stop_for_yellow = true;
+                } else {
+                    try_to_stop_for_yellow = !self->preferences.run_yellow_light;
+                    if (try_to_stop_for_yellow && !is_emergency_braking_possible) {
+                        try_to_stop_for_yellow = false; 
+                    }
+                }
+                if (try_to_stop_for_yellow) {
+                    should_brake = true; 
+                    break; 
+                }
+            }
+            if (car_should_yield_at_intersection(self, &situation, turn_indicator)) {
+                should_brake = true;
+            } else {
+                should_brake = false; 
+            }
+            break;
+
+        case TRAFFIC_LIGHT_RED_YIELD:
+            // Must first obey the RED aspect (stop or be stopping).
+            if (fabs(car_get_speed(self)) > meters(0.5) && // If moving with some speed
+                (is_comfy_braking_possible || is_emergency_braking_possible) && // and can stop
+                (situation.distance_to_end_of_lane - car_half_length > meters(0.5))) { // and not yet at the line
+                should_brake = true; // Enforce stop for the RED part.
+            } else if (fabs(car_get_speed(self)) <= meters(0.5)) { // If stopped or barely moving at the line
+                // Check if it's a permitted turn (usually right) and if it's clear
+                if (situation.is_turn_possible[turn_indicator] &&
+                    (turn_indicator == INDICATOR_RIGHT /* Add other conditions if exits, e.g. specific ramp merges */) &&
+                    !car_should_yield_at_intersection(self, &situation, turn_indicator)) {
+                    should_brake = false; // Safe to proceed with the yield turn.
+                } else {
+                    should_brake = true; // Not safe or not a permitted turn, remain stopped.
+                }
+            } else { // Approaching but cannot stop in time or already past line - this is a red light running scenario
+                 should_brake = false; // Run the red (already determined by lack of braking possibility for RED)
+            }
+            break;
+        
+        case TRAFFIC_LIGHT_YIELD: // General yield sign
+            if (car_should_yield_at_intersection(self, &situation, turn_indicator)) {
+                should_brake = true;
+            } else {
+                should_brake = false;
+            }
+            break;
+
+        case TRAFFIC_LIGHT_GREEN:
+        case TRAFFIC_LIGHT_NONE:
         default:
-            // printf("6. Default intersection case: just do what we are doing\n");
-            should_brake = false;  // For green, none, and all types of yield // TODO: handle yeild cases differently.
+            should_brake = false;
             break;
         }
     }
 
-    if (should_brake) {
+    // If we are at an intersection and making a left turn, then we should stop immediately (not necessarily at the stop line). Same case for right turn from right lane.
+    if (should_brake && car_should_yield_at_intersection(self, &situation, turn_indicator)) {
+        // printf("Breaking on Left Yield!\n");
+        position_target = car_position;
+        position_target_overshoot_buffer = meters(1);
+        speed_at_target = 0;
+        MetersPerSecondSquared accel_to_stop_at_lane_end = car_compute_acceleration_chase_target(self, position_target, speed_at_target, position_target_overshoot_buffer, speed_cruise);
+        accel = fmin(accel, accel_to_stop_at_lane_end); // take the minimum of the two accelerations
+    }
+    else if (should_brake) {
         // printf("10. Potentially braking\n");
         position_target = car_position + distance_to_stop_line;
         position_target_overshoot_buffer = meters(1);
