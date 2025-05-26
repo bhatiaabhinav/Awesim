@@ -6,6 +6,7 @@
 #include "map.h"
 
 #define MAX_CARS_IN_SIMULATION 1024 // Maximum number of cars in the simulation
+#define MAX_NUM_HAZARDS_EACH_TYPE 1024 // Maximum number of hazards of each type
 
 // Time-of-day phase start hours
 #define MORNING_START 6
@@ -120,3 +121,34 @@ void sim_free(Simulation* self);
 // Cleanup simulation resources and free all cars, roads, and map
 void sim_deep_free(Simulation* self);
 
+
+struct TrackIntersectionPoint {
+    const Lane* lane1;  // Lane at the intersection point
+    const Lane* lane2;  // Second lane at the intersection point
+    double progress1;   // Progress along lane1
+    double progress2;   // Progress along lane2
+    bool exists;        // Whether the intersection point exists
+};
+typedef struct TrackIntersectionPoint TrackIntersectionPoint;
+
+TrackIntersectionPoint track_intersection_check(const Lane* lane1, const Lane* lane2);
+
+struct DeadEnd {
+    const Lane* lane; // Lane that is a dead end
+};
+typedef struct DeadEnd DeadEnd;
+
+struct Hazards {
+    const TrackIntersectionPoint* points[MAX_NUM_HAZARDS_EACH_TYPE]; // Array of intersection points
+    const DeadEnd* dead_ends[MAX_NUM_HAZARDS_EACH_TYPE]; // Array of dead ends
+    int num_intersection_points; // Number of intersection points
+    int num_dead_ends; // Number of dead ends
+};
+typedef struct Hazards Hazards;
+
+
+Hazards* hazards_create();
+Hazards* hazards_create_from_map(const Map* map);
+void hazards_free(Hazards* self);
+void hazards_add_intersection_point(Hazards* self, const TrackIntersectionPoint* point);
+void hazards_add_dead_end(Hazards* self, const DeadEnd* dead_end);

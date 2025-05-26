@@ -1,5 +1,6 @@
 #include "awesim.h"
 #include "render.h"
+#include "logging.h"
 #include <stdio.h>
 #include <sys/time.h>
 #include <SDL2/SDL_image.h>
@@ -25,34 +26,38 @@ int main(int argc, char* argv[]) {
 
     // Initialize SDL
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
-        fprintf(stderr, "SDL could not initialize! SDL_Error: %s\n", SDL_GetError());
+        LOG_ERROR("SDL could not initialize! SDL_Error: %s", SDL_GetError());
         return -1;
     }
+    LOG_DEBUG("SDL initialized successfully.");
     // Create window
     SDL_Window* window = SDL_CreateWindow("Awesim", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, WINDOW_SIZE_WIDTH, WINDOW_SIZE_HEIGHT, SDL_WINDOW_SHOWN);
     if (window == NULL) {
-        fprintf(stderr, "Window could not be created! SDL_Error: %s\n", SDL_GetError());
+        LOG_ERROR("Window could not be created! SDL_Error: %s", SDL_GetError());
         SDL_Quit();
         return -1;
     }
+    LOG_DEBUG("Window created successfully with size %dx%d.", WINDOW_SIZE_WIDTH, WINDOW_SIZE_HEIGHT);
     // Add icon
     // SDL_Surface *icon = SDL_LoadBMP("icon.bmp");
     SDL_Surface* icon = IMG_Load("icon.png");
     if (icon == NULL) {
-        SDL_Log("Unable to load icon: %s", SDL_GetError());
+        LOG_ERROR("Unable to load icon: %s", SDL_GetError());
     } else {
         SDL_SetWindowIcon(window, icon);
         SDL_FreeSurface(icon);
+        LOG_DEBUG("Icon set successfully.");
     }
     // Create renderer
     SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     if (renderer == NULL) {
-        fprintf(stderr, "Renderer could not be created! SDL_Error: %s\n", SDL_GetError());
+        LOG_ERROR("Renderer could not be created! SDL_Error: %s", SDL_GetError());
         SDL_DestroyWindow(window);
         SDL_Quit();
         return -1;
     }
 
+    LOG_INFO("SDL initialized successfully. Window and renderer created.");
 
 
     // Main rendering loop
@@ -140,7 +145,7 @@ int main(int argc, char* argv[]) {
         render_sim(renderer, sim, true, true, false, true, false);
         SDL_RenderPresent(renderer);
         double render_time = get_sys_time_seconds() - _t; // time taken to render the simulation
-        render_fps = 0.9 * render_fps + 0.1 / render_time; // exponential smoothing
+        render_fps = 0.5 * render_fps + 0.5 / render_time; // exponential smoothing
         printf("render_fps: %f\r", render_fps);
 
         double wall_time = (get_sys_time_seconds() - t0);
