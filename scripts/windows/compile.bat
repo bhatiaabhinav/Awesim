@@ -6,10 +6,12 @@ echo Compiling source files...
 
 if not exist bin mkdir bin
 
+windres scripts/windows/resource.rc -O coff -o scripts/windows/resource.o
 gcc ^
     -Iinclude ^
-    src/*.c src/utils/*.c src/road/*.c src/render/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c ^
-    -o .\bin\play.exe ^
+    src/*.c src/utils/*.c src/road/*.c src/render/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c ^
+    scripts/windows/resource.o ^
+    -o .\bin\awesim.exe ^
     -lSDL2main -lSDL2 -lSDL2_gfx -lSDL2_ttf -lSDL2_image -lm ^
     -Wall -Wunused-variable
 
@@ -19,5 +21,5 @@ IF %ERRORLEVEL% NEQ 0 (
     exit /b %ERRORLEVEL%
 )
 
-echo ✅ Compilation successful. Executable created at: .\bin\play.exe
+echo ✅ Compilation successful. Executable created at: .\bin\awesim.exe
 

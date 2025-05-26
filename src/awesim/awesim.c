@@ -2,6 +2,7 @@
 #include "road.h"
 #include "utils.h"
 #include <stdio.h>
+#include "logging.h"
 
 
 Simulation* awesim(int num_cars, Seconds dt) {
@@ -19,7 +20,7 @@ Simulation* awesim(int num_cars, Seconds dt) {
         sim_add_car(sim, car);
         // TODO: ensure that new cars are not spawned already crashed into other cars
     }
-    printf("Created an awesome simulator!\n");
+    LOG_INFO("Created an awesome simulator with dt = %f seconds and %d cars.", dt, num_cars);
     return sim;
 }
 
