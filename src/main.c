@@ -177,8 +177,9 @@ int main(int argc, char* argv[]) {
         bool draw_traffic_lights = true; // Draw traffic lights
         bool draw_car_ids = true; // Draw car IDs
         bool draw_lane_ids = true; // Draw lane IDs
+        bool draw_road_names = true; // Draw road names
         bool benchmark = false; // Benchmark mode
-        render_sim(renderer, sim, draw_lanes, draw_cars, draw_track_lines, draw_traffic_lights, draw_car_ids, draw_lane_ids, benchmark);
+        render_sim(renderer, sim, draw_lanes, draw_cars, draw_track_lines, draw_traffic_lights, draw_car_ids, draw_lane_ids, draw_road_names, benchmark);
 
         // Render time stats
         char time_stats[40];
@@ -189,16 +190,16 @@ int main(int argc, char* argv[]) {
                  clock_reading.minutes, 
                  (int)clock_reading.seconds, 
                  simulation_speedup);
-        render_text(renderer, time_stats, WINDOW_SIZE_WIDTH - 10, 10, 255, 255, 255, 255, text_font_size, ALIGN_TOP_RIGHT); // Render time stats at the  top right corner
+        render_text(renderer, time_stats, WINDOW_SIZE_WIDTH - 10, 10, 255, 255, 255, 255, text_font_size, ALIGN_TOP_RIGHT, false); // Render time stats at the  top right corner
         
         
         // Render weather stats just below time stats
-        render_text(renderer, weather_strings[sim->weather], WINDOW_SIZE_WIDTH - 10, 20 + text_font_size, 255, 255, 255, 255, text_font_size, ALIGN_TOP_RIGHT); // Render weather stats at the top right corner below time stats
+        render_text(renderer, weather_strings[sim->weather], WINDOW_SIZE_WIDTH - 10, 20 + text_font_size, 255, 255, 255, 255, text_font_size, ALIGN_TOP_RIGHT, false); // Render weather stats at the top right corner below time stats
 
         // Render FPS stats        
         char fps_stats[24];
         snprintf(fps_stats, sizeof(fps_stats), "FPS: %d   (VSync On)", (int)render_fps);
-        render_text(renderer, fps_stats, 10, 10, 255, 255, 255, 255, text_font_size, ALIGN_TOP_LEFT); // Render FPS at the top left corner
+        render_text(renderer, fps_stats, 10, 10, 255, 255, 255, 255, text_font_size, ALIGN_TOP_LEFT, false); // Render FPS at the top left corner
         SDL_RenderPresent(renderer);
 
         // Update FPS calculation

@@ -63,7 +63,7 @@ void drawQuarterCircleOutline(SDL_Renderer *renderer, const int center_x, const 
 void render_car(SDL_Renderer* renderer, const Car* car, const bool paint_id);
 
 // Renders the entire simulation state: roads, cars, lanes, traffic.
-void render_sim(SDL_Renderer* renderer, const Simulation* sim, const bool draw_lanes, const bool draw_cars, const bool draw_track_lines, const bool draw_traffic_lights, const bool draw_car_ids, const bool draw_lane_ids, const bool benchmark);
+void render_sim(SDL_Renderer* renderer, const Simulation* sim, const bool draw_lanes, const bool draw_cars, const bool draw_track_lines, const bool draw_traffic_lights, const bool draw_car_ids, const bool draw_lane_ids, const bool draw_road_names, const bool benchmark);
 
 // thickLineRGBA(renderer, p1.x, p1.y, p2.x, p2.y, thickness, color.r, color.g, color.b, color.a);
 
@@ -99,4 +99,8 @@ typedef enum {
     ALIGN_BOTTOM_RIGHT   // Bottom-right corner at (x, y)
 } TextAlign;
 
-void render_text(SDL_Renderer* renderer, const char* text, int x, int y, Uint8 r, Uint8 g, Uint8 b, Uint8 a, int font_size, TextAlign align);
+
+void render_text(SDL_Renderer* renderer, const char* text, int x, int y, Uint8 r, Uint8 g, Uint8 b, Uint8 a, int font_size, TextAlign align, bool rotated);
+
+void render_straight_road_name(SDL_Renderer* renderer, const StraightRoad* road);
+void render_intersection_name(SDL_Renderer* renderer, const Intersection* intersection);

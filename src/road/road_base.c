@@ -1,5 +1,6 @@
 #include "road.h"
 #include <stdlib.h>
+#include <stdio.h>
 
 int road_id_counter = 0; // Global ID counter for roads
 
@@ -47,8 +48,16 @@ bool road_is_exit_road_eventually_available(const Road* self, double progress) {
 // Road Getters
 //
 
+int road_get_id(const Road* self) {
+    return self->id;
+}
+
 RoadType road_get_type(const Road* self) {
     return self->type;
+}
+
+const char* road_get_name(const Road* self) {
+    return self->name;
 }
 
 int road_get_num_lanes(const Road* self) {
@@ -73,6 +82,26 @@ double road_get_grip(const Road* self) {
 Coordinates road_get_center(const Road* self) {
     return self->center;
 }
+
+
+//
+// Road Setters
+//
+
+void road_set_name(Road* self, const char* name) {
+    if (name) {
+        snprintf(self->name, sizeof(self->name), "%s", name);
+        // Name each lane with the road's name and lane index
+        for (int i = 0; i < self->num_lanes; i++) {
+            Lane* lane = (Lane*)self->lanes[i];
+            snprintf(lane->name, sizeof(lane->name), "%s Lane %d", self->name, i);
+        }
+    } else {
+        self->name[0] = '\0'; // Clear the name if NULL
+    }
+}
+
+
 
 
 const Intersection* road_leads_to_intersection(const Road* road) {

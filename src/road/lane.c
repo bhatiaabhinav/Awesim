@@ -16,6 +16,7 @@ int lane_id_counter = 0; // Global ID counter for lanes
 void lane_init(Lane* lane, const LaneType type, const Direction direction, const Meters width, const MetersPerSecond speed_limit, const double grip, const Degradations degradations) {
     lane->id = lane_id_counter++;
     lane->type = type;
+    snprintf(lane->name, sizeof(lane->name), "Lane %d", lane->id);
     lane->direction = direction;
     lane->width = width > 0.0 ? width : 0.0;
     lane->speed_limit = speed_limit;
@@ -190,6 +191,7 @@ void lane_free(Lane* self) {
 // Getters
 //
 
+int lane_get_id(const Lane* self) { return self->id; }
 LaneType lane_get_type(const Lane* self) { return self->type; }
 Direction lane_get_direction(const Lane* self) { return self->direction; }
 Meters lane_get_width(const Lane* self) { return self->width; }

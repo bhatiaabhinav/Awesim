@@ -33,6 +33,7 @@ typedef enum {
 struct Lane {
     int id;                 // Unique identifier for the lane
     LaneType type;
+    char name[64];          // Name of the lane (optional)
     Direction direction;
     Meters width;
     MetersPerSecond speed_limit;
@@ -87,6 +88,7 @@ void lane_add_car(Lane* self, const Car* car);
 void lane_remove_car(Lane* self, const Car* car);
 
 // Lane Getters
+int lane_get_id(const Lane* self);
 LaneType lane_get_type(const Lane* self);
 Direction lane_get_direction(const Lane* self);
 Meters lane_get_width(const Lane* self);
@@ -152,7 +154,9 @@ extern int road_id_counter; // Global ID counter for roads
 void road_free(Road* self);
 
 // Road Getters
+int road_get_id(const Road* self);
 RoadType road_get_type(const Road* self);
+const char* road_get_name(const Road* self);
 int road_get_num_lanes(const Road* self);
 const Lane* road_get_lane(const Road* self, int index);
 MetersPerSecond road_get_speed_limit(const Road* self);
@@ -163,6 +167,9 @@ const Lane* road_get_rightmost_lane(const Road* self);
 bool road_is_merge_available(const Road* self);
 bool road_is_exit_road_available(const Road* self, double progress);
 bool road_is_exit_road_eventually_available(const Road* self, double progress);
+
+// Road Setters
+void road_set_name(Road* self, const char* name);
 
 // Straight Road
 typedef struct {

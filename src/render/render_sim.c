@@ -6,7 +6,7 @@
 #include <stdint.h>
 
 void render_sim(SDL_Renderer *renderer, const Simulation *sim, const bool draw_lanes, const bool draw_cars,
-                const bool draw_track_lines, const bool draw_traffic_lights, const bool draw_car_ids, const bool draw_lane_ids, const bool benchmark)
+                const bool draw_track_lines, const bool draw_traffic_lights, const bool draw_car_ids, const bool draw_lane_ids, const bool draw_road_names, const bool benchmark)
 {
     Map *map = sim->map;
 
@@ -36,6 +36,7 @@ void render_sim(SDL_Renderer *renderer, const Simulation *sim, const bool draw_l
                 for (int j = 0; j < road->num_lanes; j++) {
                     render_lane(renderer, road->lanes[j], true, true, draw_lane_ids);
                 }
+                if (draw_road_names) render_straight_road_name(renderer, (const StraightRoad *)road);
             }
         }
         end = SDL_GetPerformanceCounter();
@@ -88,6 +89,8 @@ void render_sim(SDL_Renderer *renderer, const Simulation *sim, const bool draw_l
 
         for (int i = 0; i < map->num_intersections; i++) {
             const Intersection *intersection = map->intersections[i];
+            // if (draw_road_names) render_intersection_name(renderer, intersection);
+
             IntersectionState state = intersection->state;
 
             for (int j = 0; j < intersection->base.num_lanes; j++) {

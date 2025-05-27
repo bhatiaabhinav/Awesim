@@ -48,7 +48,6 @@ Map* awesim_map(Meters city_width) {
     const bool local_four_way_stop = false;
 
     // Interstate roads
-
     const Coordinates I2E_center = coordinates_create(0, city_height_half);
     const Meters I2E_length = city_width * 0.93;
     StraightRoad* I2E = straight_road_create_from_center_dir_len(I2E_center, DIRECTION_EAST, I2E_length, interstate_num_lanes, lane_width, interstate_speed_limit, 1);
@@ -66,9 +65,13 @@ Map* awesim_map(Meters city_width) {
     StraightRoad* I1S = straight_road_create_from_center_dir_len(I1S_center, DIRECTION_SOUTH, I1S_length, interstate_num_lanes, lane_width, interstate_speed_limit, 1);
 
     map_add_straight_road(map, I2E);
+    road_set_name((Road*)I2E, "I-2 E");
     map_add_straight_road(map, I2W);
+    road_set_name((Road*)I2W, "I-2 W");
     map_add_straight_road(map, I1N);
+    road_set_name((Road*)I1N, "I-1 N");
     map_add_straight_road(map, I1S);
+    road_set_name((Road*)I1S, "I-1 S");
 
     // Interstate connectors
     Turn* interstate_connectors[4];
@@ -80,9 +83,12 @@ Map* awesim_map(Meters city_width) {
     for (int i = 0; i < 4; i++) {
         map_add_turn(map, interstate_connectors[i]);
     }
+    road_set_name((Road*)interstate_connectors[0], "I-2 E -> I-1 S");
+    road_set_name((Road*)interstate_connectors[1], "I-1 S -> I-2 W");
+    road_set_name((Road*)interstate_connectors[2], "I-2 W -> I-1 N");
+    road_set_name((Road*)interstate_connectors[3], "I-1 N -> I-2 E");
 
     // State highways
-    
     const Meters state_hgway_width = state_num_lanes * lane_width;
     const Meters state_edge_offset = I2E->width / 2 + 2 * state_hgway_width;
     double S1_x_offset = 0.5 * lane_width * state_num_lanes;
@@ -99,13 +105,18 @@ Map* awesim_map(Meters city_width) {
     StraightRoad* _S2W = straight_road_make_opposite_and_set_adjacent_left(_S2E);
 
     map_add_straight_road(map, _S1N);
+    road_set_name((Road*)_S1N, "S-1 N");
     map_add_straight_road(map, _S1S);
+    road_set_name((Road*)_S1S, "S-1 S");
     map_add_straight_road(map, _S2E);
+    road_set_name((Road*)_S2E, "S-2 E");
     map_add_straight_road(map, _S2W);
+    road_set_name((Road*)_S2W, "S-2 W");
 
     // Central intersection
-    Intersection* intersection = intersection_create_from_crossing_roads_and_update_connections(_S2E, _S2W, _S1N, _S1S, false, state_turn_radius, false, false, state_speed_limit, 1.0); // All state highways
+    Intersection* intersection = intersection_create_from_crossing_roads_and_update_connections(_S2E, _S2W, _S1N, _S1S, false, state_turn_radius, false, false, state_speed_limit, 1.0);
     map_add_intersection(map, intersection);
+    road_set_name((Road*)intersection, "S-2 & S-1 Intersection");
 
     StraightRoad* _S2E_left = _S2E;
     StraightRoad* _S2E_right = (StraightRoad*)intersection->road_eastbound_to;
@@ -117,21 +128,28 @@ Map* awesim_map(Meters city_width) {
     StraightRoad* _S1S_below = (StraightRoad*)intersection->road_southbound_to;
 
     map_add_straight_road(map, _S2E_right);
+    road_set_name((Road*)_S2E_right, "S-2 E");
     map_add_straight_road(map, _S2W_left);
+    road_set_name((Road*)_S2W_left, "S-2 W");
     map_add_straight_road(map, _S1N_above);
+    road_set_name((Road*)_S1N_above, "S-1 N");
     map_add_straight_road(map, _S1S_below);
+    road_set_name((Road*)_S1S_below, "S-1 S");
 
-    // Avenue 1
+    // 1st Avenue
     const Coordinates _Av1N_center = vec_midpoint(_S2E_left->base.center, _S2W_left->base.center);
     const Meters av1_length = city_height - 4 * I2E->width;
     StraightRoad* _Av1N = straight_road_create_from_center_dir_len(_Av1N_center, DIRECTION_NORTH, av1_length, 1, lane_width, local_speed_limit, 1.0);
     StraightRoad* _Av1S = straight_road_make_opposite_and_set_adjacent_left(_Av1N);
 
     map_add_straight_road(map, _Av1N);
+    road_set_name((Road*)_Av1N, "1st Av N");
     map_add_straight_road(map, _Av1S);
+    road_set_name((Road*)_Av1S, "1st Av S");
 
-    Intersection* Av1S2_intersection = intersection_create_from_crossing_roads_and_update_connections(_S2E_left, _S2W_left, _Av1N, _Av1S, false, local_turn_radius, false, false, local_speed_limit, 1.0); // Min of state and local
+    Intersection* Av1S2_intersection = intersection_create_from_crossing_roads_and_update_connections(_S2E_left, _S2W_left, _Av1N, _Av1S, false, local_turn_radius, false, false, local_speed_limit, 1.0);
     map_add_intersection(map, Av1S2_intersection);
+    road_set_name((Road*)Av1S2_intersection, "S-2 & 1st Av Intersection");
 
     StraightRoad* _S2E_left_left = _S2E_left;
     StraightRoad* _S2E_left_new = (StraightRoad*)Av1S2_intersection->road_eastbound_to;
@@ -142,20 +160,27 @@ Map* awesim_map(Meters city_width) {
     StraightRoad* _Av1S_below = (StraightRoad*)Av1S2_intersection->road_southbound_to;
 
     map_add_straight_road(map, _S2E_left_new);
+    road_set_name((Road*)_S2E_left_new, "S-2 E");
     map_add_straight_road(map, _S2W_left_left);
+    road_set_name((Road*)_S2W_left_left, "S-2 W");
     map_add_straight_road(map, _Av1N_above);
+    road_set_name((Road*)_Av1N_above, "1st Av N");
     map_add_straight_road(map, _Av1S_below);
+    road_set_name((Road*)_Av1S_below, "1st Av S");
 
-    // Avenue 2
+    // 2nd Avenue
     const Coordinates _Av2N_center = vec_midpoint(_S2E_right->base.center, _S2W_right->base.center);
     StraightRoad* _Av2N = straight_road_create_from_center_dir_len(_Av2N_center, DIRECTION_NORTH, av1_length, 1, lane_width, local_speed_limit, 1.0);
     StraightRoad* _Av2S = straight_road_make_opposite_and_set_adjacent_left(_Av2N);
 
     map_add_straight_road(map, _Av2N);
+    road_set_name((Road*)_Av2N, "2nd Av N");
     map_add_straight_road(map, _Av2S);
+    road_set_name((Road*)_Av2S, "2nd Av S");
 
-    Intersection* Av2S2_intersection = intersection_create_from_crossing_roads_and_update_connections(_S2E_right, _S2W_right, _Av2N, _Av2S, false, local_turn_radius, false, false, local_speed_limit, 1.0); // Min of state and local
+    Intersection* Av2S2_intersection = intersection_create_from_crossing_roads_and_update_connections(_S2E_right, _S2W_right, _Av2N, _Av2S, false, local_turn_radius, false, false, local_speed_limit, 1.0);
     map_add_intersection(map, Av2S2_intersection);
+    road_set_name((Road*)Av2S2_intersection, "S-2 & 2nd Av Intersection");
 
     StraightRoad* _S2E_right_right = (StraightRoad*)Av2S2_intersection->road_eastbound_to;
     StraightRoad* _S2W_right_right = _S2W_right;
@@ -166,21 +191,28 @@ Map* awesim_map(Meters city_width) {
     StraightRoad* _Av2S_below = (StraightRoad*)Av2S2_intersection->road_southbound_to;
 
     map_add_straight_road(map, _S2E_right_right);
+    road_set_name((Road*)_S2E_right_right, "S-2 E");
     map_add_straight_road(map, _S2W_right_new);
+    road_set_name((Road*)_S2W_right_new, "S-2 W");
     map_add_straight_road(map, _Av2N_above);
+    road_set_name((Road*)_Av2N_above, "2nd Av N");
     map_add_straight_road(map, _Av2S_below);
+    road_set_name((Road*)_Av2S_below, "2nd Av S");
 
-    // Street 1
+    // 1st Street
     const Coordinates _St1E_center = vec_midpoint(_S1N_above->base.center, _S1S_above->base.center);
     const Meters st1_length = city_width - 4 * I2E->width;
     StraightRoad* _St1E = straight_road_create_from_center_dir_len(_St1E_center, DIRECTION_EAST, st1_length, 1, lane_width, local_speed_limit, 1.0);
     StraightRoad* _St1W = straight_road_make_opposite_and_set_adjacent_left(_St1E);
 
     map_add_straight_road(map, _St1E);
+    road_set_name((Road*)_St1E, "1st St E");
     map_add_straight_road(map, _St1W);
+    road_set_name((Road*)_St1W, "1st St W");
 
-    Intersection* St1S1_intersection = intersection_create_from_crossing_roads_and_update_connections(_St1E, _St1W, _S1N_above, _S1S_above, false, local_turn_radius, false, false, local_speed_limit, 1.0); // Min of state and local
+    Intersection* St1S1_intersection = intersection_create_from_crossing_roads_and_update_connections(_St1E, _St1W, _S1N_above, _S1S_above, false, local_turn_radius, false, false, local_speed_limit, 1.0);
     map_add_intersection(map, St1S1_intersection);
+    road_set_name((Road*)St1S1_intersection, "1st St & S-1 Intersection");
 
     StraightRoad* _St1E_left = _St1E;
     StraightRoad* _St1E_right = (StraightRoad*)St1S1_intersection->road_eastbound_to;
@@ -191,20 +223,27 @@ Map* awesim_map(Meters city_width) {
     StraightRoad* _S1S_above_new = (StraightRoad*)St1S1_intersection->road_southbound_to;
 
     map_add_straight_road(map, _St1E_right);
+    road_set_name((Road*)_St1E_right, "1st St E");
     map_add_straight_road(map, _St1W_left);
+    road_set_name((Road*)_St1W_left, "1st St W");
     map_add_straight_road(map, _S1N_above_above);
+    road_set_name((Road*)_S1N_above_above, "S-1 N");
     map_add_straight_road(map, _S1S_above_new);
+    road_set_name((Road*)_S1S_above_new, "S-1 S");
 
-    // Street 2
+    // 2nd Street
     const Coordinates _St2E_center = vec_midpoint(_S1N_below->base.center, _S1S_below->base.center);
     StraightRoad* _St2E = straight_road_create_from_center_dir_len(_St2E_center, DIRECTION_EAST, st1_length, 1, lane_width, local_speed_limit, 1.0);
     StraightRoad* _St2W = straight_road_make_opposite_and_set_adjacent_left(_St2E);
 
     map_add_straight_road(map, _St2E);
+    road_set_name((Road*)_St2E, "2nd St E");
     map_add_straight_road(map, _St2W);
+    road_set_name((Road*)_St2W, "2nd St W");
 
-    Intersection* St2S1_intersection = intersection_create_from_crossing_roads_and_update_connections(_St2E, _St2W, _S1N_below, _S1S_below, false, local_turn_radius, false, false, local_speed_limit, 1.0); // Min of state and local
+    Intersection* St2S1_intersection = intersection_create_from_crossing_roads_and_update_connections(_St2E, _St2W, _S1N_below, _S1S_below, false, local_turn_radius, false, false, local_speed_limit, 1.0);
     map_add_intersection(map, St2S1_intersection);
+    road_set_name((Road*)St2S1_intersection, "2nd St & S-1 Intersection");
 
     StraightRoad* _St2E_left = _St2E;
     StraightRoad* _St2E_right = (StraightRoad*)St2S1_intersection->road_eastbound_to;
@@ -215,13 +254,18 @@ Map* awesim_map(Meters city_width) {
     StraightRoad* _S1S_below_below = (StraightRoad*)St2S1_intersection->road_southbound_to;
 
     map_add_straight_road(map, _St2E_right);
+    road_set_name((Road*)_St2E_right, "2nd St E");
     map_add_straight_road(map, _St2W_left);
+    road_set_name((Road*)_St2W_left, "2nd St W");
     map_add_straight_road(map, _S1N_below_new);
+    road_set_name((Road*)_S1N_below_new, "S-1 N");
     map_add_straight_road(map, _S1S_below_below);
+    road_set_name((Road*)_S1S_below_below, "S-1 S");
 
-    // St1 and Av1 intersection
-    Intersection* St1Av1_intersection = intersection_create_from_crossing_roads_and_update_connections(_St1E_left, _St1W_left, _Av1N_above, _Av1S_above, local_four_way_stop, local_turn_radius, false, false, local_speed_limit, 1.0); // All local
+    // 1st St and 1st Av intersection
+    Intersection* St1Av1_intersection = intersection_create_from_crossing_roads_and_update_connections(_St1E_left, _St1W_left, _Av1N_above, _Av1S_above, local_four_way_stop, local_turn_radius, false, false, local_speed_limit, 1.0);
     map_add_intersection(map, St1Av1_intersection);
+    road_set_name((Road*)St1Av1_intersection, "1st St & 1st Av Intersection");
 
     StraightRoad* _St1E_left_left = _St1E_left;
     StraightRoad* _St1E_left_new = (StraightRoad*)St1Av1_intersection->road_eastbound_to;
@@ -231,15 +275,20 @@ Map* awesim_map(Meters city_width) {
     StraightRoad* _Av1S_above_new = (StraightRoad*)St1Av1_intersection->road_southbound_to;
 
     map_add_straight_road(map, _St1E_left_new);
+    road_set_name((Road*)_St1E_left_new, "1st St E");
     map_add_straight_road(map, _St1W_left_left);
+    road_set_name((Road*)_St1W_left_left, "1st St W");
     map_add_straight_road(map, _Av1N_above_above);
+    road_set_name((Road*)_Av1N_above_above, "1st Av N");
     map_add_straight_road(map, _Av1S_above_new);
+    road_set_name((Road*)_Av1S_above_new, "1st Av S");
 
-    // St1 and Av2 intersection
-    Intersection* St1Av2_intersection = intersection_create_from_crossing_roads_and_update_connections(_St1E_right, _St1W_right, _Av2N_above, _Av2S_above, local_four_way_stop, local_turn_radius, false, false, local_speed_limit, 1.0); // All local
+    // 1st St and 2nd Av intersection
+    Intersection* St1Av2_intersection = intersection_create_from_crossing_roads_and_update_connections(_St1E_right, _St1W_right, _Av2N_above, _Av2S_above, local_four_way_stop, local_turn_radius, false, false, local_speed_limit, 1.0);
     map_add_intersection(map, St1Av2_intersection);
+    road_set_name((Road*)St1Av2_intersection, "1st St & 2nd Av Intersection");
 
-    StraightRoad* _St1E_right_right =(StraightRoad*) St1Av2_intersection->road_eastbound_to;
+    StraightRoad* _St1E_right_right = (StraightRoad*)St1Av2_intersection->road_eastbound_to;
     StraightRoad* _St1W_right_right = _St1W_right;
     StraightRoad* _St1W_right_new = (StraightRoad*)St1Av2_intersection->road_westbound_to;
     StraightRoad* _Av2N_above_above = (StraightRoad*)St1Av2_intersection->road_northbound_to;
@@ -247,13 +296,18 @@ Map* awesim_map(Meters city_width) {
     StraightRoad* _Av2S_above_new = (StraightRoad*)St1Av2_intersection->road_southbound_to;
 
     map_add_straight_road(map, _St1E_right_right);
+    road_set_name((Road*)_St1E_right_right, "1st St E");
     map_add_straight_road(map, _St1W_right_new);
+    road_set_name((Road*)_St1W_right_new, "1st St W");
     map_add_straight_road(map, _Av2N_above_above);
+    road_set_name((Road*)_Av2N_above_above, "2nd Av N");
     map_add_straight_road(map, _Av2S_above_new);
+    road_set_name((Road*)_Av2S_above_new, "2nd Av S");
 
-    // St2 and Av1 intersection
-    Intersection* St2Av1_intersection = intersection_create_from_crossing_roads_and_update_connections(_St2E_left, _St2W_left, _Av1N_below, _Av1S_below, local_four_way_stop, local_turn_radius, false, false, local_speed_limit, 1.0); // All local
+    // 2nd St and 1st Av intersection
+    Intersection* St2Av1_intersection = intersection_create_from_crossing_roads_and_update_connections(_St2E_left, _St2W_left, _Av1N_below, _Av1S_below, local_four_way_stop, local_turn_radius, false, false, local_speed_limit, 1.0);
     map->intersections[map->num_intersections++] = St2Av1_intersection;
+    road_set_name((Road*)St2Av1_intersection, "2nd St & 1st Av Intersection");
 
     StraightRoad* _St2E_left_left = _St2E_left;
     StraightRoad* _St2E_left_new = (StraightRoad*)St2Av1_intersection->road_eastbound_to;
@@ -263,13 +317,18 @@ Map* awesim_map(Meters city_width) {
     StraightRoad* _Av1S_below_below = (StraightRoad*)St2Av1_intersection->road_southbound_to;
 
     map_add_straight_road(map, _St2E_left_new);
+    road_set_name((Road*)_St2E_left_new, "2nd St E");
     map_add_straight_road(map, _St2W_left_left);
+    road_set_name((Road*)_St2W_left_left, "2nd St W");
     map_add_straight_road(map, _Av1N_below_new);
+    road_set_name((Road*)_Av1N_below_new, "1st Av N");
     map_add_straight_road(map, _Av1S_below_below);
+    road_set_name((Road*)_Av1S_below_below, "1st Av S");
 
-    // St2 and Av2 intersection
-    Intersection* St2Av2_intersection = intersection_create_from_crossing_roads_and_update_connections(_St2E_right, _St2W_right, _Av2N_below, _Av2S_below, local_four_way_stop, local_turn_radius, false, false, local_speed_limit, 1.0); // All local
+    // 2nd St and 2nd Av intersection
+    Intersection* St2Av2_intersection = intersection_create_from_crossing_roads_and_update_connections(_St2E_right, _St2W_right, _Av2N_below, _Av2S_below, local_four_way_stop, local_turn_radius, false, false, local_speed_limit, 1.0);
     map_add_intersection(map, St2Av2_intersection);
+    road_set_name((Road*)St2Av2_intersection, "2nd St & 2nd Av Intersection");
 
     StraightRoad* _St2E_right_right = (StraightRoad*)St2Av2_intersection->road_eastbound_to;
     StraightRoad* _St2W_right_right = _St2W_right;
@@ -279,9 +338,13 @@ Map* awesim_map(Meters city_width) {
     StraightRoad* _Av2S_below_below = (StraightRoad*)St2Av2_intersection->road_southbound_to;
 
     map_add_straight_road(map, _St2E_right_right);
+    road_set_name((Road*)_St2E_right_right, "2nd St E");
     map_add_straight_road(map, _St2W_right_new);
+    road_set_name((Road*)_St2W_right_new, "2nd St W");
     map_add_straight_road(map, _Av2N_below_new);
+    road_set_name((Road*)_Av2N_below_new, "2nd Av N");
     map_add_straight_road(map, _Av2S_below_below);
+    road_set_name((Road*)_Av2S_below_below, "2nd Av S");
 
     // Top Right Extension (TRE, TRW, RTN, RTS)
     const Coordinates TRE_center = {_St1E_right_right->base.center.x, _Av2N_above_above->end_point.y + local_turn_radius + 0.5 * lane_width};
@@ -299,15 +362,25 @@ Map* awesim_map(Meters city_width) {
     Turn* RTS_St1WRR_connector = turn_create_and_set_connections_and_adjacents(RTS, _St1W_right_right, DIRECTION_CW, local_turn_speed_limit, 1.0, St1ERR_RTN_connector);
 
     map_add_straight_road(map, TRE);
+    road_set_name((Road*)TRE, "Euler St E");
     map_add_straight_road(map, TRW);
+    road_set_name((Road*)TRW, "Euler St W");
     map_add_straight_road(map, RTN);
+    road_set_name((Road*)RTN, "Gauss Av N");
     map_add_straight_road(map, RTS);
+    road_set_name((Road*)RTS, "Gauss Av S");
     map_add_turn(map, _Av2N_above_above_TRE_connector);
+    road_set_name((Road*)_Av2N_above_above_TRE_connector, "2nd Av N -> Euler St E");
     map_add_turn(map, TRW_Av2S_above_above_connector);
+    road_set_name((Road*)TRW_Av2S_above_above_connector, "Euler St W -> 2nd Av S");
     map_add_turn(map, RTN_TRW_connector);
+    road_set_name((Road*)RTN_TRW_connector, "Gauss Av N -> Euler St W");
     map_add_turn(map, TRE_RTS_connector);
+    road_set_name((Road*)TRE_RTS_connector, "Euler St E -> Gauss Av S");
     map_add_turn(map, RTS_St1WRR_connector);
+    road_set_name((Road*)RTS_St1WRR_connector, "Gauss Av S -> 1st St W");
     map_add_turn(map, St1ERR_RTN_connector);
+    road_set_name((Road*)St1ERR_RTN_connector, "1st St E -> Gauss Av N");
 
     // Bottom Right Extension (BRE, BRW, RBN, RBS)
     const Coordinates BRE_center = {_St2E_right_right->base.center.x, _Av2N_below_below->start_point.y - local_turn_radius - 1.5 * lane_width};
@@ -325,15 +398,25 @@ Map* awesim_map(Meters city_width) {
     Turn* BRE_RBN_connector = turn_create_and_set_connections_and_adjacents(BRE, RBN, DIRECTION_CCW, local_turn_speed_limit, 1.0, RBS_BRW_connector);
 
     map_add_straight_road(map, BRE);
+    road_set_name((Road*)BRE, "Newton St E");
     map_add_straight_road(map, BRW);
+    road_set_name((Road*)BRW, "Newton St W");
     map_add_straight_road(map, RBN);
+    road_set_name((Road*)RBN, "Leibniz Av N");
     map_add_straight_road(map, RBS);
+    road_set_name((Road*)RBS, "Leibniz Av S");
     map_add_turn(map, RBN_St2WRR_connector);
+    road_set_name((Road*)RBN_St2WRR_connector, "Leibniz Av N -> 2nd St W");
     map_add_turn(map, BRW_Av2N_below_below_connector);
+    road_set_name((Road*)BRW_Av2N_below_below_connector, "Newton St W -> 2nd Av N");
     map_add_turn(map, Av2S_below_below_BRE_connector);
+    road_set_name((Road*)Av2S_below_below_BRE_connector, "2nd Av S -> Newton St E");
     map_add_turn(map, BRE_RBN_connector);
+    road_set_name((Road*)BRE_RBN_connector, "Newton St E -> Leibniz Av N");
     map_add_turn(map, RBS_BRW_connector);
+    road_set_name((Road*)RBS_BRW_connector, "Leibniz Av S -> Newton St W");
     map_add_turn(map, St2ERR_RBS_connector);
+    road_set_name((Road*)St2ERR_RBS_connector, "2nd St E -> Leibniz Av S");
 
     // Bottom Left Extension (BLE, BLW, LBN, LBS)
     const Coordinates BLE_center = {_St2E_left_left->base.center.x, _Av1N_below_below->start_point.y - local_turn_radius - 1.5 * lane_width};
@@ -351,15 +434,25 @@ Map* awesim_map(Meters city_width) {
     Turn* BLE_Av1N_connector = turn_create_and_set_connections_and_adjacents(BLE, _Av1N_below_below, DIRECTION_CCW, local_turn_speed_limit, 1.0, Av1S_below_below_BLW_connector);
 
     map_add_straight_road(map, BLE);
+    road_set_name((Road*)BLE, "Turing St E");
     map_add_straight_road(map, BLW);
+    road_set_name((Road*)BLW, "Turing St W");
     map_add_straight_road(map, LBN);
+    road_set_name((Road*)LBN, "Von Neumann Av N");
     map_add_straight_road(map, LBS);
+    road_set_name((Road*)LBS, "Von Neumann Av S");
     map_add_turn(map, LBN_St2ELL_connector);
+    road_set_name((Road*)LBN_St2ELL_connector, "Von Neumann Av N -> 2nd St E");
     map_add_turn(map, BLW_LBN_connector);
+    road_set_name((Road*)BLW_LBN_connector, "Turing St W -> Von Neumann Av N");
     map_add_turn(map, Av1S_below_below_BLW_connector);
+    road_set_name((Road*)Av1S_below_below_BLW_connector, "1st Av S -> Turing St W");
     map_add_turn(map, BLE_Av1N_connector);
+    road_set_name((Road*)BLE_Av1N_connector, "Turing St E -> 1st Av N");
     map_add_turn(map, LBS_BLE_connector);
+    road_set_name((Road*)LBS_BLE_connector, "Von Neumann Av S -> Turing St E");
     map_add_turn(map, St2WLL_LBS_connector);
+    road_set_name((Road*)St2WLL_LBS_connector, "2nd St W -> Von Neumann Av S");
 
     // Top Left Extension (TLE, TLW, LTN, LTS)
     const Coordinates TLE_center = {_St1E_left_left->base.center.x, _Av1N_above_above->end_point.y + local_turn_radius + lane_width / 2};
@@ -377,15 +470,25 @@ Map* awesim_map(Meters city_width) {
     Turn* TLE_Av1S_connector = turn_create_and_set_connections_and_adjacents(TLE, _Av1S_above_above, DIRECTION_CW, local_turn_speed_limit, 1.0, Av1N_above_above_TLW_connector);
 
     map_add_straight_road(map, TLE);
+    road_set_name((Road*)TLE, "Riemann St E");
     map_add_straight_road(map, TLW);
+    road_set_name((Road*)TLW, "Riemann St W");
     map_add_straight_road(map, LTN);
+    road_set_name((Road*)LTN, "Hilbert Av N");
     map_add_straight_road(map, LTS);
+    road_set_name((Road*)LTS, "Hilbert Av S");
     map_add_turn(map, LTN_TLE_connector);
+    road_set_name((Road*)LTN_TLE_connector, "Hilbert Av N -> Riemann St E");
     map_add_turn(map, St1WLL_LTN_connector);
+    road_set_name((Road*)St1WLL_LTN_connector, "1st St W -> Hilbert Av N");
     map_add_turn(map, TLW_LTS_connector);
+    road_set_name((Road*)TLW_LTS_connector, "Riemann St W -> Hilbert Av S");
     map_add_turn(map, Av1N_above_above_TLW_connector);
+    road_set_name((Road*)Av1N_above_above_TLW_connector, "1st Av N -> Riemann St W");
     map_add_turn(map, LTS_St1E_connector);
+    road_set_name((Road*)LTS_St1E_connector, "Hilbert Av S -> 1st St E");
     map_add_turn(map, TLE_Av1S_connector);
+    road_set_name((Road*)TLE_Av1S_connector, "Riemann St E -> 1st Av S");
 
     // Exit and entry ramps
     StraightRoad* exit_shoulders[4];
@@ -435,6 +538,24 @@ Map* awesim_map(Meters city_width) {
         map_add_straight_road(map, entry_shoulders[i]);
         map_add_turn(map, entry_ramps[i]);
     }
+
+    road_set_name((Road*)exit_shoulders[0], "I-2 E Exit Ramp");
+    road_set_name((Road*)exit_ramps[0], "I-2 E Exit Ramp -> S-1 S");
+    road_set_name((Road*)exit_shoulders[1], "I-1 S Exit Ramp");
+    road_set_name((Road*)exit_ramps[1], "I-1 S Exit Ramp -> S-2 W");
+    road_set_name((Road*)exit_shoulders[2], "I-2 W Exit Ramp");
+    road_set_name((Road*)exit_ramps[2], "I-2 W Exit Ramp -> S-1 N");
+    road_set_name((Road*)exit_shoulders[3], "I-1 N Exit Ramp");
+    road_set_name((Road*)exit_ramps[3], "I-1 N Exit Ramp -> S-2 E");
+
+    road_set_name((Road*)entry_shoulders[0], "I-2 E Entry Ramp");
+    road_set_name((Road*)entry_ramps[0], "S-1 N -> I-2 E Entry Ramp");
+    road_set_name((Road*)entry_shoulders[1], "I-1 S Entry Ramp");
+    road_set_name((Road*)entry_ramps[1], "S-2 E -> I-1 S Entry Ramp");
+    road_set_name((Road*)entry_shoulders[2], "I-2 W Entry Ramp");
+    road_set_name((Road*)entry_ramps[2], "S-1 S -> I-2 W Entry Ramp");
+    road_set_name((Road*)entry_shoulders[3], "I-1 N Entry Ramp");
+    road_set_name((Road*)entry_ramps[3], "S-2 W -> I-1 N Entry Ramp");
 
     return map;
 }

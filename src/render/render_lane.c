@@ -189,7 +189,8 @@ void render_lane_linear(SDL_Renderer* renderer, const LinearLane* lane, const bo
         SDL_Point lane_center_screen = to_screen_coords(lane->base.center, width, height);
         int text_x = lane_center_screen.x;
         int text_y = lane_center_screen.y;
-        render_text(renderer, id_str, text_x, text_y, text_color.r, text_color.g, text_color.b, text_color.a, font_size, ALIGN_CENTER);
+        bool rotated = (lane->base.direction == DIRECTION_NORTH || lane->base.direction == DIRECTION_SOUTH);
+        render_text(renderer, id_str, text_x, text_y, text_color.r, text_color.g, text_color.b, text_color.a, font_size, ALIGN_CENTER, rotated);
     }
 }
 
@@ -353,7 +354,7 @@ void render_lane_quarterarc(SDL_Renderer* renderer, const QuarterArcLane* lane, 
         double middle_angle = lane->start_angle + (lane->end_angle - lane->start_angle) / 2.0; // Middle angle of the arc
         int text_x = center_screen.x + (int)(middle_radius * SCALE * cos(middle_angle));
         int text_y = center_screen.y - (int)(middle_radius * SCALE * sin(middle_angle));
-        render_text(renderer, id_str, text_x, text_y, text_color.r, text_color.g, text_color.b, text_color.a, font_size, ALIGN_CENTER);
+        render_text(renderer, id_str, text_x, text_y, text_color.r, text_color.g, text_color.b, text_color.a, font_size, ALIGN_CENTER, false);
     }
 }
 

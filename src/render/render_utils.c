@@ -248,7 +248,8 @@ void cleanup_text_rendering() {
     TTF_Quit();
 }
 
-void render_text(SDL_Renderer* renderer, const char* text, int x, int y, Uint8 r, Uint8 g, Uint8 b, Uint8 a, int font_size, TextAlign align) {
+
+void render_text(SDL_Renderer* renderer, const char* text, int x, int y, Uint8 r, Uint8 g, Uint8 b, Uint8 a, int font_size, TextAlign align, bool rotated) {
     if (!fonts_initialized || font_size < 1 || font_size > MAX_FONT_SIZE) {
         LOG_ERROR("Invalid font size %d or fonts not initialized", font_size);
         return;
@@ -279,52 +280,66 @@ void render_text(SDL_Renderer* renderer, const char* text, int x, int y, Uint8 r
         return;
     }
 
-    // Adjust position based on alignment
+    // Adjust dimensions for rotation (90 degrees anticlockwise swaps width and height)
+    int render_w = rotated ? text_h : text_w;
+    int render_h = rotated ? text_w : text_h;
+
+    // Adjust position based on alignment using rotated dimensions
     int render_x = x;
     int render_y = y;
     switch (align) {
         case ALIGN_TOP_LEFT:
-            // (x, y) is top-left corner (default)
             break;
         case ALIGN_TOP_CENTER:
-            render_x = x - text_w / 2; // Center horizontally
+            render_x = x - render_w / 2;    // Center horizontally
             break;
         case ALIGN_TOP_RIGHT:
-            render_x = x - text_w; // Right edge at x
+            render_x = x - render_w;        // Right edge at x
             break;
         case ALIGN_CENTER_LEFT:
-            render_y = y - text_h / 2; // Center vertically
+            render_y = y - render_h / 2;    // Center vertically
             break;
         case ALIGN_CENTER:
-            render_x = x - text_w / 2; // Center horizontally
-            render_y = y - text_h / 2; // Center vertically
+            render_x = x - render_w / 2;    // Center horizontally
+            render_y = y - render_h / 2;    // Center vertically
             break;
         case ALIGN_CENTER_RIGHT:
-            render_x = x - text_w; // Right edge at x
-            render_y = y - text_h / 2; // Center vertically
+            render_x = x - render_w;        // Right edge at x        
+            render_y = y - render_h / 2;    // Center vertically    
             break;
         case ALIGN_BOTTOM_LEFT:
-            render_y = y - text_h; // Bottom edge at y
+            render_y = y - render_h;        // Bottom edge at y
             break;
         case ALIGN_BOTTOM_CENTER:
-            render_x = x - text_w / 2; // Center horizontally
-            render_y = y - text_h; // Bottom edge at y
+            render_x = x - render_w / 2;    // Center horizontally
+            render_y = y - render_h;        
             break;
         case ALIGN_BOTTOM_RIGHT:
-            render_x = x - text_w; // Right edge at x
-            render_y = y - text_h; // Bottom edge at y
+            render_x = x - render_w;        // Right edge at x        
+            render_y = y - render_h;        // Bottom edge at y
             break;
     }
 
+    // Adjust for rotation offset (90 degrees anticlockwise around top-left)
+    if (rotated) {
+        render_y += text_w; // Adjust y to account for the height swap
+    }
+
     // Check if text is outside screen bounds
-    if (render_x < 0 || render_x + text_w >= WINDOW_SIZE_WIDTH || render_y < 0 || render_y + text_h >= WINDOW_SIZE_HEIGHT) {
+    if (render_x < 0 || render_x + render_w >= WINDOW_SIZE_WIDTH || render_y < 0 || render_y + render_h >= WINDOW_SIZE_HEIGHT) {
         SDL_DestroyTexture(texture);
         return; // Text is completely outside the screen
     }
 
     // Render text
     SDL_Rect dst = {render_x, render_y, text_w, text_h};
-    SDL_RenderCopy(renderer, texture, NULL, &dst);
+    if (rotated) {
+        // Rotate 90 degrees anticlockwise around top-left
+        SDL_Point center = {0, 0};
+        SDL_RenderCopyEx(renderer, texture, NULL, &dst, -90.0, &center, SDL_FLIP_NONE);
+    } else {
+        SDL_RenderCopy(renderer, texture, NULL, &dst);
+    }
 
     // Clean up
     SDL_DestroyTexture(texture);
