@@ -72,6 +72,7 @@ CarPersonality preferences_sample_random(void);
 
 struct Car {
     // fixed properties:
+    int id;                         // unique identifier for the car
     Dimensions dimensions;          // width and length of the car
     CarCapabilities capabilities;   // capabilities of the car
     CarPersonality preferences;     // Preference profile of the car.
@@ -88,6 +89,7 @@ struct Car {
     CarIndictor indicator_turn;                  // Turn indicator. Should be set by the car's decision-making logic when car_make_decision() is called.
 };
 typedef struct Car Car;
+extern int car_id_counter; // Global ID counter for cars
 
 
 Car* car_create(Dimensions dimensions, CarCapabilities capabilities, CarPersonality preferences);

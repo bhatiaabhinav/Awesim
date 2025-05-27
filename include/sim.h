@@ -29,6 +29,10 @@ typedef enum {
     SUNDAY
 } DayOfWeek;
 
+static const char* day_of_week_strings[] = {
+    "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"
+};
+
 // Structure for time representation as DD:HH:MM:SS 
 typedef struct {
     Days days;
@@ -61,6 +65,10 @@ typedef enum {
     WEATHER_FOGGY,
     WEATHER_SNOWY
 } Weather;
+
+static const char* weather_strings[] = {
+    "Sunny", "Cloudy", "Rainy", "Foggy", "Snowy"
+};
 
 // Main simulation structure
 typedef struct Simulation {

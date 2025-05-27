@@ -1,5 +1,6 @@
 #include "utils.h"
 #include "render.h"
+#include "logging.h"
 #include <SDL2/SDL2_gfxPrimitives.h>
 #include <math.h>
 #include <stdio.h>
@@ -30,7 +31,7 @@ CarPose get_car_pose(const Car* car) {
         } else if (lane->direction == DIRECTION_CW) {
             pose.angle = theta - M_PI / 2;
         } else {
-            fprintf(stderr, "Error: Invalid direction for arc lane!\n");
+            LOG_ERROR("Error: Invalid direction for arc lane!");
             pose.angle = 0;
         }
     } else {
@@ -42,7 +43,7 @@ CarPose get_car_pose(const Car* car) {
 }
 
 
-void render_car(SDL_Renderer* renderer, const Car* car) {
+void render_car(SDL_Renderer* renderer, const Car* car, const bool paint_id) {
     CarPose pose = get_car_pose(car);
     double width = car->dimensions.x;
     double length = car->dimensions.y;
@@ -293,5 +294,16 @@ void render_car(SDL_Renderer* renderer, const Car* car) {
             thickLineRGBA_ignore_if_outside_screen(renderer, screen_front_edge_start.x, screen_front_edge_start.y, 
                                                   screen_front_edge_end.x, screen_front_edge_end.y, light_thickness, 255, 0, 0, 255);
         }
+    }
+
+    // Render car ID
+    if (paint_id) {
+        char id_str[10];
+        snprintf(id_str, sizeof(id_str), "%d", car->id);
+        int font_size = (int)(meters(1.0) * SCALE);     // font size = 1 meter
+        SDL_Point car_center_screen = to_screen_coords(pose.position, screen_width, screen_height);
+        int text_x = car_center_screen.x;
+        int text_y = car_center_screen.y;
+        render_text(renderer, id_str, text_x, text_y, 255, 255, 255, 255, font_size, ALIGN_CENTER);
     }
 }

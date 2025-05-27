@@ -5,8 +5,8 @@
 #include "logging.h"
 
 
-Simulation* awesim(int num_cars, Seconds dt) {
-    Map* map = awesim_map();
+Simulation* awesim(Meters city_width, int num_cars, Seconds dt) {
+    Map* map = awesim_map(city_width);
     Simulation* sim = sim_create(map, dt);
     for(int i = 0; i < num_cars; i++) {
         Car* car = car_create(car_dimensions_get_random_preset(), (CarCapabilities){CAR_ACC_PROFILE_SPORTS_CAR, from_mph(120), 0.0}, preferences_sample_random());
@@ -20,19 +20,18 @@ Simulation* awesim(int num_cars, Seconds dt) {
         sim_add_car(sim, car);
         // TODO: ensure that new cars are not spawned already crashed into other cars
     }
-    LOG_INFO("Created an awesome simulator with dt = %f seconds and %d cars.", dt, num_cars);
+    LOG_INFO("Created an awesome simulator with city width: %.2f meters, %d cars, and dt: %.2f seconds", city_width, num_cars, dt);
     return sim;
 }
 
 
-Map* awesim_map() {
+Map* awesim_map(Meters city_width) {
     Map* map = map_create();
 
     // Define constants
     const int interstate_num_lanes = 3;
     const int state_num_lanes = 2;
     const Meters lane_width = from_feet(12);
-    const Meters city_width = meters(1000);
     const Meters city_height = city_width;
     const Meters city_width_half = city_width / 2;
     const Meters city_height_half = city_height / 2;
@@ -51,19 +50,19 @@ Map* awesim_map() {
     // Interstate roads
 
     const Coordinates I2E_center = coordinates_create(0, city_height_half);
-    const Meters I2E_length = city_width * 0.9;
+    const Meters I2E_length = city_width * 0.93;
     StraightRoad* I2E = straight_road_create_from_center_dir_len(I2E_center, DIRECTION_EAST, I2E_length, interstate_num_lanes, lane_width, interstate_speed_limit, 1);
 
     const Coordinates I2W_center = coordinates_create(0, -city_height_half);
-    const Meters I2W_length = city_width * 0.9;
+    const Meters I2W_length = city_width * 0.93;
     StraightRoad* I2W = straight_road_create_from_center_dir_len(I2W_center, DIRECTION_WEST, I2W_length, interstate_num_lanes, lane_width, interstate_speed_limit, 1);
 
     const Coordinates I1N_center = coordinates_create(-city_width_half, 0);
-    const Meters I1N_length = city_height * 0.9;
+    const Meters I1N_length = city_height * 0.93;
     StraightRoad* I1N = straight_road_create_from_center_dir_len(I1N_center, DIRECTION_NORTH, I1N_length, interstate_num_lanes, lane_width, interstate_speed_limit, 1);
 
     const Coordinates I1S_center = coordinates_create(city_width_half, 0);
-    const Meters I1S_length = city_height * 0.9;
+    const Meters I1S_length = city_height * 0.93;
     StraightRoad* I1S = straight_road_create_from_center_dir_len(I1S_center, DIRECTION_SOUTH, I1S_length, interstate_num_lanes, lane_width, interstate_speed_limit, 1);
 
     map_add_straight_road(map, I2E);

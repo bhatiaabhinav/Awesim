@@ -66,6 +66,8 @@ Intersection* intersection_create_and_form_connections(
         exit(EXIT_FAILURE);
     }
 
+    intersection->base.id = road_id_counter++;
+    snprintf(intersection->base.name, sizeof(intersection->base.name), "Intersection %d", intersection->base.id);
     intersection->base.type = INTERSECTION;
     intersection->road_eastbound_from = road_eastbound_from;
     intersection->road_eastbound_to = road_eastbound_to;

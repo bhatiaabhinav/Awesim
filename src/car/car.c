@@ -1,15 +1,19 @@
 #include "utils.h"
 #include "car.h"
+#include "logging.h"
 #include <stdlib.h>
 #include <stdio.h>
 
 
+int car_id_counter = 0; // Global ID counter for cars
+
 Car* car_create(Dimensions dimensions, CarCapabilities capabilities, CarPersonality preferences) {
     Car* car = (Car*)malloc(sizeof(Car));
     if (!car) {
-        fprintf(stderr, "Memory allocation failed for Car\n");
+        LOG_ERROR("Memory allocation failed for Car");
         exit(EXIT_FAILURE);
     }
+    car->id = car_id_counter++;
     car->dimensions = dimensions;
     car->capabilities = capabilities;
     car->preferences = preferences;
@@ -59,7 +63,7 @@ void car_set_lane_progress(Car* self, double progress) {
 
 void car_set_speed(Car* self, MetersPerSecond speed) {
     if (speed > self->capabilities.top_speed) {
-        fprintf(stderr, "WARN: Speed exceeds car's top speed. You are trying to set it to %f. Clipping.\n", speed);
+        LOG_WARN("Speed exceeds car's top speed. You are trying to set it to %f. Clipping.", speed);
         self->speed = self->capabilities.top_speed;
     } else {
         self->speed = speed;
@@ -80,7 +84,7 @@ void car_set_acceleration(Car* self, MetersPerSecondSquared acceleration) {
 
 void car_set_damage(Car* self, const double damage) {
     if (damage < 0.0 || damage > 1.0) {
-        fprintf(stderr, "WARN: Damage must be between 0.0 and 1.0. You are trying to set it to %f. Clipping.\n", damage);
+        LOG_WARN("Damage must be between 0.0 and 1.0. You are trying to set it to %f. Clipping.", damage);
     }
     self->damage = fclamp(damage, 0.0, 1.0);
 }

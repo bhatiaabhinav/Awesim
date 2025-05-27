@@ -39,16 +39,16 @@ SDL_Point to_screen_coords(const Coordinates point, const int width, const int h
 void render_lane_center_line(SDL_Renderer* renderer, const Lane* lane, const SDL_Color color);
 
 // Renders a linear lane, optionally painting lane lines and arrows.
-void render_lane_linear(SDL_Renderer* renderer, const LinearLane* lane, const bool paint_lines, const bool paint_arrows);
+void render_lane_linear(SDL_Renderer* renderer, const LinearLane* lane, const bool paint_lines, const bool paint_arrows, const bool paint_id);
 
 // Renders a quarter arc lane, optionally painting lane lines and arrows.
-void render_lane_quarterarc(SDL_Renderer* renderer, const QuarterArcLane* lane, const bool paint_lines, const bool paint_arrows);
+void render_lane_quarterarc(SDL_Renderer* renderer, const QuarterArcLane* lane, const bool paint_lines, const bool paint_arrows, const bool paint_id);
 
 // Renders an intersection area and its traffic lights.
 void render_intersection(SDL_Renderer* renderer, const Intersection* intersection);
 
 // Renders a generic lane by delegating to the appropriate lane type renderer.
-void render_lane(SDL_Renderer* renderer, const Lane* lane, const bool paint_lines, const bool paint_arrows);
+void render_lane(SDL_Renderer* renderer, const Lane* lane, const bool paint_lines, const bool paint_arrows, const bool paint_id);
 
 // Draws a dotted line between two screen points using the specified color.
 void draw_dotted_line(SDL_Renderer* renderer, const SDL_Point start, const SDL_Point end, const SDL_Color color);
@@ -60,10 +60,10 @@ void drawFilledInwardRoundedRect(SDL_Renderer *renderer, const int x, const int 
 void drawQuarterCircleOutline(SDL_Renderer *renderer, const int center_x, const int center_y, const int radius, const int quadrant, const int thickness);
 
 // Renders a car based on its current lane and position.
-void render_car(SDL_Renderer* renderer, const Car* car);
+void render_car(SDL_Renderer* renderer, const Car* car, const bool paint_id);
 
 // Renders the entire simulation state: roads, cars, lanes, traffic.
-void render_sim(SDL_Renderer* renderer, const Simulation* sim, const bool draw_lanes, const bool draw_cars, const bool draw_track_lines, const bool draw_traffic_lights, const bool benchmark);
+void render_sim(SDL_Renderer* renderer, const Simulation* sim, const bool draw_lanes, const bool draw_cars, const bool draw_track_lines, const bool draw_traffic_lights, const bool draw_car_ids, const bool draw_lane_ids, const bool benchmark);
 
 // thickLineRGBA(renderer, p1.x, p1.y, p2.x, p2.y, thickness, color.r, color.g, color.b, color.a);
 
@@ -81,3 +81,22 @@ int trigonRGBA_ignore_if_outside_screen(SDL_Renderer * renderer, Sint16 x1, Sint
 int filledPolygonRGBA_ignore_if_outside_screen(SDL_Renderer * renderer, const Sint16 * vx, const Sint16 * vy, int n, Uint8 r, Uint8 g, Uint8 b, Uint8 a);
 
 int polygonRGBA_ignore_if_outside_screen(SDL_Renderer * renderer, const Sint16 * vx, const Sint16 * vy, int n, Uint8 r, Uint8 g, Uint8 b, Uint8 a);
+
+int init_text_rendering(const char* font_path);
+void cleanup_text_rendering();
+
+// Alignment options
+// Alignment options
+typedef enum {
+    ALIGN_TOP_LEFT,      // Text starts at (x, y)
+    ALIGN_TOP_CENTER,    // Top edge centered at x, y at top
+    ALIGN_TOP_RIGHT,     // Top-right corner at (x, y)
+    ALIGN_CENTER_LEFT,   // Left edge at x, centered vertically
+    ALIGN_CENTER,        // Centered at (x, y)
+    ALIGN_CENTER_RIGHT,  // Right edge at x, centered vertically
+    ALIGN_BOTTOM_LEFT,   // Bottom-left corner at (x, y)
+    ALIGN_BOTTOM_CENTER, // Bottom edge centered at x, y at bottom
+    ALIGN_BOTTOM_RIGHT   // Bottom-right corner at (x, y)
+} TextAlign;
+
+void render_text(SDL_Renderer* renderer, const char* text, int x, int y, Uint8 r, Uint8 g, Uint8 b, Uint8 a, int font_size, TextAlign align);

@@ -11,7 +11,10 @@
 // Lane Core Initialization
 //
 
+int lane_id_counter = 0; // Global ID counter for lanes
+
 void lane_init(Lane* lane, const LaneType type, const Direction direction, const Meters width, const MetersPerSecond speed_limit, const double grip, const Degradations degradations) {
+    lane->id = lane_id_counter++;
     lane->type = type;
     lane->direction = direction;
     lane->width = width > 0.0 ? width : 0.0;

@@ -11,6 +11,8 @@ Turn* turn_create_and_set_connections_and_adjacents(StraightRoad* from, Straight
         exit(EXIT_FAILURE);
     }
 
+    turn->base.id = road_id_counter++;
+    snprintf(turn->base.name, sizeof(turn->base.name), "Turn %d", turn->base.id);
     turn->base.type = TURN;
     turn->road_from = from;
     turn->road_to = to;

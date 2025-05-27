@@ -1,5 +1,6 @@
 #include "utils.h"
 #include "render.h"
+#include "logging.h"
 #include <SDL2/SDL2_gfxPrimitives.h>
 #include <math.h>
 #include <stdio.h>
@@ -41,7 +42,7 @@ void render_lane_center_line(SDL_Renderer* renderer, const Lane* lane, const SDL
 }
 
 // Renders a rectangular lane section with optional lane lines and arrows.
-void render_lane_linear(SDL_Renderer* renderer, const LinearLane* lane, const bool paint_lines, const bool paint_arrows) {
+void render_lane_linear(SDL_Renderer* renderer, const LinearLane* lane, const bool paint_lines, const bool paint_arrows, const bool paint_id) {
     int width = WINDOW_SIZE_WIDTH;
     int height = WINDOW_SIZE_HEIGHT;
 
@@ -131,7 +132,7 @@ void render_lane_linear(SDL_Renderer* renderer, const LinearLane* lane, const bo
 
     if (paint_arrows) {
         // Calculate three arrow positions along the lane
-        Coordinates mid = vec_div(vec_add(lane->base.start_point, lane->base.end_point), 2);
+        Coordinates mid = vec_div(vec_add(vec_scale(lane->base.start_point, 45), vec_scale(lane->base.end_point, 55)), 100);
         Coordinates a1 = vec_div(vec_add(vec_scale(lane->base.start_point, 4), lane->base.end_point), 5);
         Coordinates a2 = vec_div(vec_add(lane->base.start_point, vec_scale(lane->base.end_point, 3)), 4);
 
@@ -178,11 +179,23 @@ void render_lane_linear(SDL_Renderer* renderer, const LinearLane* lane, const bo
             trigonRGBA_ignore_if_outside_screen(renderer, vx[0], vy[0], vx[1], vy[1], vx[2], vy[2], color.r, color.g, color.b, 255);
         }
     }
+
+    // Render lane id:
+    if (paint_id) {
+        char id_str[10];
+        snprintf(id_str, sizeof(id_str), "%d", lane->base.id);
+        int font_size = (int)(meters(2.0) * SCALE); // font size = 2 meter
+        SDL_Color text_color = {255, 255, 255, 255}; // white text color
+        SDL_Point lane_center_screen = to_screen_coords(lane->base.center, width, height);
+        int text_x = lane_center_screen.x;
+        int text_y = lane_center_screen.y;
+        render_text(renderer, id_str, text_x, text_y, text_color.r, text_color.g, text_color.b, text_color.a, font_size, ALIGN_CENTER);
+    }
 }
 
 
 // Renders a quarter-arc lane, optionally painting boundary lines and directional arrows.
-void render_lane_quarterarc(SDL_Renderer* renderer, const QuarterArcLane* lane, const bool paint_lines, const bool paint_arrows) {
+void render_lane_quarterarc(SDL_Renderer* renderer, const QuarterArcLane* lane, const bool paint_lines, const bool paint_arrows, const bool paint_id) {
     int width = WINDOW_SIZE_WIDTH;
     int height = WINDOW_SIZE_HEIGHT;
 
@@ -288,7 +301,7 @@ void render_lane_quarterarc(SDL_Renderer* renderer, const QuarterArcLane* lane, 
         SDL_Color arrow_color = {255, 255, 255, 255};
 
         double middle_radius = (r_inner + r_outer) / 2;
-        double angle = lane->start_angle + 0.5 * (lane->end_angle - lane->start_angle);
+        double angle = lane->start_angle + (55 * lane->end_angle - 45 * lane->start_angle) / 100.0; // Middle angle of the arc plus slight offset
 
         // Arrow center on the arc path
         SDL_Point arrow_center = {
@@ -328,44 +341,29 @@ void render_lane_quarterarc(SDL_Renderer* renderer, const QuarterArcLane* lane, 
         trigonRGBA_ignore_if_outside_screen(renderer, vx[0], vy[0], vx[1], vy[1], vx[2], vy[2],
                    arrow_color.r, arrow_color.g, arrow_color.b, 255);
     }
-}
 
-
-void render_lane(SDL_Renderer* renderer, const Lane* lane, const bool paint_lines, const bool paint_arrows) {
-    if (lane->type == LINEAR_LANE) {
-        render_lane_linear(renderer, (LinearLane*)lane, paint_lines, paint_arrows);
-    } else if (lane->type == QUARTER_ARC_LANE) {
-        render_lane_quarterarc(renderer, (QuarterArcLane*)lane, paint_lines, paint_arrows);
-    } else {
-        fprintf(stderr, "Error: Unknown lane type!\n");
+    // Render lane id:
+    if (paint_id) {
+        // Render lane ID at the center of the arc
+        char id_str[10];
+        snprintf(id_str, sizeof(id_str), "%d", lane->base.id);
+        int font_size = (int)(meters(2.0) * SCALE); // font size = 2 meter
+        SDL_Color text_color = {255, 255, 255, 255}; // white text color
+        double middle_radius = (r_inner + r_outer) / 2;
+        double middle_angle = lane->start_angle + (lane->end_angle - lane->start_angle) / 2.0; // Middle angle of the arc
+        int text_x = center_screen.x + (int)(middle_radius * SCALE * cos(middle_angle));
+        int text_y = center_screen.y - (int)(middle_radius * SCALE * sin(middle_angle));
+        render_text(renderer, id_str, text_x, text_y, text_color.r, text_color.g, text_color.b, text_color.a, font_size, ALIGN_CENTER);
     }
 }
 
 
-
-// Renders last few hex digits of a Lane* pointer for debugging
-void render_lane_debug_id(SDL_Renderer* renderer, const Lane* lane, TTF_Font* font) {
-    if (!lane || !font) return;
-
-    char label[8];
-    snprintf(label, sizeof(label), "%03X", ((unsigned int)(uintptr_t)lane) & 0xFFF);
-
-    Coordinates label_pos = lane->center;
-    SDL_Point screen_pos = to_screen_coords(label_pos, WINDOW_SIZE_WIDTH, WINDOW_SIZE_HEIGHT);
-
-    SDL_Color text_color = {255, 0, 0, 255}; // Red
-
-    SDL_Surface* text_surface = TTF_RenderText_Blended(font, label, text_color);
-    if (!text_surface) return;
-
-    SDL_Texture* text_texture = SDL_CreateTextureFromSurface(renderer, text_surface);
-    SDL_FreeSurface(text_surface);
-    if (!text_texture) return;
-
-    SDL_Rect dst_rect = {
-        screen_pos.x - 12, screen_pos.y - 12,
-        text_surface->w, text_surface->h
-    };
-    SDL_RenderCopy(renderer, text_texture, NULL, &dst_rect);
-    SDL_DestroyTexture(text_texture);
+void render_lane(SDL_Renderer* renderer, const Lane* lane, const bool paint_lines, const bool paint_arrows, const bool paint_id) {
+    if (lane->type == LINEAR_LANE) {
+        render_lane_linear(renderer, (LinearLane*)lane, paint_lines, paint_arrows, paint_id);
+    } else if (lane->type == QUARTER_ARC_LANE) {
+        render_lane_quarterarc(renderer, (QuarterArcLane*)lane, paint_lines, paint_arrows, paint_id);
+    } else {
+        LOG_ERROR("Error: Unknown lane type!");
+    }
 }

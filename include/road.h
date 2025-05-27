@@ -31,6 +31,7 @@ typedef enum {
 
 // Lane structure representing a single traffic lane.
 struct Lane {
+    int id;                 // Unique identifier for the lane
     LaneType type;
     Direction direction;
     Meters width;
@@ -60,6 +61,8 @@ struct Lane {
     Coordinates center;
     Meters length;
 };
+
+extern int lane_id_counter; // Global ID counter for lanes
 
 // Initialization
 void lane_init(Lane* self, LaneType type, Direction direction, Meters width, MetersPerSecond speed_limit, double grip, Degradations degradations);
@@ -133,13 +136,17 @@ typedef enum {
 
 // Road Structure
 struct Road {
+    int id;         // Unique identifier for the road
     RoadType type;
+    char name[64];  // Name of the road
     const Lane* lanes[MAX_NUM_LANES];
     int num_lanes; // 0 = leftmost, num_lanes-1 = rightmost
     MetersPerSecond speed_limit;
     double grip;
     Coordinates center;
 };
+
+extern int road_id_counter; // Global ID counter for roads
 
 // Frees the road and all its lanes.
 void road_free(Road* self);

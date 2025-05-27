@@ -19,6 +19,8 @@ StraightRoad* straight_road_create_from_center_dir_len(Coordinates center, Direc
         exit(EXIT_FAILURE);
     }
 
+    road->base.id = road_id_counter++;
+    snprintf(road->base.name, sizeof(road->base.name), "Straight Road %d", road->base.id);
     road->base.type = STRAIGHT;
     road->base.num_lanes = num_lanes;
     road->length = length;

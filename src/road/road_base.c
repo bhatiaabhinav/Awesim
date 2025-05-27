@@ -1,6 +1,8 @@
 #include "road.h"
 #include <stdlib.h>
 
+int road_id_counter = 0; // Global ID counter for roads
+
 void road_free(Road* self) {
     switch (self->type) {
         case STRAIGHT:

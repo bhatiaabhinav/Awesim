@@ -6,7 +6,7 @@
 #include <stdint.h>
 
 void render_sim(SDL_Renderer *renderer, const Simulation *sim, const bool draw_lanes, const bool draw_cars,
-                const bool draw_track_lines, const bool draw_traffic_lights, const bool benchmark)
+                const bool draw_track_lines, const bool draw_traffic_lights, const bool draw_car_ids, const bool draw_lane_ids, const bool benchmark)
 {
     Map *map = sim->map;
 
@@ -34,7 +34,7 @@ void render_sim(SDL_Renderer *renderer, const Simulation *sim, const bool draw_l
             const Road *road = map->roads[i];
             if (road->type == STRAIGHT) {
                 for (int j = 0; j < road->num_lanes; j++) {
-                    render_lane(renderer, road->lanes[j], true, true);
+                    render_lane(renderer, road->lanes[j], true, true, draw_lane_ids);
                 }
             }
         }
@@ -48,7 +48,7 @@ void render_sim(SDL_Renderer *renderer, const Simulation *sim, const bool draw_l
             const Road *road = map->roads[i];
             if (road->type == TURN) {
                 for (int j = 0; j < road->num_lanes; j++) {
-                    render_lane(renderer, road->lanes[j], true, true);
+                    render_lane(renderer, road->lanes[j], true, true, draw_lane_ids);
                 }
             }
         }
@@ -146,7 +146,7 @@ void render_sim(SDL_Renderer *renderer, const Simulation *sim, const bool draw_l
         start = SDL_GetPerformanceCounter();
 
         for (int i = 0; i < sim->num_cars; i++) {
-            render_car(renderer, sim->cars[i]);
+            render_car(renderer, sim->cars[i], draw_car_ids);
         }
 
         end = SDL_GetPerformanceCounter();

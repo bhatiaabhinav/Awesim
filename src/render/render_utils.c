@@ -1,5 +1,7 @@
 #include "render.h"
+#include "logging.h"
 #include <SDL2/SDL2_gfxPrimitives.h>
+#include <SDL2/SDL_ttf.h>
 #include <math.h>
 
 int PAN_X = 0;
@@ -204,3 +206,126 @@ void drawFilledInwardRoundedRect(SDL_Renderer* renderer, int x, int y, int width
     SDL_SetRenderDrawColor(renderer, r, g, b, a); // Restore color
 }
 
+// Font cache for sizes 1 to 32
+#define MAX_FONT_SIZE 128
+static TTF_Font* font_cache[MAX_FONT_SIZE] = {NULL};
+static int fonts_initialized = 0;
+
+// Initialize SDL_ttf and load fonts (call once at program startup)
+int init_text_rendering(const char* font_path) {
+    if (TTF_Init() == -1) {
+        LOG_ERROR("TTF_Init failed: %s", TTF_GetError());
+        return 0;
+    }
+
+    // Load fonts for sizes 1 to 32
+    for (int i = 0; i < MAX_FONT_SIZE; i++) {
+        font_cache[i] = TTF_OpenFont(font_path, i + 1);
+        if (!font_cache[i]) {
+            LOG_ERROR("TTF_OpenFont failed for size %d: %s", i + 1, TTF_GetError());
+            // Clean up any loaded fonts
+            for (int j = 0; j < i; j++) {
+                TTF_CloseFont(font_cache[j]);
+                font_cache[j] = NULL;
+            }
+            TTF_Quit();
+            return 0;
+        }
+    }
+    fonts_initialized = 1;
+    return 1;
+}
+
+// Clean up SDL_ttf and fonts (call at program shutdown)
+void cleanup_text_rendering() {
+    for (int i = 0; i < MAX_FONT_SIZE; i++) {
+        if (font_cache[i]) {
+            TTF_CloseFont(font_cache[i]);
+            font_cache[i] = NULL;
+        }
+    }
+    fonts_initialized = 0;
+    TTF_Quit();
+}
+
+void render_text(SDL_Renderer* renderer, const char* text, int x, int y, Uint8 r, Uint8 g, Uint8 b, Uint8 a, int font_size, TextAlign align) {
+    if (!fonts_initialized || font_size < 1 || font_size > MAX_FONT_SIZE) {
+        LOG_ERROR("Invalid font size %d or fonts not initialized", font_size);
+        return;
+    }
+
+    // Get font from cache (size 1 maps to index 0, size 32 to index 31)
+    TTF_Font* font = font_cache[font_size - 1];
+    if (!font) {
+        LOG_ERROR("Font for size %d not available", font_size);
+        return;
+    }
+
+    // Create text surface
+    SDL_Color color = {r, g, b, a};
+    SDL_Surface* surface = TTF_RenderText_Solid(font, text, color);
+    if (!surface) {
+        LOG_ERROR("TTF_RenderText_Solid failed: %s", TTF_GetError());
+        return;
+    }
+
+    // Create texture from surface
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+    int text_w = surface->w;
+    int text_h = surface->h;
+    SDL_FreeSurface(surface);
+    if (!texture) {
+        LOG_ERROR("SDL_CreateTextureFromSurface failed: %s", SDL_GetError());
+        return;
+    }
+
+    // Adjust position based on alignment
+    int render_x = x;
+    int render_y = y;
+    switch (align) {
+        case ALIGN_TOP_LEFT:
+            // (x, y) is top-left corner (default)
+            break;
+        case ALIGN_TOP_CENTER:
+            render_x = x - text_w / 2; // Center horizontally
+            break;
+        case ALIGN_TOP_RIGHT:
+            render_x = x - text_w; // Right edge at x
+            break;
+        case ALIGN_CENTER_LEFT:
+            render_y = y - text_h / 2; // Center vertically
+            break;
+        case ALIGN_CENTER:
+            render_x = x - text_w / 2; // Center horizontally
+            render_y = y - text_h / 2; // Center vertically
+            break;
+        case ALIGN_CENTER_RIGHT:
+            render_x = x - text_w; // Right edge at x
+            render_y = y - text_h / 2; // Center vertically
+            break;
+        case ALIGN_BOTTOM_LEFT:
+            render_y = y - text_h; // Bottom edge at y
+            break;
+        case ALIGN_BOTTOM_CENTER:
+            render_x = x - text_w / 2; // Center horizontally
+            render_y = y - text_h; // Bottom edge at y
+            break;
+        case ALIGN_BOTTOM_RIGHT:
+            render_x = x - text_w; // Right edge at x
+            render_y = y - text_h; // Bottom edge at y
+            break;
+    }
+
+    // Check if text is outside screen bounds
+    if (render_x < 0 || render_x + text_w >= WINDOW_SIZE_WIDTH || render_y < 0 || render_y + text_h >= WINDOW_SIZE_HEIGHT) {
+        SDL_DestroyTexture(texture);
+        return; // Text is completely outside the screen
+    }
+
+    // Render text
+    SDL_Rect dst = {render_x, render_y, text_w, text_h};
+    SDL_RenderCopy(renderer, texture, NULL, &dst);
+
+    // Clean up
+    SDL_DestroyTexture(texture);
+}

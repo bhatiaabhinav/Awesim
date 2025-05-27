@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <sys/time.h>
 #include <SDL2/SDL_image.h>
+#include <SDL2/SDL_ttf.h>
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -27,7 +28,7 @@ int main(int argc, char* argv[]) {
     // Initialize SDL
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         LOG_ERROR("SDL could not initialize! SDL_Error: %s", SDL_GetError());
-        return -1;
+        return EXIT_FAILURE;
     }
     LOG_DEBUG("SDL initialized successfully.");
     // Create window
@@ -35,12 +36,11 @@ int main(int argc, char* argv[]) {
     if (window == NULL) {
         LOG_ERROR("Window could not be created! SDL_Error: %s", SDL_GetError());
         SDL_Quit();
-        return -1;
+        return EXIT_FAILURE;
     }
     LOG_DEBUG("Window created successfully with size %dx%d.", WINDOW_SIZE_WIDTH, WINDOW_SIZE_HEIGHT);
     // Add icon
-    // SDL_Surface *icon = SDL_LoadBMP("icon.bmp");
-    SDL_Surface* icon = IMG_Load("icon.png");
+    SDL_Surface* icon = IMG_Load("assets/icons/icon.png");
     if (icon == NULL) {
         LOG_ERROR("Unable to load icon: %s", SDL_GetError());
     } else {
@@ -54,7 +54,16 @@ int main(int argc, char* argv[]) {
         LOG_ERROR("Renderer could not be created! SDL_Error: %s", SDL_GetError());
         SDL_DestroyWindow(window);
         SDL_Quit();
-        return -1;
+        return EXIT_FAILURE;
+    }
+    if (!init_text_rendering("assets/fonts/Roboto.ttf")) {
+        LOG_ERROR("Text rendering initialization failed");
+        SDL_DestroyRenderer(renderer);
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return EXIT_FAILURE;
+    } else {
+        LOG_DEBUG("Text rendering initialized successfully.");
     }
 
     LOG_INFO("SDL initialized successfully. Window and renderer created.");
@@ -63,18 +72,32 @@ int main(int argc, char* argv[]) {
     // Main rendering loop
     bool quit = false;
     SDL_Event event;
-    
-    int num_cars = 256;                               // number of cars to simulate
+    Meters city_width = meters(500);                // width of the city in meters    
+    int num_cars = 64;                               // number of cars to simulate
     Seconds dt = 0.02;                              // time resolution for integration.
     Seconds seconds_to_simulate = 1e9;              // total time (in sim) to simulate, after which the program will exit.
-    Simulation* sim = awesim(num_cars, dt);
 
-    double t0 = get_sys_time_seconds();
-    double simulation_speedup = 1;       // we will simulate simultation_speedup seconds per wall-second.
-    double render_fps = 0;              // to measure render FPS
+    Simulation* sim = awesim(city_width, num_cars, dt);
+
+
+    int text_font_size = 20;                // font size for stats rendering
+    double simulation_speedup = 1;          // we will simulate simultation_speedup seconds per wall-second.far.
+    double virtual_time = 0;                // virtual time in seconds
+    double render_fps = 0;                  // to measure render FPS
+
+    double t_prev = get_sys_time_seconds();
     while (!quit) {
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) quit = true;
+            // speed up sim on pressing right button
+            else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_RIGHT) {
+                simulation_speedup += simulation_speedup < 1.0 ? 0.1 : 1.0;
+                LOG_TRACE("Simulation speedup increased to %f", simulation_speedup);
+            } else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_LEFT) {
+                simulation_speedup -= simulation_speedup <= 1.0 ? 0.1 : 1.0;
+                simulation_speedup = fmax(simulation_speedup, 0.0);
+                LOG_TRACE("Simulation speedup decreased to %f", simulation_speedup);
+            }
             else if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT) {
                 mouse_start_x = event.button.x;
                 mouse_start_y = event.button.y;
@@ -90,6 +113,7 @@ int main(int argc, char* argv[]) {
                 PAN_Y -= dy;
                 mouse_start_x = event.motion.x;
                 mouse_start_y = event.motion.y;
+                LOG_TRACE("Mouse dragged. New PAN_X: %d, PAN_Y: %d", PAN_X, PAN_Y);
             }
             else if (event.type == SDL_MOUSEWHEEL && event.wheel.y != 0) {
                 double width = WINDOW_SIZE_WIDTH;
@@ -100,9 +124,10 @@ int main(int argc, char* argv[]) {
                 double x = (mx + PAN_X - width / 2) / SCALE;
                 double y = (my + PAN_Y - height / 2) / SCALE;
                 // find new scale
-                if (event.wheel.y > 0) SCALE *= 1.04f;
-                else SCALE /= 1.04f;
+                if (event.wheel.y > 0) SCALE *= 1.1f;
+                else SCALE /= 1.1f;
                 SCALE = fclamp(SCALE, 1.0f, 50.0f);
+                LOG_TRACE("Mouse wheel scrolled. New scale: %f", SCALE);
                 // Adjust pan to keep the mouse under the same world coordinates
                 PAN_X = (int)(x * SCALE + width / 2 - mx);
                 PAN_Y = (int)(y * SCALE + height / 2 - my);
@@ -134,6 +159,7 @@ int main(int argc, char* argv[]) {
                     double scale_factor = 1.0 + event.mgesture.dDist * sensitivity;
                     SCALE *= scale_factor;
                     SCALE = fclamp(SCALE, 1.0, 50.0);  // Clamp scale between 1x and 50x
+                    LOG_TRACE("Pinch gesture detected. New scale: %f", SCALE);
                     // Update panning to keep the gesture center stable
                     PAN_X = (int)(world_x * SCALE + width / 2 - gesture_x);
                     PAN_Y = (int)(world_y * SCALE + height / 2 - gesture_y);
@@ -141,22 +167,55 @@ int main(int argc, char* argv[]) {
             }
         }
         
+        
         double _t = get_sys_time_seconds();
-        render_sim(renderer, sim, true, true, false, true, false);
-        SDL_RenderPresent(renderer);
-        double render_time = get_sys_time_seconds() - _t; // time taken to render the simulation
-        render_fps = 0.5 * render_fps + 0.5 / render_time; // exponential smoothing
-        printf("render_fps: %f\r", render_fps);
 
-        double wall_time = (get_sys_time_seconds() - t0);
-        double virtual_time = simulation_speedup * wall_time;
-        double delta_t = virtual_time - sim->time;  // the sim is lagging behind by these many virtual seconds
+        // Render simulation
+        bool draw_lanes = true; // Draw lanes
+        bool draw_cars = true; // Draw cars
+        bool draw_track_lines = false; // Draw track lines
+        bool draw_traffic_lights = true; // Draw traffic lights
+        bool draw_car_ids = true; // Draw car IDs
+        bool draw_lane_ids = true; // Draw lane IDs
+        bool benchmark = false; // Benchmark mode
+        render_sim(renderer, sim, draw_lanes, draw_cars, draw_track_lines, draw_traffic_lights, draw_car_ids, draw_lane_ids, benchmark);
+
+        // Render time stats
+        char time_stats[40];
+        ClockReading clock_reading = sim_get_clock_reading(sim); 
+        snprintf(time_stats, sizeof(time_stats), "%s %02d:%02d:%02d  (>> %.1f)", 
+                 day_of_week_strings[clock_reading.day_of_week], 
+                 clock_reading.hours, 
+                 clock_reading.minutes, 
+                 (int)clock_reading.seconds, 
+                 simulation_speedup);
+        render_text(renderer, time_stats, WINDOW_SIZE_WIDTH - 10, 10, 255, 255, 255, 255, text_font_size, ALIGN_TOP_RIGHT); // Render time stats at the  top right corner
+        
+        
+        // Render weather stats just below time stats
+        render_text(renderer, weather_strings[sim->weather], WINDOW_SIZE_WIDTH - 10, 20 + text_font_size, 255, 255, 255, 255, text_font_size, ALIGN_TOP_RIGHT); // Render weather stats at the top right corner below time stats
+
+        // Render FPS stats        
+        char fps_stats[24];
+        snprintf(fps_stats, sizeof(fps_stats), "FPS: %d   (VSync On)", (int)render_fps);
+        render_text(renderer, fps_stats, 10, 10, 255, 255, 255, 255, text_font_size, ALIGN_TOP_LEFT); // Render FPS at the top left corner
+        SDL_RenderPresent(renderer);
+
+        // Update FPS calculation
+        double render_time = get_sys_time_seconds() - _t; // time taken to render the simulation
+        render_fps = 0.9 * render_fps + 0.1 / render_time; // exponential smoothing
+
+        // Simulate:
+        double delta_wall_t = get_sys_time_seconds() - t_prev;
+        virtual_time += delta_wall_t * simulation_speedup;
         if (virtual_time < seconds_to_simulate) {
-            simulate(sim, delta_t);                     // make sim catch up to virtual time. This is will cause delta_t / dt transition updates.
+            simulate(sim, virtual_time - sim->time);                     // make sim catch up to virtual time. This is will cause (virtual_time - sim->time) / dt transition updates.
         }
+        t_prev = get_sys_time_seconds();
     }
     
     sim_deep_free(sim);
+    cleanup_text_rendering();
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();

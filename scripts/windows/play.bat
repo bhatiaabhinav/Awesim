@@ -9,6 +9,7 @@ if not exist bin mkdir bin
 windres scripts/windows/resource.rc -O coff -o scripts/windows/resource.o
 gcc ^
     -Iinclude ^
+    -D_WIN32_WINNT=0x0A00 ^
     src/*.c src/utils/*.c src/road/*.c src/render/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c ^
     scripts/windows/resource.o ^
     -o .\bin\awesim.exe ^

@@ -3,6 +3,6 @@
 #include "sim.h"
 #include <stdio.h>
 
-Map* awesim_map();
+Map* awesim_map(Meters city_width);
 
-Simulation* awesim(int num_cars, Seconds dt);
+Simulation* awesim(Meters city_width, int num_cars, Seconds dt);
