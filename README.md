@@ -1,5 +1,5 @@
 <div style="text-align: center;">
-  <img src="icon.png" alt="icon" width="200" height="200">
+  <img src="assets/icons/icon.png" alt="icon" width="200" height="200">
 </div>
 
 # Awesome 2D AV Simulator
