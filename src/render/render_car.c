@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <stdint.h>
 
-static SDL_Texture* car_id_texture_cache[MAX_CARS_IN_SIMULATION][MAX_FONT_SIZE] = {{NULL}};
+SDL_Texture* car_id_texture_cache[MAX_CARS_IN_SIMULATION][MAX_FONT_SIZE] = {{NULL}};
 
 typedef struct {
     Coordinates position;

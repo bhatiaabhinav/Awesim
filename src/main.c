@@ -126,7 +126,7 @@ int main(int argc, char* argv[]) {
                 // find new scale
                 if (event.wheel.y > 0) SCALE *= 1.1f;
                 else SCALE /= 1.1f;
-                SCALE = fclamp(SCALE, 1.0f, 50.0f);
+                SCALE = fclamp(SCALE, 1.0f, 32.0f);
                 LOG_TRACE("Mouse wheel scrolled. New scale: %f", SCALE);
                 // Adjust pan to keep the mouse under the same world coordinates
                 PAN_X = (int)(x * SCALE + width / 2 - mx);
@@ -158,7 +158,7 @@ int main(int argc, char* argv[]) {
                     double sensitivity = 2.0;  // Adjusted lower for finesse
                     double scale_factor = 1.0 + event.mgesture.dDist * sensitivity;
                     SCALE *= scale_factor;
-                    SCALE = fclamp(SCALE, 1.0, 50.0);  // Clamp scale between 1x and 50x
+                    SCALE = fclamp(SCALE, 1.0, 32.0);  // Clamp scale between 1x and 32x
                     LOG_TRACE("Pinch gesture detected. New scale: %f", SCALE);
                     // Update panning to keep the gesture center stable
                     PAN_X = (int)(world_x * SCALE + width / 2 - gesture_x);
@@ -220,6 +220,8 @@ int main(int argc, char* argv[]) {
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();
+
+    LOG_INFO("SDL cleaned up successfully. Exiting program.");
     
     return 0;
 }

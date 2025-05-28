@@ -243,38 +243,42 @@ void cleanup_text_rendering() {
         }
     }
     fonts_initialized = 0;
-    // for (int i = 0; i < MAX_NUM_ROADS; i++) {
-    //     for (int j = 0; j < MAX_FONT_SIZE; j++) {
-    //         if (road_name_texture_cache[i][j]) {
-    //             SDL_DestroyTexture(road_name_texture_cache[i][j]);
-    //             road_name_texture_cache[i][j] = NULL;
-    //         }
-    //     }
-    // }
-    // for (int i = 0; i < MAX_NUM_ROADS * MAX_NUM_LANES; i++) {
-    //     for (int j = 0; j < MAX_FONT_SIZE; j++) {
-    //         if (lane_id_texture_cache[i][j]) {
-    //             SDL_DestroyTexture(lane_id_texture_cache[i][j]);
-    //             lane_id_texture_cache[i][j] = NULL;
-    //         }
-    //     }
-    // }
-    // for (int i = 0; i < MAX_CARS_IN_SIMULATION; i++) {
-    //     for (int j = 0; j < MAX_FONT_SIZE; j++) {
-    //         if (car_id_texture_cache[i][j]) {
-    //             SDL_DestroyTexture(car_id_texture_cache[i][j]);
-    //             car_id_texture_cache[i][j] = NULL;
-    //         }
-    //     }
-    // }
+    for (int i = 0; i < MAX_NUM_ROADS; i++) {
+        for (int j = 0; j < MAX_FONT_SIZE; j++) {
+            if (road_name_texture_cache[i][j]) {
+                SDL_DestroyTexture(road_name_texture_cache[i][j]);
+                road_name_texture_cache[i][j] = NULL;
+            }
+        }
+    }
+    for (int i = 0; i < MAX_NUM_ROADS * MAX_NUM_LANES; i++) {
+        for (int j = 0; j < MAX_FONT_SIZE; j++) {
+            if (lane_id_texture_cache[i][j]) {
+                SDL_DestroyTexture(lane_id_texture_cache[i][j]);
+                lane_id_texture_cache[i][j] = NULL;
+            }
+        }
+    }
+    for (int i = 0; i < MAX_CARS_IN_SIMULATION; i++) {
+        for (int j = 0; j < MAX_FONT_SIZE; j++) {
+            if (car_id_texture_cache[i][j]) {
+                SDL_DestroyTexture(car_id_texture_cache[i][j]);
+                car_id_texture_cache[i][j] = NULL;
+            }
+        }
+    }
     TTF_Quit();
 }
 
 
 void render_text(SDL_Renderer* renderer, const char* text, int x, int y, Uint8 r, Uint8 g, Uint8 b, Uint8 a, int font_size, TextAlign align, bool rotated, SDL_Texture** cache) {
-    if (!fonts_initialized || font_size < 1 || font_size > MAX_FONT_SIZE) {
-        LOG_ERROR("Invalid font size %d or fonts not initialized", font_size);
-        // return;
+    if (!fonts_initialized) {
+        LOG_ERROR("Fonts not initialized", font_size);
+        return;
+    }
+
+    if (font_size < 1 || font_size > MAX_FONT_SIZE) {
+        LOG_WARN("Invalid font size %d", font_size);
         font_size = fclamp(font_size, 1, MAX_FONT_SIZE);
     }
 

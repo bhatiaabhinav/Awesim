@@ -31,7 +31,11 @@ extern int PAN_Y;
 #define YELLOW_LIGHT_COLOR (SDL_Color){255, 255, 0, 255}  // yellow
 #define FOUR_WAY_STOP_COLOR (SDL_Color){255, 0, 0, 100}  // maroon
 #define ARC_NUM_POINTS 10   // Number of points to approximate quarter arcs
-#define MAX_FONT_SIZE 192
+#define MAX_FONT_SIZE 128
+
+extern SDL_Texture* road_name_texture_cache[MAX_NUM_ROADS][MAX_FONT_SIZE];
+extern SDL_Texture* lane_id_texture_cache[MAX_NUM_ROADS * MAX_NUM_LANES][MAX_FONT_SIZE];
+extern SDL_Texture* car_id_texture_cache[MAX_CARS_IN_SIMULATION][MAX_FONT_SIZE];
 
 // Converts world coordinates to screen coordinates relative to screen center.
 SDL_Point to_screen_coords(const Coordinates point, const int width, const int height);

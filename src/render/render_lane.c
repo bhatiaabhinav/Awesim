@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <stdint.h>
 
-static SDL_Texture* lane_id_texture_cache[MAX_NUM_ROADS * MAX_NUM_LANES][MAX_FONT_SIZE] = {{NULL}};
+SDL_Texture* lane_id_texture_cache[MAX_NUM_ROADS * MAX_NUM_LANES][MAX_FONT_SIZE] = {{NULL}};
 
 // Render a solid center line for the lane based on type.
 void render_lane_center_line(SDL_Renderer* renderer, const Lane* lane, const SDL_Color color) {
