@@ -31,7 +31,7 @@ extern int PAN_Y;
 #define YELLOW_LIGHT_COLOR (SDL_Color){255, 255, 0, 255}  // yellow
 #define FOUR_WAY_STOP_COLOR (SDL_Color){255, 0, 0, 100}  // maroon
 #define ARC_NUM_POINTS 10   // Number of points to approximate quarter arcs
-#define MAX_FONT_SIZE 128
+#define MAX_FONT_SIZE 192
 
 // Converts world coordinates to screen coordinates relative to screen center.
 SDL_Point to_screen_coords(const Coordinates point, const int width, const int height);
