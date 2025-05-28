@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <stdint.h>
 
+static SDL_Texture* car_id_texture_cache[MAX_CARS_IN_SIMULATION][MAX_FONT_SIZE] = {{NULL}};
+
 typedef struct {
     Coordinates position;
     double angle;
@@ -304,6 +306,6 @@ void render_car(SDL_Renderer* renderer, const Car* car, const bool paint_id) {
         SDL_Point car_center_screen = to_screen_coords(pose.position, screen_width, screen_height);
         int text_x = car_center_screen.x;
         int text_y = car_center_screen.y;
-        render_text(renderer, id_str, text_x, text_y, 255, 255, 255, 255, font_size, ALIGN_CENTER, false);
+        render_text(renderer, id_str, text_x, text_y, 255, 255, 255, 255, font_size, ALIGN_CENTER, false, car_id_texture_cache[car->id]);
     }
 }

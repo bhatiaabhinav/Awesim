@@ -31,6 +31,7 @@ extern int PAN_Y;
 #define YELLOW_LIGHT_COLOR (SDL_Color){255, 255, 0, 255}  // yellow
 #define FOUR_WAY_STOP_COLOR (SDL_Color){255, 0, 0, 100}  // maroon
 #define ARC_NUM_POINTS 10   // Number of points to approximate quarter arcs
+#define MAX_FONT_SIZE 128
 
 // Converts world coordinates to screen coordinates relative to screen center.
 SDL_Point to_screen_coords(const Coordinates point, const int width, const int height);
@@ -100,7 +101,7 @@ typedef enum {
 } TextAlign;
 
 
-void render_text(SDL_Renderer* renderer, const char* text, int x, int y, Uint8 r, Uint8 g, Uint8 b, Uint8 a, int font_size, TextAlign align, bool rotated);
+void render_text(SDL_Renderer* renderer, const char* text, int x, int y, Uint8 r, Uint8 g, Uint8 b, Uint8 a, int font_size, TextAlign align, bool rotated, SDL_Texture** cache);
 
 void render_straight_road_name(SDL_Renderer* renderer, const StraightRoad* road);
 void render_intersection_name(SDL_Renderer* renderer, const Intersection* intersection);

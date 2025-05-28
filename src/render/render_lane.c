@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <stdint.h>
 
+static SDL_Texture* lane_id_texture_cache[MAX_NUM_ROADS * MAX_NUM_LANES][MAX_FONT_SIZE] = {{NULL}};
+
 // Render a solid center line for the lane based on type.
 void render_lane_center_line(SDL_Renderer* renderer, const Lane* lane, const SDL_Color color) {
     int width = WINDOW_SIZE_WIDTH;
@@ -190,7 +192,7 @@ void render_lane_linear(SDL_Renderer* renderer, const LinearLane* lane, const bo
         int text_x = lane_center_screen.x;
         int text_y = lane_center_screen.y;
         bool rotated = (lane->base.direction == DIRECTION_NORTH || lane->base.direction == DIRECTION_SOUTH);
-        render_text(renderer, id_str, text_x, text_y, text_color.r, text_color.g, text_color.b, text_color.a, font_size, ALIGN_CENTER, rotated);
+        render_text(renderer, id_str, text_x, text_y, text_color.r, text_color.g, text_color.b, text_color.a, font_size, ALIGN_CENTER, rotated, lane_id_texture_cache[lane->base.road->id]);
     }
 }
 
@@ -354,7 +356,7 @@ void render_lane_quarterarc(SDL_Renderer* renderer, const QuarterArcLane* lane, 
         double middle_angle = lane->start_angle + (lane->end_angle - lane->start_angle) / 2.0; // Middle angle of the arc
         int text_x = center_screen.x + (int)(middle_radius * SCALE * cos(middle_angle));
         int text_y = center_screen.y - (int)(middle_radius * SCALE * sin(middle_angle));
-        render_text(renderer, id_str, text_x, text_y, text_color.r, text_color.g, text_color.b, text_color.a, font_size, ALIGN_CENTER, false);
+        render_text(renderer, id_str, text_x, text_y, text_color.r, text_color.g, text_color.b, text_color.a, font_size, ALIGN_CENTER, false, lane_id_texture_cache[lane->base.road->id]);
     }
 }
 

@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <stdint.h>
 
+SDL_Texture* road_name_texture_cache[MAX_NUM_ROADS][MAX_FONT_SIZE] = {{NULL}};
+
 
 void render_straight_road_name(SDL_Renderer* renderer, const StraightRoad* road) {
     if (!road) {
@@ -42,7 +44,7 @@ void render_straight_road_name(SDL_Renderer* renderer, const StraightRoad* road)
     }
 
     bool rotated = (direction == DIRECTION_NORTH || direction == DIRECTION_SOUTH);
-    render_text(renderer, name, text_x, text_y, 255, 255, 255, 255, font_size, align, rotated);
+    render_text(renderer, name, text_x, text_y, 255, 255, 255, 255, font_size, align, rotated, road_name_texture_cache[road->base.id]);
 }
 
 
@@ -58,5 +60,5 @@ void render_intersection_name(SDL_Renderer* renderer, const Intersection* inters
     int text_y = center_screen.y;
     int font_size = (int)(meters(3) * SCALE);
     TextAlign align = ALIGN_CENTER;
-    render_text(renderer, name, text_x, text_y, 255, 255, 255, 255, font_size, align, false);
+    render_text(renderer, name, text_x, text_y, 255, 255, 255, 255, font_size, align, false, road_name_texture_cache[intersection->base.id]);
 }

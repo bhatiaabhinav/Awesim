@@ -206,8 +206,6 @@ void drawFilledInwardRoundedRect(SDL_Renderer* renderer, int x, int y, int width
     SDL_SetRenderDrawColor(renderer, r, g, b, a); // Restore color
 }
 
-// Font cache for sizes 1 to 32
-#define MAX_FONT_SIZE 128
 static TTF_Font* font_cache[MAX_FONT_SIZE] = {NULL};
 static int fonts_initialized = 0;
 
@@ -245,39 +243,75 @@ void cleanup_text_rendering() {
         }
     }
     fonts_initialized = 0;
+    // for (int i = 0; i < MAX_NUM_ROADS; i++) {
+    //     for (int j = 0; j < MAX_FONT_SIZE; j++) {
+    //         if (road_name_texture_cache[i][j]) {
+    //             SDL_DestroyTexture(road_name_texture_cache[i][j]);
+    //             road_name_texture_cache[i][j] = NULL;
+    //         }
+    //     }
+    // }
+    // for (int i = 0; i < MAX_NUM_ROADS * MAX_NUM_LANES; i++) {
+    //     for (int j = 0; j < MAX_FONT_SIZE; j++) {
+    //         if (lane_id_texture_cache[i][j]) {
+    //             SDL_DestroyTexture(lane_id_texture_cache[i][j]);
+    //             lane_id_texture_cache[i][j] = NULL;
+    //         }
+    //     }
+    // }
+    // for (int i = 0; i < MAX_CARS_IN_SIMULATION; i++) {
+    //     for (int j = 0; j < MAX_FONT_SIZE; j++) {
+    //         if (car_id_texture_cache[i][j]) {
+    //             SDL_DestroyTexture(car_id_texture_cache[i][j]);
+    //             car_id_texture_cache[i][j] = NULL;
+    //         }
+    //     }
+    // }
     TTF_Quit();
 }
 
 
-void render_text(SDL_Renderer* renderer, const char* text, int x, int y, Uint8 r, Uint8 g, Uint8 b, Uint8 a, int font_size, TextAlign align, bool rotated) {
+void render_text(SDL_Renderer* renderer, const char* text, int x, int y, Uint8 r, Uint8 g, Uint8 b, Uint8 a, int font_size, TextAlign align, bool rotated, SDL_Texture** cache) {
     if (!fonts_initialized || font_size < 1 || font_size > MAX_FONT_SIZE) {
         LOG_ERROR("Invalid font size %d or fonts not initialized", font_size);
-        return;
+        // return;
+        font_size = fclamp(font_size, 1, MAX_FONT_SIZE);
     }
 
-    // Get font from cache (size 1 maps to index 0, size 32 to index 31)
-    TTF_Font* font = font_cache[font_size - 1];
-    if (!font) {
-        LOG_ERROR("Font for size %d not available", font_size);
-        return;
-    }
-
-    // Create text surface
-    SDL_Color color = {r, g, b, a};
-    SDL_Surface* surface = TTF_RenderText_Solid(font, text, color);
-    if (!surface) {
-        LOG_ERROR("TTF_RenderText_Solid failed: %s", TTF_GetError());
-        return;
-    }
-
-    // Create texture from surface
-    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
-    int text_w = surface->w;
-    int text_h = surface->h;
-    SDL_FreeSurface(surface);
+    // cache = NULL;
+    SDL_Texture* texture = cache ? cache[font_size - 1] : NULL;
+    // SDL_Texture* texture = NULL;
+    int text_w;
+    int text_h;
     if (!texture) {
-        LOG_ERROR("SDL_CreateTextureFromSurface failed: %s", SDL_GetError());
-        return;
+        // Get font from cache (size 1 maps to index 0, size 32 to index 31)
+        TTF_Font* font = font_cache[font_size - 1];
+        if (!font) {
+            LOG_ERROR("Font for size %d not available", font_size);
+            return;
+        }
+
+        // Create text surface
+        SDL_Color color = {r, g, b, a};
+        SDL_Surface* surface = TTF_RenderText_Solid(font, text, color);
+        if (!surface) {
+            LOG_ERROR("TTF_RenderText_Solid failed: %s", TTF_GetError());
+            return;
+        }
+
+        // Create texture from surface
+        texture = SDL_CreateTextureFromSurface(renderer, surface);
+        SDL_FreeSurface(surface);
+        if (!texture) {
+            LOG_ERROR("SDL_CreateTextureFromSurface failed: %s", SDL_GetError());
+            return;
+        }
+        if (cache) cache[font_size - 1] = texture; // Cache the texture for future use
+    }
+
+    SDL_QueryTexture(texture, NULL, NULL, &text_w, &text_h);
+    if (cache && cache[font_size - 1]) {
+        LOG_TRACE("Using cached texture for font size %d. Obtained dimensions: %dx%d", font_size, text_w, text_h);
     }
 
     // Adjust dimensions for rotation (90 degrees anticlockwise swaps width and height)
@@ -327,7 +361,7 @@ void render_text(SDL_Renderer* renderer, const char* text, int x, int y, Uint8 r
 
     // Check if text is outside screen bounds
     if (render_x < 0 || render_x + render_w >= WINDOW_SIZE_WIDTH || render_y < 0 || render_y + render_h >= WINDOW_SIZE_HEIGHT) {
-        SDL_DestroyTexture(texture);
+        if (!cache) SDL_DestroyTexture(texture);
         return; // Text is completely outside the screen
     }
 
@@ -342,5 +376,5 @@ void render_text(SDL_Renderer* renderer, const char* text, int x, int y, Uint8 r
     }
 
     // Clean up
-    SDL_DestroyTexture(texture);
+    if (!cache) SDL_DestroyTexture(texture);
 }
