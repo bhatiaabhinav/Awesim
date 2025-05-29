@@ -91,10 +91,10 @@ int main(int argc, char* argv[]) {
             if (event.type == SDL_QUIT) quit = true;
             // speed up sim on pressing right button
             else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_RIGHT) {
-                simulation_speedup += simulation_speedup < 1.0 ? 0.1 : 1.0;
+                simulation_speedup += simulation_speedup < 0.99 ? 0.1 : 1.0;
                 LOG_TRACE("Simulation speedup increased to %f", simulation_speedup);
             } else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_LEFT) {
-                simulation_speedup -= simulation_speedup <= 1.0 ? 0.1 : 1.0;
+                simulation_speedup -= simulation_speedup < 1.01 ? 0.1 : 1.0;
                 simulation_speedup = fmax(simulation_speedup, 0.0);
                 LOG_TRACE("Simulation speedup decreased to %f", simulation_speedup);
             }
@@ -184,7 +184,7 @@ int main(int argc, char* argv[]) {
         // Render time stats
         char time_stats[40];
         ClockReading clock_reading = sim_get_clock_reading(sim); 
-        snprintf(time_stats, sizeof(time_stats), "%s %02d:%02d:%02d  (>> %.1f)", 
+        snprintf(time_stats, sizeof(time_stats), "%s %02d:%02d:%02d  (>> %.1fx)", 
                  day_of_week_strings[clock_reading.day_of_week], 
                  clock_reading.hours, 
                  clock_reading.minutes, 
