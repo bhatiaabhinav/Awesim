@@ -64,7 +64,7 @@ void render_sim(SDL_Renderer *renderer, const Simulation *sim, const bool draw_l
         for (int i = 0; i < map->num_roads; i++) {
             const Road *road = map->roads[i];
             for (int j = 0; j < road->num_lanes; j++) {
-                render_lane_center_line(renderer, road->lanes[j], LANE_CENTER_LINE_COLOR);
+                render_lane_center_line(renderer, road->lanes[j], LANE_CENTER_LINE_COLOR, false);
             }
         }
 
@@ -73,7 +73,7 @@ void render_sim(SDL_Renderer *renderer, const Simulation *sim, const bool draw_l
             for (int i = 0; i < map->num_intersections; i++) {
                 const Intersection *intersection = map->intersections[i];
                 for (int j = 0; j < intersection->base.num_lanes; j++) {
-                    render_lane_center_line(renderer, intersection->base.lanes[j], LANE_CENTER_LINE_COLOR);
+                    render_lane_center_line(renderer, intersection->base.lanes[j], LANE_CENTER_LINE_COLOR, false);
                 }
             }
         }
@@ -105,37 +105,65 @@ void render_sim(SDL_Renderer *renderer, const Simulation *sim, const bool draw_l
                 bool is_turn = lane->type == QUARTER_ARC_LANE;
                 bool next_is_hori = next_dir == DIRECTION_EAST || next_dir == DIRECTION_WEST;
                 bool is_NS = is_vert || (is_turn && next_is_hori);
+                bool free_right = true;
 
                 SDL_Color light_color = RED_LIGHT_COLOR;
+                bool yield = false;
 
                 switch (state) {
+                    case FOUR_WAY_STOP:
+                        light_color = FOUR_WAY_STOP_COLOR;
+                        break;
                     case NS_GREEN_EW_RED:
-                        light_color = is_NS ? GREEN_LIGHT_COLOR : RED_LIGHT_COLOR;
+                        if (is_NS) {
+                            light_color = GREEN_LIGHT_COLOR;
+                            yield = dir == DIRECTION_CCW;                   // Left turns yield
+                        } else {
+                            light_color = RED_LIGHT_COLOR;
+                            yield = free_right && dir == DIRECTION_CW;      // Right turns yield
+                        }
                         break;
                     case NS_YELLOW_EW_RED:
-                        light_color = is_NS ? YELLOW_LIGHT_COLOR : RED_LIGHT_COLOR;
+                        if (is_NS) {
+                            light_color = YELLOW_LIGHT_COLOR;
+                            yield = dir == DIRECTION_CCW;                   // Left turns yield
+                        } else {
+                            light_color = RED_LIGHT_COLOR;
+                            yield = free_right && dir == DIRECTION_CW;      // Right turns yield
+                        }
+                        break;
+                    case ALL_RED_BEFORE_EW_GREEN:
+                        light_color = RED_LIGHT_COLOR;
+                        yield = free_right && dir == DIRECTION_CW;          // Right turns yield
                         break;
                     case NS_RED_EW_GREEN:
-                        light_color = is_NS ? RED_LIGHT_COLOR : GREEN_LIGHT_COLOR;
+                        if (is_NS) {
+                            light_color = RED_LIGHT_COLOR;
+                            yield = free_right && dir == DIRECTION_CW;      // Right turns yield
+                        } else {
+                            light_color = GREEN_LIGHT_COLOR;
+                            yield = dir == DIRECTION_CCW;                   // Left turns yield
+                        }
                         break;
                     case EW_YELLOW_NS_RED:
-                        light_color = is_NS ? RED_LIGHT_COLOR : YELLOW_LIGHT_COLOR;
+                        if (is_NS) {
+                            light_color = RED_LIGHT_COLOR;
+                            yield = free_right && dir == DIRECTION_CW;      // Right turns yield
+                        } else {
+                            light_color = YELLOW_LIGHT_COLOR;
+                            yield = dir == DIRECTION_CCW;                   // Left turns yield
+                        }
                         break;
-                    case FOUR_WAY_STOP:
-                        printf("4-way!\n");
-                        light_color = FOUR_WAY_STOP_COLOR;
+                    case ALL_RED_BEFORE_NS_GREEN:
+                        light_color = RED_LIGHT_COLOR;
+                        yield = free_right && dir == DIRECTION_CW;          // Right turns yield
                         break;
                     default:
                         light_color = RED_LIGHT_COLOR;
                         break;
                 }
 
-                // Special case: allow right turns on red
-                if (dir == DIRECTION_CW) {
-                    light_color = GREEN_LIGHT_COLOR;
-                }
-
-                render_lane_center_line(renderer, lane, light_color);
+                render_lane_center_line(renderer, lane, light_color, yield);
             }
         }
 

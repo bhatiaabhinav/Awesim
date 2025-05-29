@@ -9,7 +9,7 @@
 SDL_Texture* lane_id_texture_cache[MAX_NUM_ROADS * MAX_NUM_LANES][MAX_FONT_SIZE] = {{NULL}};
 
 // Render a solid center line for the lane based on type.
-void render_lane_center_line(SDL_Renderer* renderer, const Lane* lane, const SDL_Color color) {
+void render_lane_center_line(SDL_Renderer* renderer, const Lane* lane, const SDL_Color color, bool dotted) {
     int width = WINDOW_SIZE_WIDTH;
     int height = WINDOW_SIZE_HEIGHT;
     int thickness = (int)(LANE_CENTER_LINE_THICKNESS * SCALE);
@@ -24,8 +24,11 @@ void render_lane_center_line(SDL_Renderer* renderer, const Lane* lane, const SDL
         QuarterArcLane* arc_lane = (QuarterArcLane*)lane;
         SDL_Point center = to_screen_coords(lane->center, width, height);
 
-        double step = (arc_lane->end_angle - arc_lane->start_angle) / ARC_NUM_POINTS;
-        for (int i = 0; i < ARC_NUM_POINTS; i++) {
+        int arc_num_points = dotted ? ARC_NUM_POINTS * 2 : ARC_NUM_POINTS;  // Double points for dotted lines since we skip every second point
+
+        double step = (arc_lane->end_angle - arc_lane->start_angle) / arc_num_points;
+        for (int i = 0; i < arc_num_points; i++) {
+            if (dotted && i % 2 == 0) continue; // Skip every second point for thicker lines
             double theta1 = arc_lane->start_angle + i * step;
             double theta2 = arc_lane->start_angle + (i + 1) * step;
 

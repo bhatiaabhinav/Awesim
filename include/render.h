@@ -26,10 +26,10 @@ extern int PAN_Y;
 #define CAR_COLOR (SDL_Color){74, 103, 65, 255}         // Olive greenish color
 #define BACKGROUND_COLOR (SDL_Color){0, 0, 0, 255}  // black
 #define LANE_CENTER_LINE_COLOR (SDL_Color){100, 100, 255, 255}  // blue
-#define RED_LIGHT_COLOR (SDL_Color){255, 0, 0, 255}  // red
-#define GREEN_LIGHT_COLOR (SDL_Color){0, 255, 0, 255}  // green
-#define YELLOW_LIGHT_COLOR (SDL_Color){255, 255, 0, 255}  // yellow
-#define FOUR_WAY_STOP_COLOR (SDL_Color){255, 0, 0, 100}  // maroon
+#define RED_LIGHT_COLOR (SDL_Color){200, 30, 30, 255}       // Soft red
+#define GREEN_LIGHT_COLOR (SDL_Color){50, 200, 50, 255}     // Soft green
+#define YELLOW_LIGHT_COLOR (SDL_Color){220, 180, 20, 255}   // Warm, soft yellow
+#define FOUR_WAY_STOP_COLOR (SDL_Color){200, 30, 30, 64}    // Soft red with transparency
 #define ARC_NUM_POINTS 10   // Number of points to approximate quarter arcs
 #define MAX_FONT_SIZE 128
 
@@ -41,7 +41,7 @@ extern SDL_Texture* car_id_texture_cache[MAX_CARS_IN_SIMULATION][MAX_FONT_SIZE];
 SDL_Point to_screen_coords(const Coordinates point, const int width, const int height);
 
 // Draws a lane's center line based on its geometry.
-void render_lane_center_line(SDL_Renderer* renderer, const Lane* lane, const SDL_Color color);
+void render_lane_center_line(SDL_Renderer* renderer, const Lane* lane, const SDL_Color color, bool dotted);
 
 // Renders a linear lane, optionally painting lane lines and arrows.
 void render_lane_linear(SDL_Renderer* renderer, const LinearLane* lane, const bool paint_lines, const bool paint_arrows, const bool paint_id);
