@@ -29,9 +29,7 @@ typedef enum {
     SUNDAY
 } DayOfWeek;
 
-static const char* day_of_week_strings[] = {
-    "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"
-};
+extern const char* day_of_week_strings[];
 
 // Structure for time representation as DD:HH:MM:SS 
 typedef struct {
@@ -66,9 +64,7 @@ typedef enum {
     WEATHER_SNOWY
 } Weather;
 
-static const char* weather_strings[] = {
-    "Sunny", "Cloudy", "Rainy", "Foggy", "Snowy"
-};
+extern const char* weather_strings[];
 
 // Main simulation structure
 typedef struct Simulation {
@@ -111,7 +107,6 @@ bool sim_is_evening(Simulation* self);
 bool sim_is_night(Simulation* self);
 
 // --- Utility ---
-bool sim_car_exists(const Simulation* self, int id);
 
 // Returns sunlight intensity (0–1) based on time of day
 double sunlight_intensity(Simulation* self);

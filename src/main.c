@@ -16,8 +16,8 @@ double get_sys_time_seconds() {
     return (double)((long long)tv.tv_sec * 1000000LL + (long long)tv.tv_usec) / 1000000.0; // Convert milliseconds to seconds
 }
 
-int mouse_start_x, mouse_start_y;
-bool dragging = false;
+static int mouse_start_x, mouse_start_y;
+static bool dragging = false;
 
 int main(int argc, char* argv[]) {
 

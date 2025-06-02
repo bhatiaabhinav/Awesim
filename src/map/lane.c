@@ -7,6 +7,7 @@
 #include <math.h>
 #include <stdlib.h>
 
+const Degradations DEGRADATIONS_ZERO = {0};
 
 //
 // Lane Setters

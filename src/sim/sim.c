@@ -7,6 +7,9 @@
 #include <math.h>
 
 
+const char* day_of_week_strings[] = { "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday" };
+const char* weather_strings[] = { "Sunny", "Cloudy", "Rainy", "Foggy", "Snowy" };
+
 // --- Clock Utility Functions ---
 
 ClockReading clock_reading(const Days days, const Hours hours, const Minutes minutes, const Seconds seconds) {

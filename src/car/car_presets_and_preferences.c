@@ -34,6 +34,15 @@ CarPersonality preferences_sample_random(void) {
 }
 
 
+// acceleration profile capability of various types of vehicles:
+
+const CarAccelProfile CAR_ACC_PROFILE_SPORTS_CAR     = {9.0, 3.0, 12.0};  // Sports car (≈ 0–60 mph in ~3.0s)
+const CarAccelProfile CAR_ACC_PROFILE_ELECTRIC_SEDAN = {6.5, 5.0, 11.0};  // Electric sedan (≈ 0–60 mph in ~4.1s)
+const CarAccelProfile CAR_ACC_PROFILE_GAS_SEDAN      = {4.5, 2.0, 11.0};   // Gas sedan (≈ 0–60 mph in ~6.0s)
+const CarAccelProfile CAR_ACC_PROFILE_SUV            = {4.0, 2.0, 10.0};   // SUV/crossover (≈ 0–60 mph in ~6.7s)
+const CarAccelProfile CAR_ACC_PROFILE_TRUCK          = {3.0, 1.5, 9.0};   // Pickup truck (≈ 0–60 mph in ~8.9s)
+const CarAccelProfile CAR_ACC_PROFILE_HEAVY_TRUCK    = {1.8, 1.0, 8.0};   // Heavy-duty truck (≈ 0–60 mph in ~14.9s)
+
 CarAccelProfile car_accel_profile_get_random_preset(void) {
     const CarAccelProfile presets[] = {
         CAR_ACC_PROFILE_SPORTS_CAR,
@@ -48,6 +57,15 @@ CarAccelProfile car_accel_profile_get_random_preset(void) {
     return presets[rand() % count];
 }
 
+
+// preferred acceleration profile presets:
+
+const CarAccelProfile CAR_ACC_PREF_COMFORT    = {2.5, 1.0, 9.0};   // Comfort: soft accel & braking (≈ 0–60 mph in ~10.7s)
+const CarAccelProfile CAR_ACC_PREF_ECO        = {3.0, 1.5, 10.0};   // Eco: efficiency-focused (≈ 0–60 mph in ~8.9s)
+const CarAccelProfile CAR_ACC_PREF_NORMAL     = {4.0, 2.0, 11.0};   // Normal: balanced everyday driving (≈ 0–60 mph in ~6.7s)
+const CarAccelProfile CAR_ACC_PREF_SPORT      = {6.0, 3.0, 11.0};  // Sport: responsive feel (≈ 0–60 mph in ~4.5s)
+const CarAccelProfile CAR_ACC_PREF_AGGRESSIVE = {9.0, 4.0, 12.0};  // Aggressive: max driver intent (≈ 0–60 mph in ~3.0s)
+
 CarAccelProfile car_accel_profile_get_random_preference_preset(void) {
     const CarAccelProfile prefs[] = {
         CAR_ACC_PREF_COMFORT,
@@ -59,6 +77,18 @@ CarAccelProfile car_accel_profile_get_random_preference_preset(void) {
     size_t count = sizeof(prefs) / sizeof(prefs[0]);
     return prefs[rand() % count];
 }
+
+
+// Dimensions of various types of cars:
+
+const Dimensions CAR_SIZE_COMPACT       = {1.707, 4.267};   // Compact car (e.g., Honda Civic, 5.6 ft wide, 14 ft long)
+const Dimensions CAR_SIZE_TYPICAL       = {1.770, 4.480};   // Typical car (e.g., midsize sedan, 5.8 ft wide, 14.7 ft long)
+const Dimensions CAR_SIZE_MIDSIZE       = {1.829, 4.785};   // Midsize sedan (e.g., Toyota Camry, 6.0 ft wide, 15.7 ft long)
+const Dimensions CAR_SIZE_COMPACT_SUV   = {1.829, 4.877};   // Compact SUV (e.g., Honda CR-V, 6.0 ft wide, 16 ft long)
+const Dimensions CAR_SIZE_LARGE_SUV     = {1.981, 5.334};   // Large SUV (e.g., Chevrolet Traverse, 6.5 ft wide, 17.5 ft long)
+const Dimensions CAR_SIZE_FULLSIZE      = {1.829, 5.486};   // Full-size car (e.g., Dodge Charger, 6.0 ft wide, 18 ft long)
+const Dimensions CAR_SIZE_PICKUP        = {2.134, 5.608};   // Full-size pickup (e.g., Ford F-150, 7.0 ft wide, 18.4 ft long)
+const Dimensions CAR_SIZE_BUS           = {2.438, 12.000};  // Full-size bus (e.g., 40 ft transit bus, 8.0 ft wide, 40 ft long)
 
 Dimensions car_dimensions_get_random_preset(void) {
     const Dimensions dims[] = { // TODO: once you find a way to make the roads longer, consider allowing BUS sized cars.

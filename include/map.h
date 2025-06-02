@@ -30,7 +30,7 @@ typedef struct {
     double values[LANE_DEGRADATIONS_BUCKETS];
 } Degradations;
 
-static const Degradations DEGRADATIONS_ZERO = {0};
+extern const Degradations DEGRADATIONS_ZERO;
 
 // Enum for lane geometry types.
 typedef enum {
@@ -257,14 +257,7 @@ typedef enum {
 
 #define NUM_TRAFFIC_CONTROL_STATES 6
 
-static const Seconds TRAFFIC_STATE_DURATIONS[NUM_TRAFFIC_CONTROL_STATES] = {
-    GREEN_DURATION,
-    YELLOW_DURATION,
-    MINOR_RED_EXTENSION,
-    GREEN_DURATION,
-    YELLOW_DURATION,
-    MINOR_RED_EXTENSION,
-};
+extern const Seconds TRAFFIC_STATE_DURATIONS[NUM_TRAFFIC_CONTROL_STATES];
 
 typedef struct Intersection {
     // Road base;

@@ -6,7 +6,14 @@
 #include <assert.h>
 #include <math.h>
 
-
+const Seconds TRAFFIC_STATE_DURATIONS[NUM_TRAFFIC_CONTROL_STATES] = {
+    GREEN_DURATION,
+    YELLOW_DURATION,
+    MINOR_RED_EXTENSION,
+    GREEN_DURATION,
+    YELLOW_DURATION,
+    MINOR_RED_EXTENSION,
+};
 
 // Setters
 
