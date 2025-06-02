@@ -2,7 +2,7 @@
 
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
-#include "road.h"
+#include "map.h"
 #include "car.h"
 #include "sim.h"
 
@@ -30,30 +30,31 @@ extern int PAN_Y;
 #define GREEN_LIGHT_COLOR (SDL_Color){50, 200, 50, 255}     // Soft green
 #define YELLOW_LIGHT_COLOR (SDL_Color){220, 180, 20, 255}   // Warm, soft yellow
 #define FOUR_WAY_STOP_COLOR (SDL_Color){200, 30, 30, 64}    // Soft red with transparency
-#define ARC_NUM_POINTS 10   // Number of points to approximate quarter arcs
+#define ARC_NUM_POINTS 8   // Number of points to approximate quarter arcs
 #define MAX_FONT_SIZE 128
 
 extern SDL_Texture* road_name_texture_cache[MAX_NUM_ROADS][MAX_FONT_SIZE];
-extern SDL_Texture* lane_id_texture_cache[MAX_NUM_ROADS * MAX_NUM_LANES][MAX_FONT_SIZE];
+extern SDL_Texture* intersection_name_texture_cache[MAX_NUM_INTERSECTIONS][MAX_FONT_SIZE];
+extern SDL_Texture* lane_id_texture_cache[MAX_NUM_LANES][MAX_FONT_SIZE];
 extern SDL_Texture* car_id_texture_cache[MAX_CARS_IN_SIMULATION][MAX_FONT_SIZE];
 
 // Converts world coordinates to screen coordinates relative to screen center.
 SDL_Point to_screen_coords(const Coordinates point, const int width, const int height);
 
 // Draws a lane's center line based on its geometry.
-void render_lane_center_line(SDL_Renderer* renderer, const Lane* lane, const SDL_Color color, bool dotted);
+void render_lane_center_line(SDL_Renderer* renderer, const Lane* lane, Map* map, const SDL_Color color, bool dotted);
 
 // Renders a linear lane, optionally painting lane lines and arrows.
-void render_lane_linear(SDL_Renderer* renderer, const LinearLane* lane, const bool paint_lines, const bool paint_arrows, const bool paint_id);
+void render_lane_linear(SDL_Renderer* renderer, const Lane* lane, Map* map, const bool paint_lines, const bool paint_arrows, const bool paint_id);
 
 // Renders a quarter arc lane, optionally painting lane lines and arrows.
-void render_lane_quarterarc(SDL_Renderer* renderer, const QuarterArcLane* lane, const bool paint_lines, const bool paint_arrows, const bool paint_id);
+void render_lane_quarterarc(SDL_Renderer* renderer, const Lane* lane, Map* map, const bool paint_lines, const bool paint_arrows, const bool paint_id);
 
 // Renders an intersection area and its traffic lights.
-void render_intersection(SDL_Renderer* renderer, const Intersection* intersection);
+void render_intersection(SDL_Renderer* renderer, const Intersection* intersection, Map* map);
 
 // Renders a generic lane by delegating to the appropriate lane type renderer.
-void render_lane(SDL_Renderer* renderer, const Lane* lane, const bool paint_lines, const bool paint_arrows, const bool paint_id);
+void render_lane(SDL_Renderer* renderer, const Lane* lane, Map* map, const bool paint_lines, const bool paint_arrows, const bool paint_id);
 
 // Draws a dotted line between two screen points using the specified color.
 void draw_dotted_line(SDL_Renderer* renderer, const SDL_Point start, const SDL_Point end, const SDL_Color color);
@@ -65,10 +66,10 @@ void drawFilledInwardRoundedRect(SDL_Renderer *renderer, const int x, const int 
 void drawQuarterCircleOutline(SDL_Renderer *renderer, const int center_x, const int center_y, const int radius, const int quadrant, const int thickness);
 
 // Renders a car based on its current lane and position.
-void render_car(SDL_Renderer* renderer, const Car* car, const bool paint_id);
+void render_car(SDL_Renderer* renderer, const Car* car, Map* map, const bool paint_id);
 
 // Renders the entire simulation state: roads, cars, lanes, traffic.
-void render_sim(SDL_Renderer* renderer, const Simulation* sim, const bool draw_lanes, const bool draw_cars, const bool draw_track_lines, const bool draw_traffic_lights, const bool draw_car_ids, const bool draw_lane_ids, const bool draw_road_names, const bool benchmark);
+void render_sim(SDL_Renderer* renderer, Simulation* sim, const bool draw_lanes, const bool draw_cars, const bool draw_track_lines, const bool draw_traffic_lights, const bool draw_car_ids, const bool draw_lane_ids, const bool draw_road_names, const bool benchmark);
 
 // thickLineRGBA(renderer, p1.x, p1.y, p2.x, p2.y, thickness, color.r, color.g, color.b, color.a);
 
@@ -107,5 +108,5 @@ typedef enum {
 
 void render_text(SDL_Renderer* renderer, const char* text, int x, int y, Uint8 r, Uint8 g, Uint8 b, Uint8 a, int font_size, TextAlign align, bool rotated, SDL_Texture** cache);
 
-void render_straight_road_name(SDL_Renderer* renderer, const StraightRoad* road);
-void render_intersection_name(SDL_Renderer* renderer, const Intersection* intersection);
+void render_straight_road_name(SDL_Renderer* renderer, const Road* road, Map* map);
+void render_intersection_name(SDL_Renderer* renderer, const Intersection* intersection, Map* map);

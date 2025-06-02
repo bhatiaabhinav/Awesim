@@ -33,8 +33,8 @@ CarIndictor lane_change_sample_possible(const SituationalAwareness* situation) {
     return possibles[chosen];
 }
 
-bool car_is_lane_change_dangerous(const Car* car, const SituationalAwareness* situation, CarIndictor lane_change_indicator) {
-    const Lane* lane = car->lane;
+bool car_is_lane_change_dangerous(const Car* car, Simulation* sim, const SituationalAwareness* situation, CarIndictor lane_change_indicator) {
+    const Lane* lane = situation->lane;
     const Lane* lane_target = situation->lane_target_for_indicator[lane_change_indicator];
     if (lane_target == lane) return false;      // no lane change
     if (lane_target == NULL) return true;       // Will fly off the road!
@@ -50,7 +50,7 @@ bool car_is_lane_change_dangerous(const Car* car, const SituationalAwareness* si
     Meters my_hypothetical_target_progress_m = lane_target->length * my_hypothetical_target_progress;
     Meters car_half_length = car_get_length(car) / 2;
     for (int i = 0; i < lane_target->num_cars; i++) {
-        const Car* other_car = lane_target->cars[i];
+        const Car* other_car = lane_get_car(lane_target, sim, i);
         if (other_car == car) continue; // skip self
         Meters other_car_progress_m = car_get_lane_progress_meters(other_car);
         
@@ -76,7 +76,8 @@ bool car_is_lane_change_dangerous(const Car* car, const SituationalAwareness* si
 }
 
 
-bool car_should_yield_at_intersection(const Car* self, const SituationalAwareness* situation, CarIndictor turn_indicator) {
+bool car_should_yield_at_intersection(const Car* self, Simulation* sim, const SituationalAwareness* situation, CarIndictor turn_indicator) {
+    Map* map = sim_get_map(sim);
     if (!situation->is_approaching_intersection && !situation->is_on_intersection) {
         return false; // Not at an intersection
     }
@@ -104,20 +105,20 @@ bool car_should_yield_at_intersection(const Car* self, const SituationalAwarenes
         }
 
         Direction my_dir = situation->lane->direction;
-        const StraightRoad* opposite_approach_straight_road = NULL;
+        const Road* opposite_approach_straight_road = NULL;
 
         switch (my_dir) {
             case DIRECTION_EAST:
-                opposite_approach_straight_road = intersection_obj->road_westbound_from;
+                opposite_approach_straight_road = intersection_get_road_westbound_from(intersection_obj, map);
                 break;
             case DIRECTION_WEST:
-                opposite_approach_straight_road = intersection_obj->road_eastbound_from;
+                opposite_approach_straight_road = intersection_get_road_eastbound_from(intersection_obj, map);
                 break;
             case DIRECTION_NORTH:
-                opposite_approach_straight_road = intersection_obj->road_southbound_from;
+                opposite_approach_straight_road = intersection_get_road_southbound_from(intersection_obj, map);
                 break;
             case DIRECTION_SOUTH:
-                opposite_approach_straight_road = intersection_obj->road_northbound_from;
+                opposite_approach_straight_road = intersection_get_road_northbound_from(intersection_obj, map);
                 break;
             default:
                 return false; 
@@ -127,14 +128,15 @@ bool car_should_yield_at_intersection(const Car* self, const SituationalAwarenes
             return false; 
         }
 
-        const Road* opposite_approach_road = (const Road*)opposite_approach_straight_road;
+        const Road* opposite_approach_road = opposite_approach_straight_road;
+        
 
         for (int i = 0; i < road_get_num_lanes(opposite_approach_road); ++i) {
-            const Lane* oncoming_lane = road_get_lane(opposite_approach_road, i);
+            const Lane* oncoming_lane = road_get_lane(opposite_approach_road, map, i);
             if (!oncoming_lane) continue;
 
             for (int k = 0; k < lane_get_num_cars(oncoming_lane); ++k) {
-                const Car* oncoming_car = lane_get_car(oncoming_lane, k);
+                const Car* oncoming_car = lane_get_car(oncoming_lane, sim, k);
                 if (!oncoming_car) continue;
 
                 Meters oncoming_progress_m = car_get_lane_progress_meters(oncoming_car);
@@ -184,21 +186,21 @@ bool car_should_yield_at_intersection(const Car* self, const SituationalAwarenes
         }
 
         Direction my_dir = situation->lane->direction; //
-        const StraightRoad* conflicting_approach_straight_road = NULL;
+        const Road* conflicting_approach_straight_road = NULL;
 
         // Determine the primary conflicting approach road (traffic from the ego car's left).
         switch (my_dir) {
             case DIRECTION_NORTH: // Ego car going North, turning right (East) OR yielding. Conflict from West.
-                conflicting_approach_straight_road = intersection_obj->road_westbound_from; //
+                conflicting_approach_straight_road = intersection_get_road_westbound_from(intersection_obj, map); //
                 break;
             case DIRECTION_EAST:  // Ego car going East, turning right (South) OR yielding. Conflict from North.
-                conflicting_approach_straight_road = intersection_obj->road_northbound_from; //
+                conflicting_approach_straight_road = intersection_get_road_northbound_from(intersection_obj, map); //
                 break;
             case DIRECTION_SOUTH: // Ego car going South, turning right (West) OR yielding. Conflict from East.
-                conflicting_approach_straight_road = intersection_obj->road_eastbound_from; //
+                conflicting_approach_straight_road = intersection_get_road_eastbound_from(intersection_obj, map); //
                 break;
             case DIRECTION_WEST:  // Ego car going West, turning right (North) OR yielding. Conflict from South.
-                conflicting_approach_straight_road = intersection_obj->road_southbound_from; //
+                conflicting_approach_straight_road = intersection_get_road_southbound_from(intersection_obj, map); //
                 break;
             default:
                 // Non-cardinal direction for the current lane, or situation not easily mapped
@@ -212,14 +214,14 @@ bool car_should_yield_at_intersection(const Car* self, const SituationalAwarenes
             return false; // Assume clear if no conflicting path is defined.
         }
 
-        const Road* conflicting_approach_road = (const Road*)conflicting_approach_straight_road;
+        const Road* conflicting_approach_road = conflicting_approach_straight_road;
 
         for (int i = 0; i < road_get_num_lanes(conflicting_approach_road); ++i) { //
-            const Lane* conflicting_lane = road_get_lane(conflicting_approach_road, i); //
+            const Lane* conflicting_lane = road_get_lane(conflicting_approach_road, map, i); //
             if (!conflicting_lane) continue;
 
             for (int k = 0; k < lane_get_num_cars(conflicting_lane); ++k) { //
-                const Car* conflicting_car = lane_get_car(conflicting_lane, k); //
+                const Car* conflicting_car = lane_get_car(conflicting_lane, sim, k); //
                 if (!conflicting_car) continue;
 
                 Meters conflicting_car_progress_m = car_get_lane_progress_meters(conflicting_car); //

@@ -35,13 +35,13 @@ CarPersonality preferences_sample_random(void) {
 
 
 CarAccelProfile car_accel_profile_get_random_preset(void) {
-    const CarAccelProfile presets[] = { // TODO: re-enable slower cars. Currently, slower profiles make the cars brake too slow for short roads (which don't have enough braking distance available) and this forces the cars to jump traffic
+    const CarAccelProfile presets[] = {
         CAR_ACC_PROFILE_SPORTS_CAR,
-        // CAR_ACC_PROFILE_ELECTRIC_SEDAN,
-        // CAR_ACC_PROFILE_GAS_SEDAN,
-        // CAR_ACC_PROFILE_SUV,
-        // CAR_ACC_PROFILE_TRUCK,
-        // CAR_ACC_PROFILE_HEAVY_TRUCK,
+        CAR_ACC_PROFILE_ELECTRIC_SEDAN,
+        CAR_ACC_PROFILE_GAS_SEDAN,
+        CAR_ACC_PROFILE_SUV,
+        CAR_ACC_PROFILE_TRUCK,
+        CAR_ACC_PROFILE_HEAVY_TRUCK,
         
     };
     size_t count = sizeof(presets) / sizeof(presets[0]);
@@ -49,11 +49,11 @@ CarAccelProfile car_accel_profile_get_random_preset(void) {
 }
 
 CarAccelProfile car_accel_profile_get_random_preference_preset(void) {
-    const CarAccelProfile prefs[] = {   // TODO: re-enable slower profiles. Currently, slower profiles make the cars brake too slow for short roads (which don't have enough braking distance available) and this forces the cars to jump traffic lights.
-        // CAR_ACC_PREF_COMFORT,
-        // CAR_ACC_PREF_NORMAL,
-        // CAR_ACC_PREF_ECO,
-        // CAR_ACC_PREF_SPORT,
+    const CarAccelProfile prefs[] = {
+        CAR_ACC_PREF_COMFORT,
+        CAR_ACC_PREF_NORMAL,
+        CAR_ACC_PREF_ECO,
+        CAR_ACC_PREF_SPORT,
         CAR_ACC_PREF_AGGRESSIVE
     };
     size_t count = sizeof(prefs) / sizeof(prefs[0]);

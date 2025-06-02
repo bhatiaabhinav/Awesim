@@ -1,7 +1,7 @@
 #pragma once
 
 #include "utils.h"
-#include "road.h"
+#include "map.h"
 
 
 // --- Accleration profile ------
@@ -72,14 +72,15 @@ CarPersonality preferences_sample_random(void);
 
 struct Car {
     // fixed properties:
-    int id;                         // unique identifier for the car
+    CarId id;                         // unique identifier for the car
     Dimensions dimensions;          // width and length of the car
     CarCapabilities capabilities;   // capabilities of the car
     CarPersonality preferences;     // Preference profile of the car.
 
     // state variables:
-    const Lane* lane;                   // current lane
-    double lane_progress;               // progress in the lane as a fraction of the lane length.
+    LaneId lane_id;                   // current lane
+    double lane_progress;          // progress in the lane as a fraction of the lane length.
+    Meters lane_progress_meters;   // progress in the lane in meters. Should be set by the simulation engine. Is a product of lane_progress and lane length.
     MetersPerSecond speed;              // current speed. Should be set by the simulation engine.
     double damage;                      // damage level of the car. 0.0 for no damage and 1.0 for total damage.
 
@@ -89,11 +90,11 @@ struct Car {
     CarIndictor indicator_turn;                  // Turn indicator. Should be set by the car's decision-making logic when car_make_decision() is called.
 };
 typedef struct Car Car;
-extern int car_id_counter; // Global ID counter for cars
+
+typedef struct Simulation Simulation;
 
 
-Car* car_create(Dimensions dimensions, CarCapabilities capabilities, CarPersonality preferences);
-void car_free(Car* self);
+void car_init(Car* car, Dimensions dimensions, CarCapabilities capabilities, CarPersonality preferences);
 
 
 // getters:
@@ -104,7 +105,8 @@ Meters car_get_width(const Car* self);
 CarCapabilities car_get_capabilities(const Car* self);
 CarPersonality car_get_preferences(const Car* self);
 
-const Lane* car_get_lane(const Car* self);
+LaneId car_get_lane_id(const Car* self);
+Lane* car_get_lane(const Car* self, Map* map);
 double car_get_lane_progress(const Car* self);
 // Returns car progress x lane length in meters.
 Meters car_get_lane_progress_meters(const Car* self);
@@ -121,7 +123,7 @@ CarIndictor car_get_indicator_lane(const Car* self);
 // Sets the lane of the car.
 void car_set_lane(Car* self, const Lane* lane);
 // Sets the lane progress of the car. The progress should be between 0.0 and 1.0. Will be clipped automatically.
-void car_set_lane_progress(Car* self, double progress);
+void car_set_lane_progress(Car* self, double progress, Meters progress_meters);
 // Sets the speed of the car. The speed should be between 0.0 and max_speed_capability. Will be clipped automatically.
 void car_set_speed(Car* self, MetersPerSecond speed);
 // Sets the acceleration of the car. The acceleration will be clipped automatically as per the car's capable acceleration profile.

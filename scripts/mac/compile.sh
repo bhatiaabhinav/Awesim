@@ -16,7 +16,7 @@ fi
 
 gcc \
     -Iinclude \
-    src/*.c src/utils/*.c src/road/*.c src/render/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c \
+    src/*.c src/utils/*.c src/render/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c \
     -o ./bin/play \
     `sdl2-config --cflags --libs` \
     `pkg-config --cflags --libs sdl2_ttf` \

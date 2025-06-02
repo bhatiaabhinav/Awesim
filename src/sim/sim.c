@@ -1,4 +1,5 @@
 #include "sim.h"
+#include "logging.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -50,42 +51,36 @@ ClockReading clock_reading_add(const ClockReading clock1, const ClockReading clo
 
 // --- Simulation Core Functions ---
 
-Simulation* sim_create(Map* map, double dt) {
-    Simulation* sim = malloc(sizeof(Simulation));
-    if (!sim) {
-        fprintf(stderr, "Memory allocation failed for Simulation\n");
-        exit(EXIT_FAILURE);
-    }
-
-    sim->map = map;
+void sim_init(Simulation* sim, double dt) {
+    map_init(&sim->map);
     sim->initial_clock_reading = clock_reading(0, 8, 0, 0);  // 8:00 AM Monday
     sim->num_cars = 0;
     sim->time = 0.0;
     sim->dt = dt;
     sim->weather = WEATHER_SUNNY;
-    return sim;
 }
 
-void sim_add_car(Simulation* self, Car* car) {
-    if (!self || !car) return;
+Car* sim_get_new_car(Simulation* self) {
     if (self->num_cars >= MAX_CARS_IN_SIMULATION) {
-        fprintf(stderr, "Simulation is full, cannot add more cars\n");
-        return;
+        LOG_ERROR("Simulation is full, cannot add more cars");
+        return NULL;
     }
-    self->cars[self->num_cars++] = car;
+    Car* car = &self->cars[self->num_cars++];
+    car->id = self->num_cars - 1; // Assign a unique ID
+    return car;
 }
 
 // --- Getters ---
 
 Map* sim_get_map(Simulation* self) {
-    return self ? self->map : NULL;
+    return self ? &self->map : NULL;
 }
 
 ClockReading sim_get_initial_clock_reading(Simulation* self) {
     return self->initial_clock_reading;
 }
 
-Car** sim_get_cars(Simulation* self) {
+Car* sim_get_cars(Simulation* self) {
     return self->cars;
 }
 
@@ -95,7 +90,7 @@ int sim_get_num_cars(const Simulation* self) {
 
 Car* sim_get_car(Simulation* self, int id) {
     if (!self || id < 0 || id >= self->num_cars) return NULL;
-    return self->cars[id];
+    return &self->cars[id];
 }
 
 Car* sim_get_agent_car(Simulation* self) {
@@ -119,9 +114,6 @@ DayOfWeek sim_get_day_of_week(const Simulation* self) {
     return sim_get_clock_reading((Simulation*)self).day_of_week;
 }
 
-bool sim_car_exists(const Simulation* self, int id) {
-    return self && id >= 0 && id < self->num_cars && self->cars[id] != NULL;
-}
 
 // --- Setters ---
 
@@ -174,18 +166,4 @@ double sunlight_intensity(Simulation* self) {
 
 void sim_step(Simulation* self) {
     if (self) simulate(self, self->dt);
-}
-
-void sim_free(Simulation* self) {
-    if (!self) return;
-    free(self);
-}
-
-void sim_deep_free(Simulation* self) {
-    if (!self) return;
-    for (int i = 0; i < self->num_cars; i++) {
-        car_free(self->cars[i]);
-    }
-    map_deep_free(self->map);
-    free(self);
 }

@@ -243,6 +243,7 @@ void cleanup_text_rendering() {
         }
     }
     fonts_initialized = 0;
+    LOG_DEBUG("Fonts cleaned up successfully.");
     for (int i = 0; i < MAX_NUM_ROADS; i++) {
         for (int j = 0; j < MAX_FONT_SIZE; j++) {
             if (road_name_texture_cache[i][j]) {
@@ -251,7 +252,17 @@ void cleanup_text_rendering() {
             }
         }
     }
-    for (int i = 0; i < MAX_NUM_ROADS * MAX_NUM_LANES; i++) {
+    LOG_DEBUG("Road name textures cleaned up successfully.");
+    for (int i = 0; i < MAX_NUM_INTERSECTIONS; i++) {
+        for (int j = 0; j < MAX_FONT_SIZE; j++) {
+            if (intersection_name_texture_cache[i][j]) {
+                SDL_DestroyTexture(intersection_name_texture_cache[i][j]);
+                intersection_name_texture_cache[i][j] = NULL;
+            }
+        }
+    }
+    LOG_DEBUG("Intersection name textures cleaned up successfully.");
+    for (int i = 0; i < MAX_NUM_LANES; i++) {
         for (int j = 0; j < MAX_FONT_SIZE; j++) {
             if (lane_id_texture_cache[i][j]) {
                 SDL_DestroyTexture(lane_id_texture_cache[i][j]);
@@ -259,6 +270,7 @@ void cleanup_text_rendering() {
             }
         }
     }
+    LOG_DEBUG("Lane ID textures cleaned up successfully.");
     for (int i = 0; i < MAX_CARS_IN_SIMULATION; i++) {
         for (int j = 0; j < MAX_FONT_SIZE; j++) {
             if (car_id_texture_cache[i][j]) {
@@ -267,6 +279,7 @@ void cleanup_text_rendering() {
             }
         }
     }
+    LOG_DEBUG("Car ID textures cleaned up successfully.");
     TTF_Quit();
 }
 

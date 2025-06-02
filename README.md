@@ -43,7 +43,7 @@ For macOS, use `sh scripts/mac/benchmark.sh`. For Windows, run `scripts/windows/
 To understand how the simulator works, begin by reviewing the header files in the `include/` directory in the following order:
 
 1. `utils.h`
-2. `road.h`
+2. `logging.h`
 3. `map.h`
 4. `car.h`
 5. `ai.h`

@@ -21,6 +21,17 @@ bool dragging = false;
 
 int main(int argc, char* argv[]) {
 
+    Meters city_width = argc >= 2 ? meters(atof(argv[1])) : meters(1000); // width of the city in meters. Prefer to read from command line argument, else use default.
+    if (city_width <= 0) {
+        LOG_ERROR("Invalid input. City width must be greater than 0. Exiting.");
+        exit(EXIT_FAILURE);
+    }
+    int num_cars = argc >= 3 ? atoi(argv[2]) : 128;  // number of cars to simulate. Prefer to read from command line argument, else use default.
+    if (num_cars <= 0) {
+        LOG_ERROR("Invalid input. Number of cars must be greater than 0. Exiting.");
+        exit(EXIT_FAILURE);
+    }
+
     #ifdef _WIN32
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     #endif
@@ -72,12 +83,13 @@ int main(int argc, char* argv[]) {
     // Main rendering loop
     bool quit = false;
     SDL_Event event;
-    Meters city_width = meters(500);                // width of the city in meters    
-    int num_cars = 64;                               // number of cars to simulate
+
     Seconds dt = 0.02;                              // time resolution for integration.
     Seconds seconds_to_simulate = 1e9;              // total time (in sim) to simulate, after which the program will exit.
 
-    Simulation* sim = awesim(city_width, num_cars, dt);
+    Simulation* sim = (Simulation*)malloc(sizeof(Simulation));
+    LOG_DEBUG("Allocated memory for simulation, size %.2f kilobytes.", sizeof(*sim) / 1024.0);
+    awesim_setup(sim, city_width, num_cars, dt);
 
 
     int text_font_size = 20;                // font size for stats rendering
@@ -88,9 +100,10 @@ int main(int argc, char* argv[]) {
     double t_prev = get_sys_time_seconds();
     while (!quit) {
         while (SDL_PollEvent(&event)) {
-            if (event.type == SDL_QUIT) quit = true;
-            // speed up sim on pressing right button
-            else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_RIGHT) {
+            if (event.type == SDL_QUIT) {
+                quit = true;
+                LOG_INFO("Quit event received. Exiting.");
+            } else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_RIGHT) {
                 simulation_speedup += simulation_speedup < 0.99 ? 0.1 : 1.0;
                 LOG_TRACE("Simulation speedup increased to %f", simulation_speedup);
             } else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_LEFT) {
@@ -215,11 +228,18 @@ int main(int argc, char* argv[]) {
         t_prev = get_sys_time_seconds();
     }
     
-    sim_deep_free(sim);
+    LOG_DEBUG("Freeing simulation memory.");
+    free(sim);
+    LOG_INFO("Simulation cleaned up successfully.");
+    LOG_DEBUG("Cleaning up SDL resources.");
     cleanup_text_rendering();
+    LOG_DEBUG("Text rendering cleaned up successfully.");
     SDL_DestroyRenderer(renderer);
+    LOG_DEBUG("Renderer destroyed successfully.");
     SDL_DestroyWindow(window);
+    LOG_DEBUG("Window destroyed successfully.");
     SDL_Quit();
+    LOG_DEBUG("SDL Quit called successfully.");
 
     LOG_INFO("SDL cleaned up successfully. Exiting program.");
     

@@ -1,11 +1,15 @@
 #include "render.h"
 
-void render_intersection(SDL_Renderer* renderer, const Intersection* intersection) {
+void render_intersection(SDL_Renderer* renderer, const Intersection* intersection, Map* map) {
     // Get physical world bounds
-    Meters x_min = intersection->road_eastbound_from->end_point.x;
-    Meters x_max = intersection->road_eastbound_to->start_point.x;
-    Meters y_min = intersection->road_northbound_from->end_point.y;
-    Meters y_max = intersection->road_northbound_to->start_point.y;
+    Road* road_eastbound_from = map_get_road(map, intersection->road_eastbound_from_id);
+    Road* road_eastbound_to = map_get_road(map, intersection->road_eastbound_to_id);
+    Road* road_northbound_from = map_get_road(map, intersection->road_northbound_from_id);
+    Road* road_northbound_to = map_get_road(map, intersection->road_northbound_to_id);
+    Meters x_min = road_eastbound_from->end_point.x;
+    Meters x_max = road_eastbound_to->start_point.x;
+    Meters y_min = road_northbound_from->end_point.y;
+    Meters y_max = road_northbound_to->start_point.y;
 
     // Convert corners to screen coordinates
     SDL_Point screen_left = to_screen_coords((Coordinates){x_min, 0}, WINDOW_SIZE_WIDTH, WINDOW_SIZE_HEIGHT);
@@ -21,15 +25,10 @@ void render_intersection(SDL_Renderer* renderer, const Intersection* intersectio
     int screen_width = screen_x_right - screen_x_left;
     int screen_height = screen_y_bottom - screen_y_top;
 
-    // Compute radius and pad with margin
-    int radius_px = (int)(intersection->turn_radius * 1.45 * SCALE);
-    int padded_x = screen_x_left - radius_px;
-    int padded_y = screen_y_top - radius_px;
-    int padded_width = screen_width + 2 * radius_px;
-    int padded_height = screen_height + 2 * radius_px;
-    int corner_radius = 2 * radius_px;
+    Meters corner_radius = intersection->turn_radius - 0.5 * intersection->lane_width;
+    int corner_radius_px = (int)(corner_radius * SCALE);
 
     // Draw gray intersection rectangle
     SDL_SetRenderDrawColor(renderer, 128, 128, 128, 255);
-    drawFilledInwardRoundedRect(renderer, padded_x, padded_y, padded_width, padded_height, corner_radius);
+    drawFilledInwardRoundedRect(renderer, screen_x_left, screen_y_top, screen_width, screen_height, corner_radius_px);
 }

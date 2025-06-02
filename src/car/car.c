@@ -7,24 +7,18 @@
 
 int car_id_counter = 0; // Global ID counter for cars
 
-Car* car_create(Dimensions dimensions, CarCapabilities capabilities, CarPersonality preferences) {
-    Car* car = (Car*)malloc(sizeof(Car));
-    if (!car) {
-        LOG_ERROR("Memory allocation failed for Car");
-        exit(EXIT_FAILURE);
-    }
+void car_init(Car* car, Dimensions dimensions, CarCapabilities capabilities, CarPersonality preferences) {
     car->id = car_id_counter++;
     car->dimensions = dimensions;
     car->capabilities = capabilities;
     car->preferences = preferences;
-    car->lane = NULL;
+    car->lane_id = ID_NULL;
     car->lane_progress = 0.0;
     car->speed = 0.0;
     car->damage = 0.0;
     car->acceleration = 0.0;
     car->indicator_turn = INDICATOR_NONE;
     car->indicator_lane = INDICATOR_NONE;
-    return car;
 }
 
 void car_free(Car* self) {
@@ -38,11 +32,16 @@ Meters car_get_length(const Car* self) { return self->dimensions.y; }
 Meters car_get_width(const Car* self) { return self->dimensions.x; }
 CarCapabilities car_get_capabilities(const Car* self) { return self->capabilities; }
 CarPersonality car_get_preferences(const Car* self) { return self->preferences; }
-const Lane* car_get_lane(const Car* self) { return self->lane; }
-double car_get_lane_progress(const Car* self) { return self->lane_progress; }
-Meters car_get_lane_progress_meters(const Car* self) {
-    return self->lane ? self->lane->length * self->lane_progress : 0.0;
+LaneId car_get_lane_id(const Car* self) { return self->lane_id; }
+Lane* car_get_lane(const Car* self, Map* map) {
+    if (self->lane_id < 0 || self->lane_id >= map->num_lanes) {
+        LOG_ERROR("Car (id=%d) is not on a valid lane (id=%d).", self->id, self->lane_id);
+        return NULL;
+    }
+    return map_get_lane(map, self->lane_id);
 }
+double car_get_lane_progress(const Car* self) { return self->lane_progress; }
+Meters car_get_lane_progress_meters(const Car* self) { return self->lane_progress_meters; }
 MetersPerSecond car_get_speed(const Car* self) { return self->speed; }
 double car_get_damage(const Car* self) { return self->damage; }
 MetersPerSecondSquared car_get_acceleration(const Car* self) { return self->acceleration; }
@@ -50,15 +49,19 @@ CarIndictor car_get_indicator_turn(const Car* self) { return self->indicator_tur
 CarIndictor car_get_indicator_lane(const Car* self) { return self->indicator_lane; }
 
 void car_set_lane(Car* self, const Lane* lane) {
-    self->lane = lane;
+    self->lane_id = lane->id;
 }
 
-void car_set_lane_progress(Car* self, double progress) {
+void car_set_lane_progress(Car* self, double progress, Meters progress_meters) {
     if (progress < 0.0 || progress > 1.0) {
-        // fprintf(stderr, "WARN: Lane progress must be between 0.0 and 1.0. You are trying to set it to %f. Clipping.\n", progress);
+        LOG_WARN("Car %d, lane %d : Lane progress must be between 0.0 and 1.0. You are trying to set it to %f. Clipping.", self->id, self->lane_id, progress);
     }
     progress = fclamp(progress, 0.0, 1.0);
     self->lane_progress = progress;
+    if (progress_meters < 0.0) {
+        progress_meters = 0.0;
+    }
+    self->lane_progress_meters = progress_meters;
 }
 
 void car_set_speed(Car* self, MetersPerSecond speed) {

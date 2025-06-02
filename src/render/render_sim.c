@@ -5,10 +5,10 @@
 #include <stdio.h>
 #include <stdint.h>
 
-void render_sim(SDL_Renderer *renderer, const Simulation *sim, const bool draw_lanes, const bool draw_cars,
+void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, const bool draw_cars,
                 const bool draw_track_lines, const bool draw_traffic_lights, const bool draw_car_ids, const bool draw_lane_ids, const bool draw_road_names, const bool benchmark)
 {
-    Map *map = sim->map;
+    Map *map = sim_get_map(sim);
 
     // Clear screen with background color
     SDL_SetRenderDrawColor(renderer, BACKGROUND_COLOR.r, BACKGROUND_COLOR.g, BACKGROUND_COLOR.b, BACKGROUND_COLOR.a);
@@ -22,7 +22,7 @@ void render_sim(SDL_Renderer *renderer, const Simulation *sim, const bool draw_l
         // Intersections
         start = SDL_GetPerformanceCounter();
         for (int i = 0; i < map->num_intersections; i++) {
-            render_intersection(renderer, map->intersections[i]);
+            render_intersection(renderer, map_get_intersection(map, i), map);
         }
         end = SDL_GetPerformanceCounter();
         elapsed_us = (double)(end - start) * 1e6 / SDL_GetPerformanceFrequency();
@@ -31,12 +31,13 @@ void render_sim(SDL_Renderer *renderer, const Simulation *sim, const bool draw_l
         // Straight roads
         start = SDL_GetPerformanceCounter();
         for (int i = 0; i < map->num_roads; i++) {
-            const Road *road = map->roads[i];
+            Road *road = map_get_road(map, i);
             if (road->type == STRAIGHT) {
                 for (int j = 0; j < road->num_lanes; j++) {
-                    render_lane(renderer, road->lanes[j], true, true, draw_lane_ids);
+                    Lane* lane = road_get_lane(road, map, j);
+                    render_lane(renderer, lane, map, true, true, draw_lane_ids);
                 }
-                if (draw_road_names) render_straight_road_name(renderer, (const StraightRoad *)road);
+                if (draw_road_names) render_straight_road_name(renderer, road, map);
             }
         }
         end = SDL_GetPerformanceCounter();
@@ -46,10 +47,11 @@ void render_sim(SDL_Renderer *renderer, const Simulation *sim, const bool draw_l
         // Turn roads
         start = SDL_GetPerformanceCounter();
         for (int i = 0; i < map->num_roads; i++) {
-            const Road *road = map->roads[i];
+            const Road *road = map_get_road(map, i);
             if (road->type == TURN) {
                 for (int j = 0; j < road->num_lanes; j++) {
-                    render_lane(renderer, road->lanes[j], true, true, draw_lane_ids);
+                    Lane *lane = road_get_lane(road, map, j);
+                    render_lane(renderer, lane, map, true, true, draw_lane_ids);
                 }
             }
         }
@@ -62,18 +64,20 @@ void render_sim(SDL_Renderer *renderer, const Simulation *sim, const bool draw_l
     if (draw_track_lines) {
         start = SDL_GetPerformanceCounter();
         for (int i = 0; i < map->num_roads; i++) {
-            const Road *road = map->roads[i];
+            Road *road = map_get_road(map, i);
             for (int j = 0; j < road->num_lanes; j++) {
-                render_lane_center_line(renderer, road->lanes[j], LANE_CENTER_LINE_COLOR, false);
+                Lane* lane = road_get_lane(road, map, j);
+                render_lane_center_line(renderer, lane, map, LANE_CENTER_LINE_COLOR, false);
             }
         }
 
         // Optional: draw center lines at intersections if traffic lights are not drawn
         if (!draw_traffic_lights) {
             for (int i = 0; i < map->num_intersections; i++) {
-                const Intersection *intersection = map->intersections[i];
-                for (int j = 0; j < intersection->base.num_lanes; j++) {
-                    render_lane_center_line(renderer, intersection->base.lanes[j], LANE_CENTER_LINE_COLOR, false);
+                Intersection *intersection = map_get_intersection(map, i);
+                for (int j = 0; j < intersection->num_lanes; j++) {
+                    Lane* lane = intersection_get_lane(intersection, map, j);
+                    render_lane_center_line(renderer, lane, map, LANE_CENTER_LINE_COLOR, false);
                 }
             }
         }
@@ -88,17 +92,17 @@ void render_sim(SDL_Renderer *renderer, const Simulation *sim, const bool draw_l
         start = SDL_GetPerformanceCounter();
 
         for (int i = 0; i < map->num_intersections; i++) {
-            const Intersection *intersection = map->intersections[i];
-            // if (draw_road_names) render_intersection_name(renderer, intersection);
+            Intersection *intersection = map_get_intersection(map, i);
+            // if (draw_road_names) render_intersection_name(renderer, intersection, map);
 
             IntersectionState state = intersection->state;
 
-            for (int j = 0; j < intersection->base.num_lanes; j++) {
-                const Lane *lane = intersection->base.lanes[j];
+            for (int j = 0; j < intersection->num_lanes; j++) {
+                Lane *lane = intersection_get_lane(intersection, map, j);
                 if (!lane) continue;
 
                 Direction dir = lane->direction;
-                const Lane *next_lane = lane->for_straight_connects_to;
+                Lane *next_lane = lane_get_connection_straight(lane, map);
                 Direction next_dir = next_lane ? next_lane->direction : dir;
 
                 bool is_vert = dir == DIRECTION_NORTH || dir == DIRECTION_SOUTH;
@@ -163,7 +167,7 @@ void render_sim(SDL_Renderer *renderer, const Simulation *sim, const bool draw_l
                         break;
                 }
 
-                render_lane_center_line(renderer, lane, light_color, yield);
+                render_lane_center_line(renderer, lane, map, light_color, yield);
             }
         }
 
@@ -177,7 +181,8 @@ void render_sim(SDL_Renderer *renderer, const Simulation *sim, const bool draw_l
         start = SDL_GetPerformanceCounter();
 
         for (int i = 0; i < sim->num_cars; i++) {
-            render_car(renderer, sim->cars[i], draw_car_ids);
+            Car* car = sim_get_car(sim, i);
+            render_car(renderer, car, map, draw_car_ids);
         }
 
         end = SDL_GetPerformanceCounter();

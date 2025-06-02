@@ -3,6 +3,11 @@
 #include "utils.h"
 #include "car.h"
 
+// forward declarations
+typedef struct Simulation Simulation;
+Seconds sim_get_dt(const Simulation* self);
+Map* sim_get_map(Simulation* self);
+
 // Traffic light in context of an intented turn
 typedef enum {
     TRAFFIC_LIGHT_GREEN,
@@ -75,8 +80,8 @@ struct SituationalAwareness {
 typedef struct SituationalAwareness SituationalAwareness;
 
 // Set acceleration, indicator_turn, indicator_lane.
-void npc_car_make_decisions(Car* self);
-SituationalAwareness situational_awareness_build(const Car* car);
+void npc_car_make_decisions(Car* self, Simulation* sim);
+SituationalAwareness situational_awareness_build(const Car* car, Simulation* sim);
 
 // sample a turn that is feasible from the current lane
 CarIndictor turn_sample_possible(const SituationalAwareness* situation);
@@ -84,13 +89,13 @@ CarIndictor turn_sample_possible(const SituationalAwareness* situation);
 // sample a lane change intent that is feasible in terms of existence of such lanes
 CarIndictor lane_change_sample_possible(const SituationalAwareness* situation);
 
-bool car_is_lane_change_dangerous(const Car* car, const SituationalAwareness* situation, CarIndictor lane_change_indicator);
+bool car_is_lane_change_dangerous(const Car* car, Simulation* sim, const SituationalAwareness* situation, CarIndictor lane_change_indicator);
 
 MetersPerSecondSquared car_compute_acceleration_chase_target(const Car* car, Meters position_target, MetersPerSecond speed_target, Meters position_target_overshoot_buffer, MetersPerSecond speed_limit);
 MetersPerSecondSquared car_compute_acceleration_cruise(const Car* car, MetersPerSecond speed_target);
 BrakingDistance car_compute_braking_distance(const Car* car);
 
-bool car_should_yield_at_intersection(const Car* car, const SituationalAwareness* situation, CarIndictor turn_indicator);
+bool car_should_yield_at_intersection(const Car* car, Simulation* sim, const SituationalAwareness* situation, CarIndictor turn_indicator);
 
 
 

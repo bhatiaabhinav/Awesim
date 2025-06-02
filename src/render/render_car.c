@@ -13,8 +13,8 @@ typedef struct {
     double angle;
 } CarPose;
 
-CarPose get_car_pose(const Car* car) {
-    const Lane* lane = car->lane;
+CarPose get_car_pose(const Car* car, Map* map) {
+    Lane* lane = car_get_lane(car, map);
     CarPose pose;
 
     if (lane->type == LINEAR_LANE) {
@@ -24,10 +24,9 @@ CarPose get_car_pose(const Car* car) {
         pose.position = vec_add(start, vec_scale(delta, car->lane_progress));
         pose.angle = atan2(delta.y, delta.x);
     } else if (lane->type == QUARTER_ARC_LANE) {
-        QuarterArcLane* arc_lane = (QuarterArcLane*)lane;
-        double theta = arc_lane->start_angle + car->lane_progress * (arc_lane->end_angle - arc_lane->start_angle);
-        pose.position.x = lane->center.x + arc_lane->radius * cos(theta);
-        pose.position.y = lane->center.y + arc_lane->radius * sin(theta);
+        double theta = lane->start_angle + car->lane_progress * (lane->end_angle - lane->start_angle);
+        pose.position.x = lane->center.x + lane->radius * cos(theta);
+        pose.position.y = lane->center.y + lane->radius * sin(theta);
         if (lane->direction == DIRECTION_CCW) {
             pose.angle = theta + M_PI / 2;
         } else if (lane->direction == DIRECTION_CW) {
@@ -37,7 +36,7 @@ CarPose get_car_pose(const Car* car) {
             pose.angle = 0;
         }
     } else {
-        fprintf(stderr, "Error: Unknown lane type!\n");
+        LOG_ERROR("Error: Unknown lane type for car ID %d!", car->id);
         pose.position = coordinates_create(0, 0);
         pose.angle = 0;
     }
@@ -45,8 +44,8 @@ CarPose get_car_pose(const Car* car) {
 }
 
 
-void render_car(SDL_Renderer* renderer, const Car* car, const bool paint_id) {
-    CarPose pose = get_car_pose(car);
+void render_car(SDL_Renderer* renderer, const Car* car, Map* map, const bool paint_id) {
+    CarPose pose = get_car_pose(car, map);
     double width = car->dimensions.x;
     double length = car->dimensions.y;
 
