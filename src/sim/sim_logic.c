@@ -138,10 +138,12 @@ void simulate(Simulation* self, Seconds time_period) {
                 LOG_TRACE("Car %d: Progress %.2f (s = %.2f) exceeds lane length %.2f. Handling turn. Connections: left = %d, straight = %d, right = %d", car->id, progress, s, lane->length, lane->connections[0], lane->connections[1], lane->connections[2]);
                 if (turn_intent == INDICATOR_LEFT && connection_left) {
                     lane = connection_left;
-                    LOG_TRACE("Car %d turned left into lane %d", car->id, lane->id);
+                    turn_intent = INDICATOR_NONE; // Mark turn intent as executed.
+                    LOG_TRACE("Car %d turned left into lane %d. Indicator turned off.", car->id, lane->id);
                 } else if (turn_intent == INDICATOR_RIGHT && connection_right) {
                     lane = connection_right;
-                    LOG_TRACE("Car %d turned right into lane %d", car->id, lane->id);
+                    turn_intent = INDICATOR_NONE; // Mark turn intent as executed.
+                    LOG_TRACE("Car %d turned right into lane %d. Indicator turned off.", car->id, lane->id);
                 } else {
                     lane = connection_straight;
                     LOG_TRACE("Car %d went straight into lane %d", car->id, lane->id);
@@ -159,6 +161,7 @@ void simulate(Simulation* self, Seconds time_period) {
                 s = (progress - lane->exit_lane_start) * lane->length;
                 lane = lane_get_exit_lane(lane, map);
                 progress = s / lane->length;
+                lane_change_intent = INDICATOR_NONE; // Mark exit intent as executed.
                 LOG_TRACE("Car %d exited into lane %d at progress %.2f (s = %.2f)", car->id, lane->id, progress, s);
             }
             s = progress * lane->length; // update s after all changes to lane and progress.
