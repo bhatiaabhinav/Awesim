@@ -26,7 +26,7 @@ int main(int argc, char* argv[]) {
         LOG_ERROR("Invalid input. City width must be greater than 0. Exiting.");
         exit(EXIT_FAILURE);
     }
-    int num_cars = argc >= 3 ? atoi(argv[2]) : 128;  // number of cars to simulate. Prefer to read from command line argument, else use default.
+    int num_cars = argc >= 3 ? atoi(argv[2]) : 512;  // number of cars to simulate. Prefer to read from command line argument, else use default.
     if (num_cars <= 0) {
         LOG_ERROR("Invalid input. Number of cars must be greater than 0. Exiting.");
         exit(EXIT_FAILURE);
