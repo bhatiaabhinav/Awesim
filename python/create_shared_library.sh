@@ -1,7 +1,7 @@
 #!/bin/bash
 
 input_headers="include/utils.h include/map.h include/car.h include/ai.h include/sim.h include/awesim.h"
-output_header="./bin/libawesim.h"
+output_header="./python/libawesim.h"
 
 # Ensure bin directory exists
 mkdir -p bin
