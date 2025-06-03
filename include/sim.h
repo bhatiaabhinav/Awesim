@@ -73,12 +73,17 @@ typedef struct Simulation {
     Car cars[MAX_CARS_IN_SIMULATION];  // Car list; car[0] = agent
     int num_cars;   // Number of cars in simulation
     Seconds time;   // Time simulated so far
-    Seconds dt;     // Simulation timestep
+    Seconds dt;     // Simulation engine's time resolution for integration (in seconds)
     Weather weather;
 } Simulation;
 
-// Create a new simulation instance
-void sim_init(Simulation* sim, double dt);
+ // Allocate memory for a new Simulation instance. The memory is not initialized and contains garbage values.
+Simulation* sim_malloc();
+ // Free memory for a Simulation instance
+void sim_free(Simulation* self);
+
+// Initialize the simulation instance, setting up an empty map and default initial conditions (clock = 8:00 AM on monday, weather = sunny, dt = 0.02 seconds).
+void sim_init(Simulation* sim);
 
 // Add a car to the simulation
 Car* sim_get_new_car(Simulation* self);
@@ -96,6 +101,7 @@ DayOfWeek sim_get_day_of_week(const Simulation* self);
 Car* sim_get_agent_car(Simulation* self);
 
 // --- Setters ---
+void sim_set_dt(Simulation* self, Seconds dt);
 void sim_set_initial_clock_reading(Simulation* self, ClockReading clock);
 void sim_set_weather(Simulation* self, Weather weather);
 

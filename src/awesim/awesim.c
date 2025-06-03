@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include <math.h>
 
-bool placement_would_cause_collision(Car* car, Lane* lane, Simulation* sim, Meters progress) {
+static bool placement_would_cause_collision(Car* car, Lane* lane, Simulation* sim, Meters progress) {
     Meters progress_meters = progress * lane->length;
     Meters car_length = car_get_length(car);
     bool would_collide = false;
@@ -23,8 +23,11 @@ bool placement_would_cause_collision(Car* car, Lane* lane, Simulation* sim, Mete
     return would_collide;
 }
 
-void awesim_setup(Simulation* sim, Meters city_width, int num_cars, Seconds dt) {
-    sim_init(sim, dt);
+void awesim_setup(Simulation* sim, Meters city_width, int num_cars, Seconds dt, ClockReading initial_clock_reading, Weather weather) {
+    sim_init(sim);
+    sim_set_dt(sim, dt);
+    sim_set_initial_clock_reading(sim, initial_clock_reading);
+    sim_set_weather(sim, weather);
     Map* map = sim_get_map(sim);
     LOG_TRACE("Map allocated at %p, with memory size %llu bytes", (void*)map, sizeof(*map));
     awesim_map_setup(map, city_width);
@@ -70,7 +73,13 @@ void awesim_setup(Simulation* sim, Meters city_width, int num_cars, Seconds dt) 
             car_set_speed(car, 0);
         }
     }
-    LOG_INFO("Awesome simulator setup complete with city width: %.2f meters, %d cars, and dt: %.2f seconds", city_width, sim->num_cars, dt);
+    LOG_INFO("Awesome simulator setup complete with city width: %.2f meters, %d cars, Clock: %02d:%02d:%02d, Weather: %s, dt: %.2f seconds",
+             city_width, sim->num_cars,
+             sim->initial_clock_reading.hours,
+             sim->initial_clock_reading.minutes,
+             (int)sim->initial_clock_reading.seconds,
+             weather_strings[sim->weather],
+             sim->dt);
 }
 
 

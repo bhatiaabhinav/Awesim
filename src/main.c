@@ -85,11 +85,19 @@ int main(int argc, char* argv[]) {
     SDL_Event event;
 
     Seconds dt = 0.02;                              // time resolution for integration.
+    ClockReading initial_clock_reading = clock_reading(0, 8, 0, 0); // start clock at 8:00 AM on Monday.
+    Weather weather = WEATHER_SUNNY;                // default weather condition.
     Seconds seconds_to_simulate = 1e9;              // total time (in sim) to simulate, after which the program will exit.
 
-    Simulation* sim = (Simulation*)malloc(sizeof(Simulation));
-    LOG_DEBUG("Allocated memory for simulation, size %.2f kilobytes.", sizeof(*sim) / 1024.0);
-    awesim_setup(sim, city_width, num_cars, dt);
+    Simulation* sim = sim_malloc();
+    if (!sim) {
+        LOG_ERROR("Failed to allocate memory for Simulation. Exiting.");
+        SDL_DestroyRenderer(renderer);
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return EXIT_FAILURE;
+    }
+    awesim_setup(sim, city_width, num_cars, dt, initial_clock_reading, weather);
 
 
     int text_font_size = 20;                // font size for stats rendering
@@ -229,7 +237,7 @@ int main(int argc, char* argv[]) {
     }
     
     LOG_DEBUG("Freeing simulation memory.");
-    free(sim);
+    sim_free(sim);
     LOG_INFO("Simulation cleaned up successfully.");
     LOG_DEBUG("Cleaning up SDL resources.");
     cleanup_text_rendering();

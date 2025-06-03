@@ -54,12 +54,32 @@ ClockReading clock_reading_add(const ClockReading clock1, const ClockReading clo
 
 // --- Simulation Core Functions ---
 
-void sim_init(Simulation* sim, double dt) {
+Simulation* sim_malloc() {
+    Simulation* sim = (Simulation*)malloc(sizeof(Simulation));
+    if (!sim) {
+        LOG_ERROR("Failed to allocate memory for Simulation");
+        return NULL;
+    }
+    LOG_DEBUG("Allocated memory for simulation, size %.2f kilobytes.", sizeof(*sim) / 1024.0);
+    return sim;
+}
+
+void sim_free(Simulation* self) {
+    if (self) {
+        free(self);
+        LOG_DEBUG("Freed memory for simulation");
+    } else {
+        LOG_ERROR("Attempted to free a NULL Simulation pointer");
+    }
+}
+
+
+void sim_init(Simulation* sim) {
     map_init(&sim->map);
     sim->initial_clock_reading = clock_reading(0, 8, 0, 0);  // 8:00 AM Monday
     sim->num_cars = 0;
     sim->time = 0.0;
-    sim->dt = dt;
+    sim->dt = 0.02;
     sim->weather = WEATHER_SUNNY;
 }
 
@@ -119,6 +139,18 @@ DayOfWeek sim_get_day_of_week(const Simulation* self) {
 
 
 // --- Setters ---
+
+void sim_set_dt(Simulation* self, Seconds dt) {
+    if (self) {
+        if (dt <= 0) {
+            LOG_ERROR("Invalid dt value: %.2f. It must be positive.", dt);
+            return;
+        }
+        self->dt = dt;
+    } else {
+        LOG_ERROR("Attempted to set dt on a NULL Simulation pointer");
+    }
+}
 
 void sim_set_initial_clock_reading(Simulation* self, ClockReading clock) {
     if (self) self->initial_clock_reading = clock;
