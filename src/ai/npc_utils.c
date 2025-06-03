@@ -77,47 +77,49 @@ bool car_is_lane_change_dangerous(const Car* car, Simulation* sim, const Situati
 
 
 bool car_should_yield_at_intersection(const Car* self, Simulation* sim, const SituationalAwareness* situation, CarIndictor turn_indicator) {
-    Map* map = sim_get_map(sim);
-    if (!situation->is_approaching_intersection && !situation->is_on_intersection) {
+    // TODO: Implement metric logger to show number of collisions on left or right turns.
+    // TODO: Fix left turn yielding when the oncoming car stops or breaks in the middle of the intersection. The current ego car assumes the car maintains its speed and does not stop, which is not always true.
+    // TODO: Tune the hyperparameters for yield decision making.
+    Map* map = sim_get_map(sim); //
+    if (!situation->is_approaching_intersection && !situation->is_on_intersection) { //
         return false; // Not at an intersection
     }
 
-    const Intersection* intersection_obj = situation->intersection;
+    const Intersection* intersection_obj = situation->intersection; //
     if (!intersection_obj) {
         return false;
     }
 
-    Meters car_speed = car_get_speed(self);
-    Meters self_half_length = car_get_length(self) / 2;
-    Meters car_front_bumper_dist_to_stop_line = situation->distance_to_end_of_lane - self_half_length;
+    Meters car_speed = car_get_speed(self); //
+    Meters self_half_length = car_get_length(self) / 2; //
+    Meters car_front_bumper_dist_to_stop_line = situation->distance_to_end_of_lane - self_half_length; //
 
     // 1. Left Turn Yield (e.g., TRAFFIC_LIGHT_GREEN_YIELD, self intends INDICATOR_LEFT)
-    if (turn_indicator == INDICATOR_LEFT &&
-        (situation->light_for_turn[INDICATOR_LEFT] == TRAFFIC_LIGHT_GREEN_YIELD ||
-         (situation->light_for_turn[INDICATOR_LEFT] == TRAFFIC_LIGHT_YELLOW_YIELD && self->preferences.run_yellow_light))) {
+    if (turn_indicator == INDICATOR_LEFT && //
+        (situation->light_for_turn[INDICATOR_LEFT] == TRAFFIC_LIGHT_GREEN_YIELD || //
+         (situation->light_for_turn[INDICATOR_LEFT] == TRAFFIC_LIGHT_YELLOW_YIELD && self->preferences.run_yellow_light))) { //
         
-        // This check ensures the car doesn't yield when it's still far down the road from the intersection.
-        const Meters YIELD_DECISION_PROXIMITY_THRESHOLD = meters(5.0); // Tunable
+        const Meters YIELD_DECISION_PROXIMITY_THRESHOLD = meters(5.0); // Tunable //
         if (car_front_bumper_dist_to_stop_line > YIELD_DECISION_PROXIMITY_THRESHOLD) {
-            // Too far from the stop line to make a specific yield decision against oncoming traffic yet.
-            // The main driving logic in npc_car_make_decisions should handle general approach speed.
             return false;
         }
 
-        Direction my_dir = situation->lane->direction;
+        Direction my_dir = situation->lane->direction; //
         const Road* opposite_approach_straight_road = NULL;
 
+        // NOTE: Assuming intersection_get_road_... functions exist and take (Intersection*, Map*)
+        // and return const Road*. The original road.h showed direct member access.
         switch (my_dir) {
-            case DIRECTION_EAST:
+            case DIRECTION_EAST: //
                 opposite_approach_straight_road = intersection_get_road_westbound_from(intersection_obj, map);
                 break;
-            case DIRECTION_WEST:
+            case DIRECTION_WEST: //
                 opposite_approach_straight_road = intersection_get_road_eastbound_from(intersection_obj, map);
                 break;
-            case DIRECTION_NORTH:
+            case DIRECTION_NORTH: //
                 opposite_approach_straight_road = intersection_get_road_southbound_from(intersection_obj, map);
                 break;
-            case DIRECTION_SOUTH:
+            case DIRECTION_SOUTH: //
                 opposite_approach_straight_road = intersection_get_road_northbound_from(intersection_obj, map);
                 break;
             default:
@@ -130,12 +132,13 @@ bool car_should_yield_at_intersection(const Car* self, Simulation* sim, const Si
 
         const Road* opposite_approach_road = opposite_approach_straight_road;
         
-
         for (int i = 0; i < road_get_num_lanes(opposite_approach_road); ++i) {
+            // NOTE: Assuming road_get_lane now takes (Road*, Map*, int)
             const Lane* oncoming_lane = road_get_lane(opposite_approach_road, map, i);
             if (!oncoming_lane) continue;
 
             for (int k = 0; k < lane_get_num_cars(oncoming_lane); ++k) {
+                // NOTE: Assuming lane_get_car now takes (Lane*, Simulation*, int)
                 const Car* oncoming_car = lane_get_car(oncoming_lane, sim, k);
                 if (!oncoming_car) continue;
 
@@ -145,20 +148,46 @@ bool car_should_yield_at_intersection(const Car* self, Simulation* sim, const Si
                 Meters oncoming_dist_to_their_stop_line = oncoming_lane_length - oncoming_progress_m - (oncoming_car_length / 2.0);
                 Meters oncoming_speed = car_get_speed(oncoming_car);
 
-                // Check if the oncoming car is relevant (close to its stop line and moving)
-                if (oncoming_dist_to_their_stop_line < meters(20) && oncoming_speed > meters(1.0)) { // Tunable: meters(20)
-                    
-                    // If the ego car is already (almost) stopped at its line, it should yield if any relevant oncoming traffic exists.
-                    if (car_speed < meters(0.5) && car_front_bumper_dist_to_stop_line < meters(3.0)) { // Essentially stopped at line
+                bool oncoming_is_a_factor = false;
+
+                // Check if oncoming car is already in the intersection's conflict area for our turn
+                // (i.e., past its stop line but not too far past the typical conflict zone width).
+                // A typical intersection might be 15-20m wide.
+                if (oncoming_dist_to_their_stop_line < meters(0) && oncoming_dist_to_their_stop_line > -meters(15.0)) {
+                    // Car is in the intersection, 0 to 15m past its stop line.
+                    // Its presence is a factor, regardless of its current speed (it might be stopped/braking).
+                    oncoming_is_a_factor = true;
+                }
+                // Else, check if it's approaching and poses a threat based on speed and proximity.
+                else if (oncoming_dist_to_their_stop_line >= meters(0) && oncoming_dist_to_their_stop_line < meters(20) && oncoming_speed > meters(1.0)) {
+                    oncoming_is_a_factor = true;
+                }
+
+                if (oncoming_is_a_factor) {
+                    // If the ego car is already (almost) stopped at its line, it must yield.
+                    if (car_speed < meters(0.5) && car_front_bumper_dist_to_stop_line < meters(3.0)) {
                         return true; // Yield
                     }
 
-                    // If ego car is still moving (but within YIELD_DECISION_PROXIMITY_THRESHOLD), compare times.
-                    double time_for_oncoming_to_enter_intersection = (oncoming_speed > 0.1) ? (oncoming_dist_to_their_stop_line / oncoming_speed) : 1000.0;
-                    double time_for_me_to_enter_conflict_zone = (car_speed > 0.1) ? (car_front_bumper_dist_to_stop_line / car_speed) : 1000.0;
-                    
-                    if (time_for_oncoming_to_enter_intersection < time_for_me_to_enter_conflict_zone + 5.0) { // 5.0s safety buffer
+                    // If oncoming car is already IN the intersection (and thus blocking the path)
+                    // and our ego car is very close to entering (within YIELD_DECISION_PROXIMITY_THRESHOLD),
+                    // the ego car must yield.
+                    if (oncoming_dist_to_their_stop_line < meters(0) && oncoming_dist_to_their_stop_line > -meters(15.0)) {
+                        // Ego car is already within 5m of its line (YIELD_DECISION_PROXIMITY_THRESHOLD).
+                        // If oncoming car is present in the intersection, yield.
+                        // printf("Yielding to oncoming car in intersection: %d\n", oncoming_car->id);
                         return true; // Yield
+                    }
+                    
+                    // If oncoming car is APPROACHING (not yet in intersection), and ego is moving, compare times.
+                    // This case is now only for when oncoming_dist_to_their_stop_line >= 0.
+                    if (oncoming_dist_to_their_stop_line >= meters(0)) {
+                        double time_for_oncoming_to_enter_intersection = (oncoming_speed > 0.1) ? (oncoming_dist_to_their_stop_line / oncoming_speed) : 1000.0;
+                        double time_for_me_to_enter_conflict_zone = (car_speed > 0.1) ? (car_front_bumper_dist_to_stop_line / car_speed) : 1000.0;
+                        
+                        if (time_for_oncoming_to_enter_intersection < time_for_me_to_enter_conflict_zone + 5.0) { // 5.0s safety buffer
+                            return true; // Yield
+                        }
                     }
                 }
             }
@@ -166,61 +195,54 @@ bool car_should_yield_at_intersection(const Car* self, Simulation* sim, const Si
     }
 
     // 2. Right Turn on Red Yield / General Yield Sign
-    // This handles TRAFFIC_LIGHT_RED_YIELD specifically for right turns,
-    // and TRAFFIC_LIGHT_YIELD for any turn_indicator (though the conflict logic below is tailored for cross-traffic from left).
-    if ((turn_indicator == INDICATOR_RIGHT && situation->light_for_turn[INDICATOR_RIGHT] == TRAFFIC_LIGHT_RED_YIELD) ||
-         situation->light_for_turn[turn_indicator] == TRAFFIC_LIGHT_YIELD) {
+    if ((turn_indicator == INDICATOR_RIGHT && situation->light_for_turn[INDICATOR_RIGHT] == TRAFFIC_LIGHT_RED_YIELD) || //
+         situation->light_for_turn[turn_indicator] == TRAFFIC_LIGHT_YIELD) { //
 
         Meters yield_decision_proximity_threshold;
-        if (turn_indicator == INDICATOR_RIGHT && situation->light_for_turn[INDICATOR_RIGHT] == TRAFFIC_LIGHT_RED_YIELD) {
-            // For Right Turn on Red, car should be very close, typically having already stopped or preparing to.
-            yield_decision_proximity_threshold = meters(5.0);
+        if (turn_indicator == INDICATOR_RIGHT && situation->light_for_turn[INDICATOR_RIGHT] == TRAFFIC_LIGHT_RED_YIELD) { //
+            yield_decision_proximity_threshold = meters(5.0); //
         } else {
-            // For a general TRAFFIC_LIGHT_YIELD, allow a slightly larger distance,
-            yield_decision_proximity_threshold = meters(10.0); // Tunable
+            yield_decision_proximity_threshold = meters(10.0); // Tunable //
         }
 
         if (car_front_bumper_dist_to_stop_line > yield_decision_proximity_threshold) {
-            // Too far from the stop line to make this specific yield decision yet.
             return false;
         }
 
         Direction my_dir = situation->lane->direction; //
         const Road* conflicting_approach_straight_road = NULL;
 
-        // Determine the primary conflicting approach road (traffic from the ego car's left).
+        // NOTE: Assuming intersection_get_road_... functions exist
         switch (my_dir) {
-            case DIRECTION_NORTH: // Ego car going North, turning right (East) OR yielding. Conflict from West.
-                conflicting_approach_straight_road = intersection_get_road_westbound_from(intersection_obj, map); //
+            case DIRECTION_NORTH: //
+                conflicting_approach_straight_road = intersection_get_road_westbound_from(intersection_obj, map);
                 break;
-            case DIRECTION_EAST:  // Ego car going East, turning right (South) OR yielding. Conflict from North.
-                conflicting_approach_straight_road = intersection_get_road_northbound_from(intersection_obj, map); //
+            case DIRECTION_EAST: //
+                conflicting_approach_straight_road = intersection_get_road_northbound_from(intersection_obj, map);
                 break;
-            case DIRECTION_SOUTH: // Ego car going South, turning right (West) OR yielding. Conflict from East.
-                conflicting_approach_straight_road = intersection_get_road_eastbound_from(intersection_obj, map); //
+            case DIRECTION_SOUTH: //
+                conflicting_approach_straight_road = intersection_get_road_eastbound_from(intersection_obj, map);
                 break;
-            case DIRECTION_WEST:  // Ego car going West, turning right (North) OR yielding. Conflict from South.
-                conflicting_approach_straight_road = intersection_get_road_southbound_from(intersection_obj, map); //
+            case DIRECTION_WEST: //
+                conflicting_approach_straight_road = intersection_get_road_southbound_from(intersection_obj, map);
                 break;
             default:
-                // Non-cardinal direction for the current lane, or situation not easily mapped
-                return false; // Cannot determine conflict reliably.
+                return false;
         }
 
         if (!conflicting_approach_straight_road) {
-            // This might occur at a T-junction where there's no road to the left,
-            // or if the intersection definition is incomplete.
-            // printf("DEBUG Car %p: Right/Yield Turn - Conflicting approach road is NULL for my_dir %d.\n", (void*)self, my_dir);
-            return false; // Assume clear if no conflicting path is defined.
+            return false;
         }
 
         const Road* conflicting_approach_road = conflicting_approach_straight_road;
 
         for (int i = 0; i < road_get_num_lanes(conflicting_approach_road); ++i) { //
+            // NOTE: Assuming road_get_lane now takes (Road*, Map*, int)
             const Lane* conflicting_lane = road_get_lane(conflicting_approach_road, map, i); //
             if (!conflicting_lane) continue;
 
             for (int k = 0; k < lane_get_num_cars(conflicting_lane); ++k) { //
+                // NOTE: Assuming lane_get_car now takes (Lane*, Simulation*, int)
                 const Car* conflicting_car = lane_get_car(conflicting_lane, sim, k); //
                 if (!conflicting_car) continue;
 
@@ -230,33 +252,18 @@ bool car_should_yield_at_intersection(const Car* self, Simulation* sim, const Si
                 Meters conflicting_car_dist_to_its_stop_line = conflicting_lane_length - conflicting_car_progress_m - (conflicting_car_length / 2.0);
                 Meters conflicting_car_speed = car_get_speed(conflicting_car); //
 
-                // Heuristic: If a conflicting car (from the left) is close to its intersection entry and moving.
-                // Tunable: meters(25.0) gives them a bit more space/time than direct oncoming for left turns.
-                if (conflicting_car_dist_to_its_stop_line < meters(15.0) && conflicting_car_speed > meters(1.0)) {
-                    
-                    // If ego car is already (almost) stopped at its line (expected for Right Turn on Red,
-                    // or after deciding to stop for a Yield sign).
-                    if (car_speed < meters(0.5) && car_front_bumper_dist_to_stop_line < meters(3.0)) { // Essentially stopped at line
-                        // printf("DEBUG Car %p: Yielding (stopped at line) to conflicting cross-traffic car %p\n", (void*)self, (void*)conflicting_car);
+                if (conflicting_car_dist_to_its_stop_line < meters(15.0) && conflicting_car_speed > meters(1.0)) { //
+                    if (car_speed < meters(0.5) && car_front_bumper_dist_to_stop_line < meters(3.0)) { //
                         return true; // Yield
                     }
-
-                    // If ego car is still moving (but within yield_decision_proximity_threshold),
-                    // be cautious. For yields/right-on-red, it's generally not about "beating" the other car
-                    // but ensuring they pass safely if they are close.
                     double time_for_conflicting_to_enter_intersection = (conflicting_car_speed > 0.1) ? (conflicting_car_dist_to_its_stop_line / conflicting_car_speed) : 1000.0;
-
-                    // If conflicting car is very close in time (e.g., less than ~3 seconds away),
-                    // it's safer to yield.
-                    const double CONFLICTING_CAR_TIME_THRESHOLD_S = 3.0; // Tunable
+                    const double CONFLICTING_CAR_TIME_THRESHOLD_S = 4.0; // Tunable
                     if (time_for_conflicting_to_enter_intersection < CONFLICTING_CAR_TIME_THRESHOLD_S) {
-                        // printf("DEBUG Car %p: Yielding (moving) to conflicting cross-traffic car %p (time_to_their_entry %f s)\n", (void*)self, (void*)conflicting_car, time_for_conflicting_to_enter_intersection);
                         return true; // Yield
                     }
                 }
             }
         }
     }
-
     return false;
 }
