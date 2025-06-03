@@ -54,7 +54,7 @@ CarAccelProfile car_accel_profile_get_random_preset(void) {
         
     };
     size_t count = sizeof(presets) / sizeof(presets[0]);
-    return presets[rand() % count];
+    return presets[rand_int(count)];
 }
 
 
@@ -75,7 +75,7 @@ CarAccelProfile car_accel_profile_get_random_preference_preset(void) {
         CAR_ACC_PREF_AGGRESSIVE
     };
     size_t count = sizeof(prefs) / sizeof(prefs[0]);
-    return prefs[rand() % count];
+    return prefs[rand_int(count)];
 }
 
 
@@ -102,7 +102,7 @@ Dimensions car_dimensions_get_random_preset(void) {
         // CAR_SIZE_BUS
     };
     size_t count = sizeof(dims) / sizeof(dims[0]);
-    return dims[rand() % count];
+    return dims[rand_int(count)];
 }
 
 
