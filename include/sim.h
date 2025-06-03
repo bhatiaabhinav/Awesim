@@ -75,6 +75,7 @@ typedef struct Simulation {
     Seconds time;   // Time simulated so far
     Seconds dt;     // Simulation engine's time resolution for integration (in seconds)
     Weather weather;
+    bool is_agent_enabled; // Whether car 0 is an agent (true) or an NPC (false). False by default. When true, car 0 is the agent car and must be controlled using car_set_acceleration, car_set_indicator_turn, and car_set_indicator_lane functions outside the sim loop.
 } Simulation;
 
  // Allocate memory for a new Simulation instance. The memory is not initialized and contains garbage values.
@@ -98,12 +99,15 @@ Seconds sim_get_dt(const Simulation* self);
 Weather sim_get_weather(Simulation* self);
 ClockReading sim_get_clock_reading(Simulation* self);
 DayOfWeek sim_get_day_of_week(const Simulation* self);
+bool sim_is_agent_enabled(Simulation* self);
+// returns NULL if the agent is not enabled
 Car* sim_get_agent_car(Simulation* self);
 
 // --- Setters ---
 void sim_set_dt(Simulation* self, Seconds dt);
 void sim_set_initial_clock_reading(Simulation* self, ClockReading clock);
 void sim_set_weather(Simulation* self, Weather weather);
+void sim_set_agent_enabled(Simulation* self, bool enabled);
 
 // --- Time Queries ---
 bool sim_is_weekend(Simulation* self);

@@ -116,10 +116,6 @@ Car* sim_get_car(Simulation* self, int id) {
     return &self->cars[id];
 }
 
-Car* sim_get_agent_car(Simulation* self) {
-    return sim_get_car(self, 0);
-}
-
 Seconds sim_get_time(Simulation* self) {
     return self ? self->time : 0;
 }
@@ -135,6 +131,32 @@ Weather sim_get_weather(Simulation* self) {
 DayOfWeek sim_get_day_of_week(const Simulation* self) {
     if (!self) return MONDAY;
     return sim_get_clock_reading((Simulation*)self).day_of_week;
+}
+
+bool sim_is_agent_enabled(Simulation* self) {
+    return self ? self->is_agent_enabled : false;
+}
+
+Car* sim_get_agent_car(Simulation* self) {
+    if (!self) {
+        LOG_ERROR("Attempted to get agent car from a NULL Simulation pointer");
+        return NULL;
+    }
+    if (self->is_agent_enabled) {
+        return sim_get_car(self, 0); // Agent car is always at index 0
+    } else {
+        LOG_DEBUG("Agent is not enabled, returning NULL");
+        return NULL; // Agent is not enabled
+    }
+}
+
+void sim_set_agent_enabled(Simulation* self, bool enabled) {
+    if (self) {
+        self->is_agent_enabled = enabled;
+        LOG_INFO("Agent enabled: %s", enabled ? "true" : "false");
+    } else {
+        LOG_ERROR("Attempted to set agent enabled on a NULL Simulation pointer");
+    }
 }
 
 

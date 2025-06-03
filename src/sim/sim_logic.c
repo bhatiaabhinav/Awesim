@@ -41,9 +41,14 @@ void simulate(Simulation* self, Seconds time_period) {
 
 
         for(int car_id=0; car_id < self->num_cars; car_id++) {
-            // bool is_NPC = car_id > 0;
             Car* car = sim_get_car(self, car_id);
-            npc_car_make_decisions(car, self);
+            if (!sim_is_agent_enabled(self) || car_id > 0) {
+                // NPC car logic
+                npc_car_make_decisions(car, self);
+            } else {
+                // Assume that the first car (id 0) is the agent car and it is controlled externally.
+                LOG_TRACE("Skipping decision-making for agent car %d, assuming it is controlled externally using car_set_acceleration, car_set_indicator_turn, and car_set_indicator_lane functions.", car->id);
+            }
             Lane* lane = car_get_lane(car, map);
             double progress = car_get_lane_progress(car);
             Meters s = car_get_lane_progress_meters(car);
@@ -58,6 +63,8 @@ void simulate(Simulation* self, Seconds time_period) {
             Lane* adjacent_right = lane_get_adjacent_right(lane, map);
             if(lane_change_intent == INDICATOR_LEFT && adjacent_left && adjacent_left->direction == lane->direction) {
                 // TODO: ignore lane change if this is an NPC if a collision is possible with another vehicle
+                // TODO: Allow non-NPC to do unsafe lane change (and receive a penalty for that).
+                // TODO: Maybe it is ok to allow to NPCs to do unsafe lane changes as well? So that they can pass the leading vehicle?
                 lane = adjacent_left;
                 lane_change_intent = INDICATOR_NONE;   // Important: To mark lane change intent already executed, so that merge is ignored if a merge is available on the new lane.
                 LOG_TRACE("Car %d changed to left lane %d", car->id, lane->id);

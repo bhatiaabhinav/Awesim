@@ -71,6 +71,7 @@ void awesim_setup(Simulation* sim, Meters city_width, int num_cars, Seconds dt, 
             car_set_lane_progress(car, random_progress, random_progress * random_lane->length);
             // car_set_speed(car, random_lane->speed_limit + car->preferences.average_speed_offset);
             car_set_speed(car, 0);
+            LOG_TRACE("Placed car id %d on lane %d (%s) at position %.2f meters (speed = %.2f mph) after %d attempts", car->id, random_lane->id, road_get_name(random_road), car_get_lane_progress_meters(car), to_mph(car_get_speed(car)), attempts);
         }
     }
     LOG_INFO("Awesome simulator setup complete with city width: %.2f meters, %d cars, Clock: %02d:%02d:%02d, Weather: %s, dt: %.2f seconds",
