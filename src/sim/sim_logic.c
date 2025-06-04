@@ -174,9 +174,12 @@ void simulate(Simulation* self, Seconds time_period) {
             s = progress * lane->length; // update s after all changes to lane and progress.
 
             car_handle_lane_change(map, car, lane);
+            Road* road = lane_get_road(lane, map);
+            Intersection* intersection = lane_get_intersection(lane, map);
+            const char* road_name = road ? road->name : intersection ? intersection->name : "Unknown";
             car_set_lane_progress(car, progress, s);
             car_set_speed(car, v);
-            LOG_TRACE("Car %d processing complete: Updated lane %d, progress %.2f (s = %.2f), speed = %.2f, acceleration = %.2f", car->id, lane->id, progress, s, v, a);
+            LOG_TRACE("Car %d processing complete: Updated state: lane %d (%s), progress %.2f (%.2f miles), speed = %.2f mps (%.2f mph), acceleration = %.2f mpss", car->id, lane->id, road_name, progress, to_miles(s), v, to_mph(v), a);
         }
         self->time += dt;
     }
