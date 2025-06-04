@@ -59,6 +59,21 @@ Each header file is implemented in a corresponding folder within the `src/` dire
 
 ---
 
-Feel free to contribute or report issues. Enjoy simulating!
+## Python Bindings
+
+To generate a shared library, run:
+
+```bash
+sh scripts/linux/compile_so.sh
+```
+on Linux or MacOS. For Windows, use `scripts/windows/compile_dll.bat`.
+
+To use the shared library from Python, create a Python virtual environment and install `cffi` module using pip. That's it. See example script `python/awesim.py` for usage.
+
 
 ## Todos
+
+
+## Contributing
+
+Feel free to contribute or report issues. Enjoy simulating!

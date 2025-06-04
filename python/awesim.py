@@ -1,14 +1,28 @@
+#  Before running this script, make sure you run compile_so.sh script on linux or mac, or compile_dll.bat on Windoes. Also, install `pip install cffi` in your python environment.
+
 import os
 from cffi import FFI
 
 os.environ["SIM_TRACE"] = "sim_logic.c"     # to print simulator logs
 
 ffi = FFI()
-with open(os.path.join("python", "libawesim.h")) as f:
-    ffi.cdef(f.read(), override=True)
-libsim = ffi.dlopen(os.path.join("bin", "libawesim.so"))   # sim module. Contains everything declared in the header files
+try:
+    with open(os.path.join("python", "libawesim.h")) as f:
+        ffi.cdef(f.read(), override=True)
+except FileNotFoundError:
+    print("Error: libawesim.h not found")
+    exit(1)
 
-# libsim.main(0, [])
+# Dynamic library loading based on OS.
+lib_extension = "dll" if os.name == "nt" else "so"
+lib_name = f"libawesim.{lib_extension}"
+lib_path = os.path.abspath(os.path.join("bin", lib_name))
+try:
+    libsim = ffi.dlopen(lib_path)     # sim module. Contains everything declared in the header files
+except OSError as e:
+    print(f"Error loading library {lib_path}: {e}")
+    exit(1)
+
 
 sim = libsim.sim_malloc()
 city_width = 1000   # 1km

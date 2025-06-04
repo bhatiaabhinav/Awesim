@@ -28,21 +28,3 @@ mkdir -p bin
 echo "int main(int argc, char* argv[]);" >> "$output_header"
 
 echo "✅ Combined headers into $output_header"
-
-# Compilation block (unchanged)
-echo "Compiling source files to shared library..."
-
-gcc \
-    -fPIC -shared \
-    -Iinclude \
-    src/*.c src/utils/*.c src/render/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c \
-    -o ./bin/libawesim.so \
-    -lSDL2 -lSDL2_gfx -lSDL2_ttf -lSDL2_image -lm -lrt \
-    -Wall -Wunused-variable
-
-if [ $? -eq 0 ]; then
-    echo "✅ Compilation successful. Shared library created at: ./bin/libawesim.so"
-else
-    echo "❌ Compilation failed. Please check the errors above."
-    exit 1
-fi
