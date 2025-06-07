@@ -26,7 +26,7 @@ void car_handle_lane_change(Map* map, Car* car, Lane* new_lane) {
     car_set_lane(car, new_lane);
 }
 
-void simulate(Simulation* self, Seconds time_period) {
+void sim_integrate(Simulation* self, Seconds time_period) {
     Seconds t0 = self->time;
     Seconds dt = self->dt;
     Map* map = sim_get_map(self);

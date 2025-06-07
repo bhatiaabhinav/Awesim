@@ -31,9 +31,11 @@ init_clock = libsim.clock_reading(0, 8, 0, 0)   # Monday 8:00 AM
 init_weather = libsim.WEATHER_SUNNY
 libsim.awesim_setup(sim, city_width, num_cars, 0.02, init_clock, init_weather)  # set's up sim variables, awesim map and adds cars randomly
 libsim.sim_set_agent_enabled(sim, True)         # car 0 won't be NPC
-decision_frequency = 0.1
+decision_interval = 0.1
 total_play_time = 8.0
 agent = libsim.sim_get_agent_car(sim)
+libsim.sim_set_synchronized(sim, True, 1.0)  # synchronize simulation with real time
+libsim.sim_open_rendering_window(sim)
 
 while libsim.sim_get_time(sim) < total_play_time:
     situation = libsim.situational_awareness_build(agent, sim)  # holds most variables needed for decision making
@@ -41,6 +43,7 @@ while libsim.sim_get_time(sim) < total_play_time:
     libsim.car_set_acceleration(agent, 4.0)     # 0-60mph in ~4.5s
     libsim.car_set_indicator_lane(agent, libsim.INDICATOR_NONE)
     libsim.car_set_indicator_turn(agent, libsim.INDICATOR_NONE)
-    libsim.simulate(sim, decision_frequency)    # simulate 0.1 seconds
+    libsim.simulate(sim, decision_interval)    # simulate 0.1 seconds
 
+libsim.sim_close_rendering_window()  # close rendering window
 libsim.sim_free(sim)

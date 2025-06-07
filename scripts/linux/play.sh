@@ -18,7 +18,7 @@ gcc \
     -Iinclude \
     src/*.c src/utils/*.c src/render/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c \
     -o ./bin/play \
-    -lSDL2 -lSDL2_gfx -lSDL2_ttf -lSDL2_image -lm -lrt \
+    -lSDL2 -lSDL2_gfx -lSDL2_ttf -lSDL2_image -lm -lrt -lpthread \
     -Wall -Wunused-variable
 
 # Check if compilation was successful

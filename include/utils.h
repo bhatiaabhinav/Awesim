@@ -40,6 +40,8 @@ double fclamp(double value, double min, double max);
 // Returns system time in seconds since Unix epoch with microsecond precision.
 double get_sys_time_seconds(void);
 
+// Sleeps for the specified number of milliseconds.
+void sleep_ms(int milliseconds);
 
 //
 // 2D Vector structure and operations

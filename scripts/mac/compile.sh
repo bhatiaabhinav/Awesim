@@ -21,7 +21,7 @@ gcc \
     `sdl2-config --cflags --libs` \
     `pkg-config --cflags --libs sdl2_ttf` \
     `pkg-config --cflags --libs sdl2_image` \
-    -lSDL2 -lSDL2_gfx -lSDL2_ttf -lSDL2_image -lm \
+    -lSDL2 -lSDL2_gfx -lSDL2_ttf -lSDL2_image -lm -lpthread \
     -Wall -Wunused-variable
 
 # Check if compilation was successful

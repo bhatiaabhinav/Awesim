@@ -8,9 +8,10 @@ if not exist bin mkdir bin
 
 gcc ^
     -Iinclude ^
+    -D_WIN32_WINNT=0x0A00 ^
     src/benchmark/*.c src/utils/*.c src/render/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c ^
     -o .\bin\benchmark.exe ^
-    -lSDL2main -lSDL2 -lSDL2_gfx -lSDL2_ttf -lSDL2_image -lm ^
+    -lSDL2main -lSDL2 -lSDL2_gfx -lSDL2_ttf -lSDL2_image -lm -lpthread ^
     -Wall -Wunused-variable
 
 REM Check if compilation succeeded

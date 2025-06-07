@@ -81,6 +81,11 @@ void sim_init(Simulation* sim) {
     sim->time = 0.0;
     sim->dt = 0.02;
     sim->weather = WEATHER_SUNNY;
+    sim->is_agent_enabled = false; // Agent car is disabled by default
+    sim->is_synchronized = false; // Not synchronized by default
+    sim->simulation_speedup = 1.0; // Default to real-time speed
+    sim->is_rendering_window_open = false; // Rendering window is closed by default
+    sim->should_quit_when_rendering_window_closed = false; // Default behavior is to not quit when rendering window is closed
 }
 
 Car* sim_get_new_car(Simulation* self) {
@@ -159,6 +164,34 @@ void sim_set_agent_enabled(Simulation* self, bool enabled) {
     }
 }
 
+void sim_set_synchronized(Simulation* self, bool is_synchronized, double simulation_speedup) {
+    if (self) {
+        if (is_synchronized) {
+            if (simulation_speedup <= 0) {
+                LOG_ERROR("Invalid simulation speedup value: %.2f. It must be positive.", simulation_speedup);
+                return;
+            }
+            self->is_synchronized = is_synchronized;
+            self->simulation_speedup = simulation_speedup;
+            LOG_INFO("Simulation synchronized with wall time at %.2fx speedup", simulation_speedup);
+        } else {
+            self->is_synchronized = false;
+            self->simulation_speedup = 1.0; // Default to real-time speed
+            LOG_INFO("Simulation set to run as fast as possible without synchronization");
+        }
+    } else {
+        LOG_ERROR("Attempted to set synchronization on a NULL Simulation pointer");
+    }
+}
+
+void sim_set_should_quit_when_rendering_window_closed(Simulation* self, bool should_quit) {
+    if (self) {
+        self->should_quit_when_rendering_window_closed = should_quit;
+        LOG_DEBUG("Set should quit when rendering window closed to %s", should_quit ? "true" : "false");
+    } else {
+        LOG_ERROR("Attempted to set should quit on a NULL Simulation pointer");
+    }
+}
 
 // --- Setters ---
 
@@ -219,8 +252,56 @@ double sunlight_intensity(Simulation* self) {
     return sin(M_PI * (h - 6) / 12);
 }
 
+// --- Simulation Core Functions ---
+
+void simulate(Simulation* self, Seconds sim_duration) {
+    if (!self) {
+        LOG_ERROR("Attempted to simulate a NULL Simulation pointer");
+        return;
+    }
+    if (!self->is_rendering_window_open && self->should_quit_when_rendering_window_closed) {
+        LOG_ERROR("Rendering window is not open, and should quit when rendering window closed is true. Not simulating.");
+        return; // Exit if rendering window is not open and should quit when closed
+    }
+    if (sim_duration <= 0) {
+        LOG_ERROR("Invalid simulation duration: %.2f. It must be positive.", sim_duration);
+        return;
+    }
+    if (!self->is_synchronized) {
+        LOG_TRACE("Simulation is not synchronized with wall time, running as fast as possible.");
+        sim_integrate(self, sim_duration);
+        return; // No synchronization needed, just integrate
+    }
+
+    double sim_time = self->time;               // sim time passed in seconds
+    double initial_sim_time = sim_time;         // store initial sim time
+    double t_prev = get_sys_time_seconds();         // previous wall time in seconds
+    LOG_TRACE("Starting simulation for %.2f seconds. Current sim time: %.2f seconds", 
+              sim_duration, sim_time);
+
+    while (sim_time - initial_sim_time < sim_duration) {
+
+        if (!self->is_rendering_window_open && self->should_quit_when_rendering_window_closed) {
+            LOG_INFO("Rendering window closed, quitting simulation.");
+            break; // Exit the loop if rendering window is closed and should quit when that happens
+        }
+
+        double delta_wall_t = get_sys_time_seconds() - t_prev;
+        double simulation_speedup = self->simulation_speedup;
+        sim_time += delta_wall_t * simulation_speedup;
+        sim_integrate(self, sim_time - self->time);     // make sim catch up to sim_time.
+        t_prev = get_sys_time_seconds();                // update previous wall time
+        double sleep_duration = (self->dt / simulation_speedup) * 1000.0;   // convert to milliseconds
+        sleep_duration = fclamp(sleep_duration, 1000.0 / 120.0, 1000 / 10.0);        // limit between 120 FPS and 10 FPS
+        LOG_TRACE("Simulation advanced to %.2f seconds (wall time delta: %.2f seconds). Sleeping for %.2f milliseconds", 
+                  sim_time, delta_wall_t, sleep_duration);
+        sleep_ms((int)sleep_duration);
+    }
+}
+
+
 // --- Simulation Ticking ---
 
 void sim_step(Simulation* self) {
-    if (self) simulate(self, self->dt);
+    if (self) sim_integrate(self, self->dt);
 }

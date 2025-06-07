@@ -33,6 +33,8 @@ double fclamp(double value, double min, double max);
 // Returns system time in seconds since Unix epoch with microsecond precision.
 double get_sys_time_seconds(void);
 
+// Sleeps for the specified number of milliseconds.
+void sleep_ms(int milliseconds);
 
 //
 // 2D Vector structure and operations
@@ -1129,6 +1131,11 @@ typedef struct Simulation {
     Seconds dt;     // Simulation engine's time resolution for integration (in seconds)
     Weather weather;
     bool is_agent_enabled; // Whether car 0 is an agent (true) or an NPC (false). False by default. When true, car 0 is the agent car and must be controlled using car_set_acceleration, car_set_indicator_turn, and car_set_indicator_lane functions outside the sim loop.
+
+    bool is_synchronized; // Whether the simulation is synchronized with wall time. If true, the simulation will run in real-time, simulating `simulation_speedup` seconds of simulation time per second of wall time. If false, the simulation will run as fast as possible without synchronization.
+    double simulation_speedup; // How many seconds of simulation time to simulate per second of wall time. Default is 1.0, meaning real-time simulation.
+    bool is_rendering_window_open; // Whether the rendering window is open. If true, the simulation is being rendered in an SDL window. If false, the simulation is not being rendered. The rendering thread sets this variable to true when the rendering window is opened and to false when the rendering window is closed.
+    bool should_quit_when_rendering_window_closed; // Whether the simulation should quit when the rendering window is closed. If true, the `simulate` function will return when the rendering window is closed, allowing the simulation to exit gracefully. If false, the simulation will continue running even if the rendering window is closed, allowing for background processing or other tasks to continue.
 } Simulation;
 
  // Allocate memory for a new Simulation instance. The memory is not initialized and contains garbage values.
@@ -1136,7 +1143,7 @@ Simulation* sim_malloc();
  // Free memory for a Simulation instance
 void sim_free(Simulation* self);
 
-// Initialize the simulation instance, setting up an empty map and default initial conditions (clock = 8:00 AM on monday, weather = sunny, dt = 0.02 seconds).
+// Initialize the simulation instance, setting up an empty map and default initial conditions (clock = 8:00 AM on monday, weather = sunny, dt = 0.02 seconds, no cars, no agent enabled, not synchronized).
 void sim_init(Simulation* sim);
 
 // Add a car to the simulation
@@ -1161,6 +1168,8 @@ void sim_set_dt(Simulation* self, Seconds dt);
 void sim_set_initial_clock_reading(Simulation* self, ClockReading clock);
 void sim_set_weather(Simulation* self, Weather weather);
 void sim_set_agent_enabled(Simulation* self, bool enabled);
+void sim_set_synchronized(Simulation* self, bool is_synchronized, double simulation_speedup);
+void sim_set_should_quit_when_rendering_window_closed(Simulation* self, bool should_quit);
 
 // --- Time Queries ---
 bool sim_is_weekend(Simulation* self);
@@ -1174,11 +1183,19 @@ bool sim_is_night(Simulation* self);
 // Returns sunlight intensity (0–1) based on time of day
 double sunlight_intensity(Simulation* self);
 
-// Advance simulation state by a duration
-void simulate(Simulation* self, Seconds duration);
+// Integrate the simulation for a given duration in (simulated) seconds with dt resolution, causing sim_duration / dt transition updates. This will advance the simulation `time` by `sim_duration` seconds.
+void sim_integrate(Simulation* self, Seconds sim_duration);
+
+// Advance simulation by a duration in (simulated) seconds. If `self->is_synchronized` is true, the simulation will run in real-time, simulating `self->simulation_speedup` seconds of simulation time per second of wall time. If `is_synchronized` is false, the simulation will run as fast as possible without synchronization, making this function identical to `sim_integrate(self, sim_duration)`.
+void simulate(Simulation* self, Seconds sim_duration);
 
 // Advance simulation by one timestep (dt)
 void sim_step(Simulation* self);
+
+// Start rendering thread in SDL window asynchronously. This function will create a new thread that will render the simulation in an SDL window. The simulation must be initialized before calling this function.
+int sim_open_rendering_window(Simulation* sim);
+// Close the rendering thread and clean up SDL resources. Will not free the simulation instance, so it must be done separately.
+void sim_close_rendering_window();
 
 
 struct TrackIntersectionPoint {
