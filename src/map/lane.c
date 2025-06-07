@@ -172,8 +172,8 @@ Intersection* lane_get_intersection(const Lane* self, Map* map) {
 }
 int lane_get_num_cars(const Lane* self) { return self->num_cars; }
 CarId lane_get_car_id(const Lane* self, int index) {
-    if (!self || index < 0 || index >= self->num_cars) {
-        LOG_ERROR("Invalid index %d for lane (id=%d) with %d cars.", index, self->id, self->num_cars);
+    if (!self || index < 0 || index >= self->num_cars || index >= MAX_CARS_PER_LANE) {
+        LOG_ERROR("Invalid index %d for lane (id=%d) with %d cars, max %d.", index, self->id, self->num_cars, MAX_CARS_PER_LANE);
         return ID_NULL;
     }
     return self->cars_ids[index];
@@ -241,7 +241,7 @@ Lane* lane_create(Map* map, const LaneType type, const Direction direction, cons
     lane->exit_lane_start = 0.0;
     lane->exit_lane_end = 0.0;
 
-    // lane->num_cars = 0;
+    lane->num_cars = 0;
 
     lane->start_point = vec_create(0.0, 0.0);
     lane->end_point = vec_create(0.0, 0.0);
