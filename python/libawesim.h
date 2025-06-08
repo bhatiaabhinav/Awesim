@@ -11,6 +11,14 @@
 // Returns true if the difference between a and b is within epsilon.
 bool approxeq(double a, double b, double epsilon);
 
+void seed_rng(uint32_t seed);
+
+// Returns a random 32-bit unsigned integer using a linear congruential generator (LCG).
+uint32_t lcg_rand();
+
+// Returns the current state of the LCG as a 32-bit unsigned integer.
+uint32_t lcg_get_state();
+
 // Returns a random double in the range [0.0, 1.0).
 double rand_0_to_1(void);
 

@@ -29,6 +29,13 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
     CarIndictor turn_indicator;
     CarIndictor lane_change_indicator;
 
+    // Some random calls. It is always good to sample same number of randoms in each decision-making cycle and make them independent of branching (which depends on floating point comparisons), to make decisions consistent across platforms / compilers, as different platforms / compilers may have different floating point comparison results due to precision issues.
+    double r1 = rand_0_to_1();
+    double r2 = rand_0_to_1();
+    double r3 = rand_0_to_1();
+    CarIndictor rand_turn = turn_sample_possible(&situation);
+    CarIndictor rand_lane_change = lane_change_sample_possible(&situation);
+
     if (situation.is_approaching_intersection) {
         // Whe approaching an intersection, turn and lane change decision will depend on distance to intersection. If we are far off, we can randomly change lanes or change turn intent. Else, we should not change lanes or change turn intent.
         if (situation.is_close_to_end_of_lane || situation.braking_distance.preferred_smooth >= 1.1 * distance_to_stop_line) {
@@ -36,17 +43,17 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
             // printf("0. Not changing lanes or turn intent\n");
             turn_indicator = car_get_indicator_turn(self);  // whatever it is
             if (!situation.is_turn_possible[turn_indicator]) {
-                turn_indicator = turn_sample_possible(&situation);
+                turn_indicator = rand_turn;
             }
             lane_change_indicator = INDICATOR_NONE;
         } else {
             // We are not close to the end of the lane.
-            turn_indicator = (rand_0_to_1() < dt / 4) ? turn_sample_possible(&situation) : car_get_indicator_turn(self);
+            turn_indicator = (r1 < dt / 4) ? rand_turn : car_get_indicator_turn(self);
             if (!situation.is_turn_possible[turn_indicator]) {
-                turn_indicator = turn_sample_possible(&situation);
+                turn_indicator = rand_turn;
             }
             // printf("Turn indicator: %d\n", turn_indicator);
-            lane_change_indicator = (rand_0_to_1() < dt / 5) ? lane_change_sample_possible(&situation) : INDICATOR_NONE;
+            lane_change_indicator = (r2 < dt / 5) ? rand_lane_change : INDICATOR_NONE;
             // printf("Lane change indicator: %d\n", lane_change_indicator);
             // printf("0. Intersection upcoming: sampled turn indicator and lane change indicator: %d, %d\n", turn_indicator, lane_change_indicator);
         }
@@ -65,7 +72,7 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
     } else {
         // We are not approaching an intersection or a dead end. We can randomly change lanes (and turn intent is not relevant).
         turn_indicator = INDICATOR_NONE;
-        lane_change_indicator = (rand_0_to_1() < dt) ? lane_change_sample_possible(&situation) : INDICATOR_NONE;
+        lane_change_indicator = (r3 < dt) ? rand_lane_change : INDICATOR_NONE;
         if (lane_change_indicator != INDICATOR_NONE) {
             // printf("0. Not an intersection or dead end: lane change indicator: %d\n", lane_change_indicator);
         }
@@ -99,10 +106,11 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
         // accel += situation.lead_vehicle->acceleration; // add the lead vehicle's acceleration to our acceleration to account for the fact that we are following it and it may be accelerating or braking.
 
         // If are already within 2.0 feet of the lead vehicle, let's try to change lanes to avoid rear-ending it.
+        rand_lane_change = lane_change_sample_possible(&situation);
         if (situation.distance_to_lead_vehicle - (car_half_length + car_get_length(situation.lead_vehicle) / 2) < from_feet(2.0)) { // TODO: make it depend on more variables
             // printf("Emergency lane change maneuver to avoid rear-ending the next car.\n");
             if (lane_change_indicator == INDICATOR_NONE) {
-                lane_change_indicator = lane_change_sample_possible(&situation);
+                lane_change_indicator = rand_lane_change;
                 if (lane_change_indicator == INDICATOR_NONE) {
                     // printf("Oh no! No lane change possible. We might rear-end the lead vehicle!\n");
                 }

@@ -12,24 +12,23 @@ CarAccelProfile car_accel_profile_get_effective(CarAccelProfile capable, CarAcce
 
 
 CarPersonality preferences_sample_random(void) {
-    CarPersonality p = {
-        .lane = rand_int_range(0, 2), // Random lane preference (0 to 2)
-        .turn_speed = rand_uniform(from_mph(5), from_mph(15)),
-        .scenic = rand_0_to_1(),
-        .distance_to_front_vehicle = rand_uniform(from_feet(10), from_feet(100)),
-        .distance_to_back_vehicle = rand_uniform(from_feet(10), from_feet(100)),
-        .run_yellow_light = (bool)rand_int_range(0, 1),
-        .turn_right_on_red = (bool)rand_int_range(0, 1),
-        .aversion_to_rough_terrain = rand_0_to_1(),
-        .aversion_to_traffic_jam = rand_0_to_1(),
-        .aversion_to_construction_zone = rand_0_to_1(),
-        .aversion_to_traffic_light = rand_0_to_1(),
-        .aversion_to_lane_change = rand_0_to_1(),
-        .average_speed_offset = rand_uniform(from_mph(-10), from_mph(0)),
-        .min_speed_offset = rand_uniform(from_mph(-20), from_mph(-10)),
-        .max_speed_offset = rand_uniform(from_mph(10), from_mph(20)),
-        .acceleration_profile = car_accel_profile_get_random_preference_preset(),
-    };
+    CarPersonality p;
+    p.lane = rand_int_range(0, 2);
+    p.turn_speed = rand_uniform(from_mph(5), from_mph(15));
+    p.scenic = rand_0_to_1();
+    p.distance_to_front_vehicle = rand_uniform(from_feet(10), from_feet(100));
+    p.distance_to_back_vehicle = rand_uniform(from_feet(10), from_feet(100));
+    p.run_yellow_light = (bool)rand_int_range(0, 1);
+    p.turn_right_on_red = (bool)rand_int_range(0, 1);
+    p.aversion_to_rough_terrain = rand_0_to_1();
+    p.aversion_to_traffic_jam = rand_0_to_1();
+    p.aversion_to_construction_zone = rand_0_to_1();
+    p.aversion_to_traffic_light = rand_0_to_1();
+    p.aversion_to_lane_change = rand_0_to_1();
+    p.average_speed_offset = rand_uniform(from_mph(-10), from_mph(0));
+    p.min_speed_offset = rand_uniform(from_mph(-20), from_mph(-10));
+    p.max_speed_offset = rand_uniform(from_mph(10), from_mph(20));
+    p.acceleration_profile = car_accel_profile_get_random_preference_preset();
     return p;
 }
 

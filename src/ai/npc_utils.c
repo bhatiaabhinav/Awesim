@@ -14,6 +14,9 @@ CarIndictor turn_sample_possible(const SituationalAwareness* situation) {
             possibles[num_possibles++] = i;
         }
     }
+    if (num_possibles == 0) {
+        return INDICATOR_NONE;
+    }
     return possibles[rand_int(num_possibles)];
 }
 
@@ -28,6 +31,9 @@ CarIndictor lane_change_sample_possible(const SituationalAwareness* situation) {
     }
     if (num_possibles == 0) {
         return INDICATOR_NONE;
+    }
+    if (num_possibles == 1) {
+        return possibles[0];
     }
     int chosen = rand_int(num_possibles);
     return possibles[chosen];

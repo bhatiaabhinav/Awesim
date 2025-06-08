@@ -14,8 +14,9 @@ static bool placement_would_cause_collision(Car* car, Lane* lane, Simulation* si
         Meters other_progress_meters = car_get_lane_progress_meters(other_car);
         Meters distance_between_centers = fabs(progress_meters - other_progress_meters);
         Meters other_length = car_get_length(other_car);
+        LOG_TRACE("Checking collision for car id %d (len = %.10f) on lane %d at progress %.10f meters with car id %d (len = %.10f) at progress %.10f meters. Distance between centers = %.10f meters.", car->id, car_length, lane->id, progress_meters, other_car->id, other_length, other_progress_meters, distance_between_centers);
         if (distance_between_centers < meters(1) + (car_length + other_length) / 2.0) {
-            LOG_TRACE("Placement of car id %d on lane %d at %.2f meters would cause collision with car %d at progress %.2f meters.", car->id, lane->id, progress_meters, other_car->id, other_progress_meters);
+            LOG_TRACE("Placement of car id %d on lane %d at %.10f meters would cause collision with car %d at progress %.10f meters.", car->id, lane->id, progress_meters, other_car->id, other_progress_meters);
             would_collide = true;
             break;
         }
@@ -46,7 +47,10 @@ void awesim_setup(Simulation* sim, Meters city_width, int num_cars, Seconds dt, 
     }
     for(int i = 0; i < num_cars; i++) {
         Car* car = sim_get_new_car(sim);
-        car_init(car, car_dimensions_get_random_preset(), (CarCapabilities){CAR_ACC_PROFILE_SPORTS_CAR, from_mph(120), 0.0}, preferences_sample_random());
+        Dimensions dims = car_dimensions_get_random_preset();
+        CarPersonality prefs = preferences_sample_random();
+        car_init(car, dims, (CarCapabilities){CAR_ACC_PROFILE_SPORTS_CAR, from_mph(120), 0.0}, prefs);
+        LOG_TRACE("Car id %d init: Dimensions: width = %.2f meters, length = %.2f meters", car->id, car_get_width(car), car_get_length(car));
         Road* random_road;
         Lane* random_lane;
         double random_progress;

@@ -1,4 +1,5 @@
 #include "utils.h"
+#include "logging.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
@@ -16,8 +17,14 @@ void seed_rng(uint32_t seed) {
     lcg_state = seed;
 }
 
+static long long counter = 0;    // Number of calls to lcg_rand for logging purposes
 uint32_t lcg_rand() {
-    lcg_state = (LCG_A * lcg_state + LCG_C);
+    lcg_state = (uint32_t)(LCG_A * lcg_state + LCG_C);  // Explicit cast to ensure 32-bit arithmetic
+    LOG_TRACE("%lld LCG generated random number: %u", counter++, lcg_state);
+    return lcg_state;
+}
+
+uint32_t lcg_get_state() {
     return lcg_state;
 }
 
