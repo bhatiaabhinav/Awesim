@@ -54,7 +54,8 @@ struct Lane {
     double grip;
     Degradations degradations;
 
-    LaneId connections[3];             // Indices of connected lanes (left, stright, right)
+    LaneId connections_incoming[3];    // Indices of incoming lanes (left , straight, right). On non-intersections, there is no incoming left or incomg right, there is just incoming straight (which could be coming in from a curved road, too, which would be the case when this lane is output of a simple turn connector between two perpendicular straight roads). On intersections, left means that a vehicle took a left turn to enter this lane, straight means that a vehicle entered this lane from the straight lane, and right means that a vehicle took a right turn to enter this lane.
+    LaneId connections[3];             // Indices of connected lanes (left, stright, right). For simple turn connectors between two perpendicular straight roads, use "straight", since vehicles don't use an indicator in such cases. Left and right have meaning only for intersections.
     LaneId adjacents[2];               // Indices of adjacent lanes (left, right)
     LaneId merges_into_id;
     double merges_into_start;
@@ -85,6 +86,9 @@ struct Lane {
 
 
 // Lane Setters
+void lane_set_connection_incoming_left(Lane* self, const Lane* lane);
+void lane_set_connection_incoming_straight(Lane* self, const Lane* lane);
+void lane_set_connection_incoming_right(Lane* self, const Lane* lane);
 void lane_set_connection_left(Lane* self, const Lane* lane);
 void lane_set_connection_straight(Lane* self, const Lane* lane);
 void lane_set_connection_right(Lane* self, const Lane* lane);
@@ -117,6 +121,12 @@ Coordinates lane_get_end_point(const Lane* self);
 Coordinates lane_get_center(const Lane* self);
 Meters lane_get_length(const Lane* self);
 Degradations lane_get_degradations(const Lane* self);
+LaneId lane_get_connection_incoming_left_id(const Lane* self);
+Lane* lane_get_connection_incoming_left(const Lane* self, Map* map);
+LaneId lane_get_connection_incoming_straight_id(const Lane* self);
+Lane* lane_get_connection_incoming_straight(const Lane* self, Map* map);
+LaneId lane_get_connection_incoming_right_id(const Lane* self);
+Lane* lane_get_connection_incoming_right(const Lane* self, Map* map);
 LaneId lane_get_connection_left_id(const Lane* self);
 Lane* lane_get_connection_left(const Lane* self, Map* map);
 LaneId lane_get_connection_straight_id(const Lane* self);
@@ -142,6 +152,7 @@ Car* lane_get_car(const Lane* self, Simulation* sim, int index);
 
 // Fancier functions
 
+int lane_get_num_connections_incoming(const Lane* self);
 int lane_get_num_connections(const Lane* self);
 bool lane_is_merge_available(const Lane* self);
 bool lane_is_exit_lane_available(const Lane* self, double progress);
@@ -346,7 +357,7 @@ void intersection_update(Intersection* self, Seconds dt);
 void print_traffic_state(const Intersection* intersection);
 
 Intersection* road_leads_to_intersection(const Road* road, Map* map);
-
+Intersection* road_comes_from_intersection(const Road* road, Map* map);
 
 
 

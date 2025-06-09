@@ -207,6 +207,7 @@ Intersection* intersection_create_and_form_connections(
             lane_from->width, speed_limit, grip, DEGRADATIONS_ZERO);
         lane_set_connection_right(lane_from, right_turn_lane);
         lane_set_connection_straight(right_turn_lane, lane_to);
+        lane_set_connection_incoming_right(lane_to, right_turn_lane);
         lane_set_intersection(right_turn_lane, intersection);
         intersection->lane_ids[lanes_count++] = right_turn_lane->id;
         turn_radius = fmin(turn_radius, right_turn_lane->radius);
@@ -222,6 +223,7 @@ Intersection* intersection_create_and_form_connections(
             lane_from->width, speed_limit, grip, DEGRADATIONS_ZERO);
         lane_set_connection_left(lane_from, left_turn_lane);
         lane_set_connection_straight(left_turn_lane, lane_to);
+        lane_set_connection_incoming_left(lane_to, left_turn_lane);
         lane_set_intersection(left_turn_lane, intersection);
         intersection->lane_ids[lanes_count++] = left_turn_lane->id;
         turn_radius = fmin(turn_radius, left_turn_lane->radius);
@@ -244,6 +246,7 @@ Intersection* intersection_create_and_form_connections(
 
             lane_set_connection_straight(lane_from, straight_lane);
             lane_set_connection_straight(straight_lane, lane_to);
+            lane_set_connection_incoming_straight(lane_to, straight_lane);
             lane_set_intersection(straight_lane, intersection);
             intersection->lane_ids[lanes_count++] = straight_lane->id;
         }
@@ -385,6 +388,23 @@ Intersection* road_leads_to_intersection(const Road* road, Map* map) {
             Lane* connected_lane = map_get_lane(map, lane->connections[i]);
             if (connected_lane->is_at_intersection) {
                 return map_get_intersection(map, connected_lane->intersection_id);
+            }
+        }
+    }
+    return NULL;
+}
+
+Intersection* road_comes_from_intersection(const Road* road, Map* map) {
+    if (!road) {
+        LOG_ERROR("Road is NULL, cannot determine originating intersection.");
+        return NULL;
+    }
+    const Lane* lane = road_get_leftmost_lane(road, map);
+    for (int i = 0; i < 3; i++) {
+        if (lane->connections_incoming[i] != ID_NULL) {
+            Lane* incoming_lane = map_get_lane(map, lane->connections_incoming[i]);
+            if (incoming_lane->is_at_intersection) {
+                return map_get_intersection(map, incoming_lane->intersection_id);
             }
         }
     }

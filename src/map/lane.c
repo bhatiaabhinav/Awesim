@@ -13,6 +13,33 @@ const Degradations DEGRADATIONS_ZERO = {0};
 // Lane Setters
 //
 
+void lane_set_connection_incoming_left(Lane* self, const Lane* lane) {
+    if (!lane) {
+        self->connections_incoming[0] = -1; // No incoming left connection
+        return;
+    }
+    assert(vec_approx_equal(lane->end_point, self->start_point, 1e-6));
+    self->connections_incoming[0] = lane->id; // incoming left connection
+}
+
+void lane_set_connection_incoming_straight(Lane* self, const Lane* lane) {
+    if (!lane) {
+        self->connections_incoming[1] = -1; // No incoming straight connection
+        return;
+    }
+    assert(vec_approx_equal(lane->end_point, self->start_point, 1e-6));
+    self->connections_incoming[1] = lane->id; // incoming straight connection
+}
+
+void lane_set_connection_incoming_right(Lane* self, const Lane* lane) {
+    if (!lane) {
+        self->connections_incoming[2] = -1; // No incoming right connection
+        return;
+    }
+    assert(vec_approx_equal(lane->end_point, self->start_point, 1e-6));
+    self->connections_incoming[2] = lane->id; // incoming right connection
+}
+
 void lane_set_connection_left(Lane* self, const Lane* lane) {
     if (!lane) {
         self->connections[0] = -1; // No left connection
@@ -42,7 +69,7 @@ void lane_set_connection_right(Lane* self, const Lane* lane) {
 
 void lane_set_adjacents(Lane* self, const Lane* left, const Lane* right) {
     self->adjacents[0] = left ? left->id : -1; // left adjacent
-    self->adjacents[1] = right ? right->id : -1; // right adjacent
+    lane_set_adjacent_right(self, right); // right adjacent
 }
 
 void lane_set_adjacent_left(Lane* self, const Lane* left) {
@@ -50,7 +77,12 @@ void lane_set_adjacent_left(Lane* self, const Lane* left) {
 }
 
 void lane_set_adjacent_right(Lane* self, const Lane* right) {
-    self->adjacents[1] = right ? right->id : -1; // right adjacent
+    if (right) {
+        assert(right->direction == self->direction && "Right adjacent lane must have the same direction as the current lane.");
+        self->adjacents[1] = right->id; // right adjacent
+    } else {
+        self->adjacents[1] = -1; // No right adjacent
+    }
 }
 
 void lane_set_merges_into(Lane* self, const Lane* lane, const double start, const double end) {
@@ -115,6 +147,25 @@ Coordinates lane_get_mid_point(const Lane* self) { return self->mid_point; }
 Coordinates lane_get_center(const Lane* self) { return self->center; }
 Meters lane_get_length(const Lane* self) { return self->length; }
 Degradations lane_get_degradations(const Lane* self) { return self->degradations; }
+
+LaneId lane_get_connection_incoming_left_id(const Lane* self) { return self->connections_incoming[0]; }
+Lane* lane_get_connection_incoming_left(const Lane* self, Map* map) {
+    LaneId left_incoming_id = lane_get_connection_incoming_left_id(self);
+    if (left_incoming_id < 0) return NULL;
+    return map_get_lane(map, left_incoming_id);
+}
+LaneId lane_get_connection_incoming_straight_id(const Lane* self) { return self->connections_incoming[1]; }
+Lane* lane_get_connection_incoming_straight(const Lane* self, Map* map) {
+    LaneId straight_incoming_id = lane_get_connection_incoming_straight_id(self);
+    if (straight_incoming_id < 0) return NULL;
+    return map_get_lane(map, straight_incoming_id);
+}
+LaneId lane_get_connection_incoming_right_id(const Lane* self) { return self->connections_incoming[2]; }
+Lane* lane_get_connection_incoming_right(const Lane* self, Map* map) {
+    LaneId right_incoming_id = lane_get_connection_incoming_right_id(self);
+    if (right_incoming_id < 0) return NULL;
+    return map_get_lane(map, right_incoming_id);
+}
 LaneId lane_get_connection_left_id(const Lane* self) { return self->connections[0]; }
 Lane* lane_get_connection_left(const Lane* self, Map* map) {
     LaneId left_id = lane_get_connection_left_id(self);
@@ -191,6 +242,14 @@ Car* lane_get_car(const Lane* self, Simulation* sim, int index) {
 // Fancier Functions
 //
 
+int lane_get_num_connections_incoming(const Lane* self) {
+    int count = 0;
+    if (self->connections_incoming[0] >= 0) count++; // left incoming
+    if (self->connections_incoming[1] >= 0) count++; // straight incoming
+    if (self->connections_incoming[2] >= 0) count++; // right incoming
+    return count;
+}
+
 int lane_get_num_connections(const Lane* self) {
     int count = 0;
     if (self->connections[0] >= 0) count++; // left connection
@@ -229,6 +288,9 @@ Lane* lane_create(Map* map, const LaneType type, const Direction direction, cons
     lane->grip = grip > 0.0 ? (grip < 1.0 ? grip : 1.0) : 0.0;
     lane->degradations = degradations;
 
+    lane->connections_incoming[0] = -1; // left incoming
+    lane->connections_incoming[1] = -1; // straight incoming
+    lane->connections_incoming[2] = -1; // right incoming
     lane->connections[0] = -1; // left
     lane->connections[1] = -1; // straight
     lane->connections[2] = -1; // right
@@ -382,6 +444,8 @@ Lane* quarter_arc_lane_create_from_start_end(
 //
 // Lane Car Management
 //
+
+// TODO: Make cars_ids array sorted by lane progress
 
 void lane_add_car(Lane* self, CarId car_id) {
     if (self->num_cars < MAX_CARS_PER_LANE) {

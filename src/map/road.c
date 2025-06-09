@@ -321,7 +321,9 @@ Road* turn_create_and_set_connections_and_adjacents(Map* map, Road* from, Road* 
         Lane* to_lane = road_get_lane(to, map, i);
         Lane* new_lane = quarter_arc_lane_create_from_start_end(map, from_lane->end_point, to_lane->start_point, direction, from_lane->width, speed_limit, grip, DEGRADATIONS_ZERO);
         lane_set_connection_straight(from_lane, new_lane);
+        lane_set_connection_incoming_straight(new_lane, from_lane);
         lane_set_connection_straight(new_lane, to_lane);
+        lane_set_connection_incoming_straight(to_lane, new_lane);
         turn->lane_ids[i] = new_lane->id;
         lane_set_road(new_lane, turn);
     }
