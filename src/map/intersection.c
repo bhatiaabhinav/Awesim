@@ -199,7 +199,7 @@ Intersection* intersection_create_and_form_connections(
         // Right turn
         Lane* lane_from = road_get_rightmost_lane(road_from, map);
         Road* road_to = roads_to[(dir_id + 1) % 4];
-        const Lane* lane_to = road_get_rightmost_lane(road_to, map);
+        Lane* lane_to = road_get_rightmost_lane(road_to, map);
         LOG_TRACE("Creating right turn lane from %s (Road %s) to %s (Road %s)",
                   lane_from->name, road_from->name, lane_to->name, road_to->name);
         Lane* right_turn_lane = quarter_arc_lane_create_from_start_end(map, 
