@@ -399,27 +399,42 @@ SituationalAwareness situational_awareness_build(const Car* car, Simulation* sim
     Meters closest_forward_distance = 1e6;
     const Car* closest_behind = NULL;
     Meters closest_behind_distance = 1e6;
-    for (int i = 0; i < lane_get_num_cars(lane); i++) { // TODO: make the cars sorted by progress in the cars array on lane.
-        const Car* car_i = lane_get_car(lane, sim, i);
-        if (car_i == car) continue;
-        Meters distance = car_get_lane_progress_meters(car_i) - lane_progress_m;
-        if (distance > 0 && distance < closest_forward_distance) {
-            closest_forward_distance = distance;
-            closest_forward = car_i;
-        } else if (distance < 0 && -distance < closest_behind_distance) {
-            closest_behind_distance = -distance;
-            closest_behind = car_i;
+    int my_rank = car_get_lane_rank(car);
+    int closest_forward_rank = my_rank - 1; // the next car in the lane
+    if (closest_forward_rank >= 0 && closest_forward_rank < lane_get_num_cars(lane)) {
+        closest_forward = lane_get_car(lane, sim, closest_forward_rank);
+        closest_forward_distance = car_get_lane_progress_meters(closest_forward) - lane_progress_m;
+    }
+    // If no vehicle found ahead on this lane, pick the closest vehicle on the next lane(s)
+    if (closest_forward == NULL && !situation.is_approaching_dead_end) {
+        for (int turn_intent = 0; turn_intent < 3; turn_intent++) {
+            const Lane* next_lane = situation.lane_next_after_turn[turn_intent];
+            if (next_lane) {
+                int next_lane_rank = lane_get_num_cars(next_lane) - 1; // the last car in the next lane
+                if (next_lane_rank >= 0) {
+                    const Car* next_car = lane_get_car(next_lane, sim, next_lane_rank);
+                    Meters next_car_progress_m = car_get_lane_progress_meters(next_car);
+                    Meters distance_to_next_car = next_car_progress_m + distance_to_end_of_lane;
+                    if (distance_to_next_car < closest_forward_distance) {
+                        closest_forward = next_car;
+                        closest_forward_distance = distance_to_next_car;
+                    }
+                }
+            }
         }
     }
-    // TODO: if no vehicle found ahead on this lane, pick the closest vehicle on the next lane.
-    // TODO: if no vehicle found behind on this lane, pick the closest vehicle on the previous lane.
+    int closest_behind_rank = my_rank + 1; // the previous car in the lane
+    if (closest_behind_rank < lane_get_num_cars(lane)) {
+        closest_behind = lane_get_car(lane, sim, closest_behind_rank);
+        closest_behind_distance = lane_progress_m - car_get_lane_progress_meters(closest_behind);
+    }
+    // TODO: if no vehicle found behind on this lane, pick the closest vehicle on the previous lane
     situation.is_vehicle_ahead = closest_forward != NULL;
     situation.is_vehicle_behind = closest_behind != NULL;
     situation.lead_vehicle = closest_forward;
     situation.following_vehicle = closest_behind;
     situation.distance_to_lead_vehicle = closest_forward_distance;
     situation.distance_to_following_vehicle = closest_behind_distance;
-    // TODO: situational awareness of this vehicle regarding these things can be propagated to the situational awareness of the lead vehicle and the following vehicle.
     LOG_TRACE("Car %d: Lead vehicle: %d (distance = %.2f m), following vehicle: %d (distance = %.2f m)", car->id, situation.is_vehicle_ahead ? situation.lead_vehicle->id : -1, situation.distance_to_lead_vehicle, situation.is_vehicle_behind ? situation.following_vehicle->id : -1,  situation.distance_to_following_vehicle);
 
     situation.braking_distance = car_compute_braking_distance(car);

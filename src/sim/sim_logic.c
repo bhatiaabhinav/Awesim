@@ -99,6 +99,7 @@ void sim_integrate(Simulation* self, Seconds time_period) {
             if (progress < 0.0) {
                 LOG_TRACE("Car %d: Progress %.4f (s = %.2f) on lane %d has become negative. Maybe it reversed (speed = %.2f) too much? Clamping progress and speed to 0.0. The sim is yet to support backing on to a previous lane.", car->id, progress, s, lane->id, v);
                 progress = 0.0; // Clamp progress to 0 if it goes negative.
+                progress += rand_0_to_1() * 0.01; // Add a small random value to avoid multiple cars having the same progress.
                 if (v < 0) v = 0; // If speed is negative, clamp it to 0 as well.
             }
             LOG_TRACE("Car %d: Updated speed = %.2f, position s = %.2f, progress = %.2f", car->id, v, s, progress);
@@ -175,12 +176,12 @@ void sim_integrate(Simulation* self, Seconds time_period) {
             }
             s = progress * lane->length; // update s after all changes to lane and progress.
 
+            car_set_lane_progress(car, progress, s);
+            car_set_speed(car, v);
             car_handle_movement_or_lane_change(self, car, lane);
             Road* road = lane_get_road(lane, map);
             Intersection* intersection = lane_get_intersection(lane, map);
             const char* road_name = road ? road->name : intersection ? intersection->name : "Unknown";
-            car_set_lane_progress(car, progress, s);
-            car_set_speed(car, v);
             LOG_TRACE("Car %d processing complete: Updated state: lane %d (%s), progress %.2f (%.2f miles), speed = %.2f mps (%.2f mph), acceleration = %.2f mpss", car->id, lane->id, road_name, progress, to_miles(s), v, to_mph(v), a);
         }
         self->time += dt;

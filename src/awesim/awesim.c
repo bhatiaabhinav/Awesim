@@ -70,9 +70,9 @@ void awesim_setup(Simulation* sim, Meters city_width, int num_cars, Seconds dt, 
             sim->num_cars = i; // Set the number of cars to the successfully placed ones
             break;
         } else {
-            lane_add_car(random_lane, car, sim);
-            car_set_lane(car, random_lane);
             car_set_lane_progress(car, random_progress, random_progress * random_lane->length);
+            car_set_lane(car, random_lane);
+            lane_add_car(random_lane, car, sim);
             // car_set_speed(car, random_lane->speed_limit + car->preferences.average_speed_offset);
             car_set_speed(car, 0);
             LOG_TRACE("Placed car id %d on lane %d (%s) at position %.2f meters (speed = %.2f mph) after %d attempts", car->id, random_lane->id, road_get_name(random_road), car_get_lane_progress_meters(car), to_mph(car_get_speed(car)), attempts);

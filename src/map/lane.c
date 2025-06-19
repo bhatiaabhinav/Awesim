@@ -445,6 +445,7 @@ Lane* quarter_arc_lane_create_from_start_end(
 // Lane Car Management
 //
 
+// add a car to the lane, maintaining descending order by progress
 void lane_add_car(Lane* self, Car* car, Simulation* sim) {
     CarId car_id = car_get_id(car);
     if (self->num_cars >= MAX_CARS_PER_LANE) {
@@ -476,6 +477,7 @@ void lane_add_car(Lane* self, Car* car, Simulation* sim) {
     self->num_cars++;
 }
 
+// move a car (after updated progress) within the lane, maintaining descending order by progress, assuming other cars are properly ordered
 void lane_move_car(Lane* self, Car* car, Simulation* sim) {
     CarId car_id = car_get_id(car);
     float new_progress = car_get_lane_progress(car);
@@ -524,6 +526,7 @@ void lane_move_car(Lane* self, Car* car, Simulation* sim) {
     car_set_lane_rank(car, index);
 }
 
+// remove a car from the lane, maintaining descending order by progress
 void lane_remove_car(Lane* self, Car* car, Simulation* sim) {
     CarId car_id = car_get_id(car);
     int index = car_get_lane_rank(car);
@@ -539,6 +542,7 @@ void lane_remove_car(Lane* self, Car* car, Simulation* sim) {
         Car* moved_car = sim_get_car(sim, self->cars_ids[i]);
         car_set_lane_rank(moved_car, i);
     }
+    self->cars_ids[self->num_cars - 1] = ID_NULL; // Clear last position
 
     self->num_cars--;
 
