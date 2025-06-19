@@ -23,7 +23,7 @@ void car_handle_movement_or_lane_change(Simulation* sim, Car* car, Lane* new_lan
         return;
     }
     LOG_TRACE("Processing car %d changing lane from %d to %d", car->id, current_lane->id, new_lane->id);
-    lane_remove_car(current_lane, car);
+    lane_remove_car(current_lane, car, sim);
     lane_add_car(new_lane, car, sim);
     car_set_lane(car, new_lane);
 }

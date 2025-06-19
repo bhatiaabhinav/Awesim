@@ -14,6 +14,8 @@ void car_init(Car* car, Dimensions dimensions, CarCapabilities capabilities, Car
     car->preferences = preferences;
     car->lane_id = ID_NULL;
     car->lane_progress = 0.0;
+    car->lane_progress_meters = 0.0;
+    car->lane_rank = -1;
     car->speed = 0.0;
     car->damage = 0.0;
     car->acceleration = 0.0;
@@ -43,6 +45,7 @@ Lane* car_get_lane(const Car* self, Map* map) {
 }
 double car_get_lane_progress(const Car* self) { return self->lane_progress; }
 Meters car_get_lane_progress_meters(const Car* self) { return self->lane_progress_meters; }
+int car_get_lane_rank(const Car* self) { return self->lane_rank; }
 MetersPerSecond car_get_speed(const Car* self) { return self->speed; }
 double car_get_damage(const Car* self) { return self->damage; }
 MetersPerSecondSquared car_get_acceleration(const Car* self) { return self->acceleration; }
@@ -63,6 +66,10 @@ void car_set_lane_progress(Car* self, double progress, Meters progress_meters) {
         progress_meters = 0.0;
     }
     self->lane_progress_meters = progress_meters;
+}
+
+void car_set_lane_rank(Car* self, int rank) {
+    self->lane_rank = rank;
 }
 
 void car_set_speed(Car* self, MetersPerSecond speed) {

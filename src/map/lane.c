@@ -445,7 +445,7 @@ Lane* quarter_arc_lane_create_from_start_end(
 // Lane Car Management
 //
 
-void lane_add_car(Lane* self, const Car* car, Simulation* sim) {
+void lane_add_car(Lane* self, Car* car, Simulation* sim) {
     CarId car_id = car_get_id(car);
     if (self->num_cars >= MAX_CARS_PER_LANE) {
         LOG_ERROR("Lane (id=%d) is full, cannot add car (id=%d). Max cars allowed: %d", self->id, car_id, MAX_CARS_PER_LANE);
@@ -464,75 +464,83 @@ void lane_add_car(Lane* self, const Car* car, Simulation* sim) {
         }
     }
 
-    // Shift elements to the right to make space
+    // Shift elements to the right and update ranks
     for (int i = self->num_cars; i > insert_pos; i--) {
         self->cars_ids[i] = self->cars_ids[i - 1];
+        Car* moved_car = sim_get_car(sim, self->cars_ids[i]);
+        car_set_lane_rank(moved_car, i);
     }
 
     self->cars_ids[insert_pos] = car_id;
+    car_set_lane_rank(car, insert_pos);
     self->num_cars++;
 }
 
-// ensures that the car is moved to the correct position in the array to maintain the descending order of progress
-void lane_move_car(Lane* self, const Car* car, Simulation* sim) {
+void lane_move_car(Lane* self, Car* car, Simulation* sim) {
     CarId car_id = car_get_id(car);
     float new_progress = car_get_lane_progress(car);
 
-    int index = -1;
-    for (int i = 0; i < self->num_cars; i++) {
-        if (self->cars_ids[i] == car_id) {
-            index = i;
-            break;
-        }
-    }
+    int index = car_get_lane_rank(car);  // use known rank
 
-    if (index == -1) {
-        LOG_ERROR("Car (id=%d) not found in lane (id=%d). Cannot move.", car_id, self->id);
+    if (index < 0 || index >= self->num_cars || self->cars_ids[index] != car_id) {
+        LOG_ERROR("Car (id=%d) has invalid rank in lane (id=%d). Cannot move.", car_id, self->id);
         return;
     }
 
-    // Early exit if order is already valid (for descending order)
+    // Early exit if order is already valid
     if ((index == 0 || new_progress <= car_get_lane_progress(sim_get_car(sim, self->cars_ids[index - 1]))) &&
         (index == self->num_cars - 1 || new_progress >= car_get_lane_progress(sim_get_car(sim, self->cars_ids[index + 1])))) {
         return;
     }
 
-    // Bubble left if progress increased (i.e., should move earlier in list)
+    // Bubble left (toward front) if progress increased
     while (index > 0) {
-        Car* prev_car = sim_get_car(sim, self->cars_ids[index - 1]);
+        int prev_idx = index - 1;
+        Car* prev_car = sim_get_car(sim, self->cars_ids[prev_idx]);
         if (new_progress > car_get_lane_progress(prev_car)) {
-            self->cars_ids[index] = self->cars_ids[index - 1];
-            self->cars_ids[index - 1] = car_id;
+            self->cars_ids[index] = self->cars_ids[prev_idx];
+            car_set_lane_rank(prev_car, index);
             index--;
+            self->cars_ids[index] = car_id;
         } else {
             break;
         }
     }
 
-    // Bubble right if progress decreased (i.e., should move later in list)
+    // Bubble right (toward back) if progress decreased
     while (index < self->num_cars - 1) {
-        Car* next_car = sim_get_car(sim, self->cars_ids[index + 1]);
+        int next_idx = index + 1;
+        Car* next_car = sim_get_car(sim, self->cars_ids[next_idx]);
         if (new_progress < car_get_lane_progress(next_car)) {
-            self->cars_ids[index] = self->cars_ids[index + 1];
-            self->cars_ids[index + 1] = car_id;
+            self->cars_ids[index] = self->cars_ids[next_idx];
+            car_set_lane_rank(next_car, index);
             index++;
+            self->cars_ids[index] = car_id;
         } else {
             break;
         }
     }
+
+    car_set_lane_rank(car, index);
 }
 
-void lane_remove_car(Lane* self, const Car* car) {
+void lane_remove_car(Lane* self, Car* car, Simulation* sim) {
     CarId car_id = car_get_id(car);
-    for (int i = 0; i < self->num_cars; i++) {
-        if (self->cars_ids[i] == car_id) {
-            // Shift cars to the left
-            for (int j = i; j < self->num_cars - 1; j++) {
-                self->cars_ids[j] = self->cars_ids[j + 1];
-            }
-            self->num_cars--;
-            return;
-        }
+    int index = car_get_lane_rank(car);
+
+    if (index < 0 || index >= self->num_cars || self->cars_ids[index] != car_id) {
+        LOG_ERROR("Car (id=%d) has invalid rank in lane (id=%d). Cannot remove.", car_id, self->id);
+        return;
     }
-    LOG_ERROR("Car (id=%d) not found in lane (id=%d). Cannot remove.", car_id, self->id);
+
+    // Shift left and update ranks
+    for (int i = index; i < self->num_cars - 1; i++) {
+        self->cars_ids[i] = self->cars_ids[i + 1];
+        Car* moved_car = sim_get_car(sim, self->cars_ids[i]);
+        car_set_lane_rank(moved_car, i);
+    }
+
+    self->num_cars--;
+
+    car_set_lane_rank(car, -1); // Reset rank in car
 }

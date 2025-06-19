@@ -34,6 +34,8 @@ typedef struct Simulation Simulation;
 Car* sim_get_car(Simulation* sim, CarId id);
 double car_get_lane_progress(const Car* self);
 CarId car_get_id(const Car* self);
+int car_get_lane_rank(const Car* self);
+void car_set_lane_rank(Car* self, int rank);
 
 // Degradations: Represents grip degradation across segments of a lane.
 typedef struct {
@@ -110,9 +112,9 @@ void lane_set_intersection(Lane* self, const Intersection* intersection);
 void lane_set_name(Lane* self, const char* name);
 
 // Lane Vehicle Management
-void lane_add_car(Lane* self, const Car* car, Simulation* sim);
-void lane_remove_car(Lane* self, const Car* car);
-void lane_move_car(Lane* self, const Car* car, Simulation* sim);
+void lane_add_car(Lane* self, Car* car, Simulation* sim);
+void lane_remove_car(Lane* self, Car* car, Simulation* sim);
+void lane_move_car(Lane* self, Car* car, Simulation* sim);
 
 // Lane Getters
 int lane_get_id(const Lane* self);

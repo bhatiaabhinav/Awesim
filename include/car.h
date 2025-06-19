@@ -81,6 +81,7 @@ struct Car {
     LaneId lane_id;                   // current lane
     double lane_progress;          // progress in the lane as a fraction of the lane length.
     Meters lane_progress_meters;   // progress in the lane in meters. Should be set by the simulation engine. Is a product of lane_progress and lane length.
+    int lane_rank;              // rank of the car in the lane, where 0 is the first car in the lane (the one closest to the end of the lane), and num_cars-1 is the last car in the lane (the one closest to the start of the lane).
     MetersPerSecond speed;              // current speed. Should be set by the simulation engine.
     double damage;                      // damage level of the car. 0.0 for no damage and 1.0 for total damage.
 
@@ -110,6 +111,7 @@ Lane* car_get_lane(const Car* self, Map* map);
 double car_get_lane_progress(const Car* self);
 // Returns car progress x lane length in meters.
 Meters car_get_lane_progress_meters(const Car* self);
+int car_get_lane_rank(const Car* self);
 MetersPerSecond car_get_speed(const Car* self);
 double car_get_damage(const Car* self);
 
@@ -124,6 +126,7 @@ CarIndictor car_get_indicator_lane(const Car* self);
 void car_set_lane(Car* self, const Lane* lane);
 // Sets the lane progress of the car. The progress should be between 0.0 and 1.0. Will be clipped automatically.
 void car_set_lane_progress(Car* self, double progress, Meters progress_meters);
+void car_set_lane_rank(Car* self, int rank);
 // Sets the speed of the car. The speed should be between 0.0 and max_speed_capability. Will be clipped automatically.
 void car_set_speed(Car* self, MetersPerSecond speed);
 // Sets the acceleration of the car. The acceleration will be clipped automatically as per the car's capable acceleration profile.
