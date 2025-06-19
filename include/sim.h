@@ -98,7 +98,7 @@ Car* sim_get_new_car(Simulation* self);
 Map* sim_get_map(Simulation* self);
 ClockReading sim_get_initial_clock_reading(Simulation* self);
 int sim_get_num_cars(const Simulation* self);
-Car* sim_get_car(Simulation* self, int id);
+Car* sim_get_car(Simulation* self, CarId id);
 Seconds sim_get_time(Simulation* self);
 Seconds sim_get_dt(const Simulation* self);
 Weather sim_get_weather(Simulation* self);

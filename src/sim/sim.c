@@ -116,7 +116,7 @@ int sim_get_num_cars(const Simulation* self) {
     return self ? self->num_cars : 0;
 }
 
-Car* sim_get_car(Simulation* self, int id) {
+Car* sim_get_car(Simulation* self, CarId id) {
     if (!self || id < 0 || id >= self->num_cars) return NULL;
     return &self->cars[id];
 }

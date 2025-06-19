@@ -16,14 +16,24 @@
 #define MINOR_RED_EXTENSION 2
 #define ID_NULL -1
 
+// Typedef Definitions
+
+typedef int LaneId;
+typedef int RoadId;
+typedef int IntersectionId;
+typedef int CarId;
+
 // Forward Declarations
+
 typedef struct Car Car;
 typedef struct Road Road;
 typedef struct Lane Lane;
 typedef struct Intersection Intersection;
 typedef struct Map Map;
 typedef struct Simulation Simulation;
-Car* sim_get_car(Simulation* sim, int id);
+Car* sim_get_car(Simulation* sim, CarId id);
+double car_get_lane_progress(const Car* self);
+CarId car_get_id(const Car* self);
 
 // Degradations: Represents grip degradation across segments of a lane.
 typedef struct {
@@ -37,11 +47,6 @@ typedef enum {
     LINEAR_LANE,
     QUARTER_ARC_LANE
 } LaneType;
-
-typedef int LaneId;
-typedef int RoadId;
-typedef int IntersectionId;
-typedef int CarId;
 
 // Lane structure representing a single traffic lane.
 struct Lane {
@@ -80,7 +85,7 @@ struct Lane {
     IntersectionId intersection_id;    // The intersection this lane belongs to, if any
     bool is_at_intersection;        // True if this lane is at an intersection, false otherwise
 
-    CarId cars_ids[MAX_CARS_PER_LANE]; // Array of cars currently in this lane
+    CarId cars_ids[MAX_CARS_PER_LANE]; // Array of cars currently in this lane, ordered/ranked by their position on the lane in descending order (i.e., the first car (index = 0) is the one closest to the end of the lane).
     int num_cars;                  // Number of cars currently in this lane
 };
 
@@ -105,8 +110,9 @@ void lane_set_intersection(Lane* self, const Intersection* intersection);
 void lane_set_name(Lane* self, const char* name);
 
 // Lane Vehicle Management
-void lane_add_car(Lane* self, CarId car_id);
-void lane_remove_car(Lane* self, CarId car_id);
+void lane_add_car(Lane* self, const Car* car, Simulation* sim);
+void lane_remove_car(Lane* self, const Car* car);
+void lane_move_car(Lane* self, const Car* car, Simulation* sim);
 
 // Lane Getters
 int lane_get_id(const Lane* self);
@@ -147,7 +153,9 @@ IntersectionId lane_get_intersection_id(const Lane* self);
 bool lane_is_at_intersection(const Lane* self);
 Intersection* lane_get_intersection(const Lane* self, Map* map);
 int lane_get_num_cars(const Lane* self);
+// Returns the car ID at the given index in the lane. The index is 0-based, where 0 is the first car in the lane (the one closest to the end of the lane), and num_cars-1 is the last car in the lane (the one closest to the start of the lane). Interpret the index as a rank.
 CarId lane_get_car_id(const Lane* self, int index);
+// Returns the car at the given index in the lane. The index is 0-based, where 0 is the first car in the lane (the one closest to the end of the lane), and num_cars-1 is the last car in the lane (the one closest to the start of the lane). Interpret the index as a rank.
 Car* lane_get_car(const Lane* self, Simulation* sim, int index);
 
 // Fancier functions

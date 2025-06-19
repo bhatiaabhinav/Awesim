@@ -27,6 +27,7 @@ void car_free(Car* self) {
     }
 }
 
+CarId car_get_id(const Car* self) { return self->id; }
 Dimensions car_get_dimensions(const Car* self) { return self->dimensions; }
 Meters car_get_length(const Car* self) { return self->dimensions.y; }
 Meters car_get_width(const Car* self) { return self->dimensions.x; }

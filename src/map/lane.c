@@ -445,17 +445,85 @@ Lane* quarter_arc_lane_create_from_start_end(
 // Lane Car Management
 //
 
-// TODO: Make cars_ids array sorted by lane progress
-
-void lane_add_car(Lane* self, CarId car_id) {
-    if (self->num_cars < MAX_CARS_PER_LANE) {
-        self->cars_ids[self->num_cars++] = car_id; // Add car to lane
-    } else {
+void lane_add_car(Lane* self, const Car* car, Simulation* sim) {
+    CarId car_id = car_get_id(car);
+    if (self->num_cars >= MAX_CARS_PER_LANE) {
         LOG_ERROR("Lane (id=%d) is full, cannot add car (id=%d). Max cars allowed: %d", self->id, car_id, MAX_CARS_PER_LANE);
+        return;
+    }
+
+    float new_progress = car_get_lane_progress(car);
+    int insert_pos = self->num_cars;
+
+    // Find correct position to insert (keep descending order: highest progress first)
+    for (int i = 0; i < self->num_cars; i++) {
+        Car* car_i = sim_get_car(sim, self->cars_ids[i]);
+        if (new_progress > car_get_lane_progress(car_i)) {
+            insert_pos = i;
+            break;
+        }
+    }
+
+    // Shift elements to the right to make space
+    for (int i = self->num_cars; i > insert_pos; i--) {
+        self->cars_ids[i] = self->cars_ids[i - 1];
+    }
+
+    self->cars_ids[insert_pos] = car_id;
+    self->num_cars++;
+}
+
+// ensures that the car is moved to the correct position in the array to maintain the descending order of progress
+void lane_move_car(Lane* self, const Car* car, Simulation* sim) {
+    CarId car_id = car_get_id(car);
+    float new_progress = car_get_lane_progress(car);
+
+    int index = -1;
+    for (int i = 0; i < self->num_cars; i++) {
+        if (self->cars_ids[i] == car_id) {
+            index = i;
+            break;
+        }
+    }
+
+    if (index == -1) {
+        LOG_ERROR("Car (id=%d) not found in lane (id=%d). Cannot move.", car_id, self->id);
+        return;
+    }
+
+    // Early exit if order is already valid (for descending order)
+    if ((index == 0 || new_progress <= car_get_lane_progress(sim_get_car(sim, self->cars_ids[index - 1]))) &&
+        (index == self->num_cars - 1 || new_progress >= car_get_lane_progress(sim_get_car(sim, self->cars_ids[index + 1])))) {
+        return;
+    }
+
+    // Bubble left if progress increased (i.e., should move earlier in list)
+    while (index > 0) {
+        Car* prev_car = sim_get_car(sim, self->cars_ids[index - 1]);
+        if (new_progress > car_get_lane_progress(prev_car)) {
+            self->cars_ids[index] = self->cars_ids[index - 1];
+            self->cars_ids[index - 1] = car_id;
+            index--;
+        } else {
+            break;
+        }
+    }
+
+    // Bubble right if progress decreased (i.e., should move later in list)
+    while (index < self->num_cars - 1) {
+        Car* next_car = sim_get_car(sim, self->cars_ids[index + 1]);
+        if (new_progress < car_get_lane_progress(next_car)) {
+            self->cars_ids[index] = self->cars_ids[index + 1];
+            self->cars_ids[index + 1] = car_id;
+            index++;
+        } else {
+            break;
+        }
     }
 }
 
-void lane_remove_car(Lane* self, CarId car_id) {
+void lane_remove_car(Lane* self, const Car* car) {
+    CarId car_id = car_get_id(car);
     for (int i = 0; i < self->num_cars; i++) {
         if (self->cars_ids[i] == car_id) {
             // Shift cars to the left

@@ -7,9 +7,11 @@
 #include <assert.h>
 #include <math.h>
 
-void car_handle_lane_change(Map* map, Car* car, Lane* new_lane) {
+void car_handle_movement_or_lane_change(Simulation* sim, Car* car, Lane* new_lane) {
+    Map* map = sim_get_map(sim);
     Lane* current_lane = car_get_lane(car, map);
     if (current_lane == new_lane) {
+        lane_move_car(current_lane, car, sim);
         return; // No change needed
     }
     if (current_lane == NULL || new_lane == NULL) {
@@ -21,8 +23,8 @@ void car_handle_lane_change(Map* map, Car* car, Lane* new_lane) {
         return;
     }
     LOG_TRACE("Processing car %d changing lane from %d to %d", car->id, current_lane->id, new_lane->id);
-    lane_remove_car(current_lane, car->id);
-    lane_add_car(new_lane, car->id);
+    lane_remove_car(current_lane, car);
+    lane_add_car(new_lane, car, sim);
     car_set_lane(car, new_lane);
 }
 
@@ -173,7 +175,7 @@ void sim_integrate(Simulation* self, Seconds time_period) {
             }
             s = progress * lane->length; // update s after all changes to lane and progress.
 
-            car_handle_lane_change(map, car, lane);
+            car_handle_movement_or_lane_change(self, car, lane);
             Road* road = lane_get_road(lane, map);
             Intersection* intersection = lane_get_intersection(lane, map);
             const char* road_name = road ? road->name : intersection ? intersection->name : "Unknown";

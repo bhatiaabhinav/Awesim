@@ -98,7 +98,7 @@ void car_init(Car* car, Dimensions dimensions, CarCapabilities capabilities, Car
 
 
 // getters:
-
+CarId car_get_id(const Car* self);
 Dimensions car_get_dimensions(const Car* self);
 Meters car_get_length(const Car* self); 
 Meters car_get_width(const Car* self);
