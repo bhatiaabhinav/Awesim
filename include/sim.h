@@ -79,8 +79,9 @@ typedef struct Simulation {
 
     bool is_synchronized; // Whether the simulation is synchronized with wall time. If true, the simulation will run in real-time, simulating `simulation_speedup` seconds of simulation time per second of wall time. If false, the simulation will run as fast as possible without synchronization.
     double simulation_speedup; // How many seconds of simulation time to simulate per second of wall time. Default is 1.0, meaning real-time simulation.
-    bool is_rendering_window_open; // Whether the rendering window is open. If true, the simulation is being rendered in an SDL window. If false, the simulation is not being rendered. The rendering thread sets this variable to true when the rendering window is opened and to false when the rendering window is closed.
     bool should_quit_when_rendering_window_closed; // Whether the simulation should quit when the rendering window is closed. If true, the `simulate` function will return when the rendering window is closed, allowing the simulation to exit gracefully. If false, the simulation will continue running even if the rendering window is closed, allowing for background processing or other tasks to continue.
+    int render_socket; // Socket handle for render server connection
+    bool is_connected_to_render_server; // Flag indicating connection status
 } Simulation;
 
  // Allocate memory for a new Simulation instance. The memory is not initialized and contains garbage values.
@@ -93,6 +94,18 @@ void sim_init(Simulation* sim);
 
 // Add a car to the simulation
 Car* sim_get_new_car(Simulation* self);
+
+// Function to connect to render server
+bool sim_connect_to_render_server(Simulation* self, const char* server_ip, int port);
+// Function to disconnect from render server
+void sim_disconnect_from_render_server(Simulation* self);
+// The render server may issue these commands to the simulation
+typedef enum {
+    COMMAND_NONE,
+    COMMAND_QUIT,
+    COMMAND_SIM_INCREASE_SPEED,
+    COMMAND_SIM_DECREASE_SPEED,
+} SimCommand;
 
 // --- Getters ---
 Map* sim_get_map(Simulation* self);
@@ -136,11 +149,6 @@ void simulate(Simulation* self, Seconds sim_duration);
 
 // Advance simulation by one timestep (dt)
 void sim_step(Simulation* self);
-
-// Start rendering thread in SDL window asynchronously. This function will create a new thread that will render the simulation in an SDL window. The simulation must be initialized before calling this function.
-int sim_open_rendering_window(Simulation* sim);
-// Close the rendering thread and clean up SDL resources. Will not free the simulation instance, so it must be done separately.
-void sim_close_rendering_window();
 
 
 struct TrackIntersectionPoint {

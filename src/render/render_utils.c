@@ -4,18 +4,6 @@
 #include <SDL2/SDL_ttf.h>
 #include <math.h>
 
-int PAN_X = 0;
-int PAN_Y = 0;
-double SCALE = 4.0;
-
-SDL_Point to_screen_coords(const Coordinates point, const int width, const int height) {
-    double x_scaled = point.x * SCALE;
-    double y_scaled = point.y * SCALE;
-    int x_screen = (int)(width / 2 + x_scaled) - PAN_X;
-    int y_screen = (int)(height / 2 - y_scaled) - PAN_Y;
-    return (SDL_Point){x_screen, y_screen};
-}
-
 int thickLineRGBA_ignore_if_outside_screen(SDL_Renderer * renderer, Sint16 x1, Sint16 y1, Sint16 x2, Sint16 y2, Uint8 width, Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
     // Check if the line is outside the screen bounds
     if ((x1 < 0 && x2 < 0) || (x1 >= WINDOW_SIZE_WIDTH && x2 >= WINDOW_SIZE_WIDTH) ||
@@ -204,83 +192,6 @@ void drawFilledInwardRoundedRect(SDL_Renderer* renderer, int x, int y, int width
     drawQuarterCircleOutline(renderer, x + width, y + height, radius, 4, thickness);
 
     SDL_SetRenderDrawColor(renderer, r, g, b, a); // Restore color
-}
-
-static TTF_Font* font_cache[MAX_FONT_SIZE] = {NULL};
-static int fonts_initialized = 0;
-
-// Initialize SDL_ttf and load fonts (call once at program startup)
-int init_text_rendering(const char* font_path) {
-    if (TTF_Init() == -1) {
-        LOG_ERROR("TTF_Init failed: %s", TTF_GetError());
-        return 0;
-    }
-
-    // Load fonts for sizes 1 to 32
-    for (int i = 0; i < MAX_FONT_SIZE; i++) {
-        font_cache[i] = TTF_OpenFont(font_path, i + 1);
-        if (!font_cache[i]) {
-            LOG_ERROR("TTF_OpenFont failed for size %d: %s", i + 1, TTF_GetError());
-            // Clean up any loaded fonts
-            for (int j = 0; j < i; j++) {
-                TTF_CloseFont(font_cache[j]);
-                font_cache[j] = NULL;
-            }
-            TTF_Quit();
-            return 0;
-        }
-    }
-    fonts_initialized = 1;
-    return 1;
-}
-
-// Clean up SDL_ttf and fonts (call at program shutdown)
-void cleanup_text_rendering() {
-    for (int i = 0; i < MAX_FONT_SIZE; i++) {
-        if (font_cache[i]) {
-            TTF_CloseFont(font_cache[i]);
-            font_cache[i] = NULL;
-        }
-    }
-    fonts_initialized = 0;
-    LOG_DEBUG("Fonts cleaned up successfully.");
-    for (int i = 0; i < MAX_NUM_ROADS; i++) {
-        for (int j = 0; j < MAX_FONT_SIZE; j++) {
-            if (road_name_texture_cache[i][j]) {
-                SDL_DestroyTexture(road_name_texture_cache[i][j]);
-                road_name_texture_cache[i][j] = NULL;
-            }
-        }
-    }
-    LOG_DEBUG("Road name textures cleaned up successfully.");
-    for (int i = 0; i < MAX_NUM_INTERSECTIONS; i++) {
-        for (int j = 0; j < MAX_FONT_SIZE; j++) {
-            if (intersection_name_texture_cache[i][j]) {
-                SDL_DestroyTexture(intersection_name_texture_cache[i][j]);
-                intersection_name_texture_cache[i][j] = NULL;
-            }
-        }
-    }
-    LOG_DEBUG("Intersection name textures cleaned up successfully.");
-    for (int i = 0; i < MAX_NUM_LANES; i++) {
-        for (int j = 0; j < MAX_FONT_SIZE; j++) {
-            if (lane_id_texture_cache[i][j]) {
-                SDL_DestroyTexture(lane_id_texture_cache[i][j]);
-                lane_id_texture_cache[i][j] = NULL;
-            }
-        }
-    }
-    LOG_DEBUG("Lane ID textures cleaned up successfully.");
-    for (int i = 0; i < MAX_CARS_IN_SIMULATION; i++) {
-        for (int j = 0; j < MAX_FONT_SIZE; j++) {
-            if (car_id_texture_cache[i][j]) {
-                SDL_DestroyTexture(car_id_texture_cache[i][j]);
-                car_id_texture_cache[i][j] = NULL;
-            }
-        }
-    }
-    LOG_DEBUG("Car ID textures cleaned up successfully.");
-    TTF_Quit();
 }
 
 

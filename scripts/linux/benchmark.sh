@@ -14,9 +14,9 @@ fi
 
 gcc \
     -Iinclude \
-    src/benchmark/*.c src/utils/*.c src/render/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c \
+    src/benchmark.c src/utils/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c \
     -o ./bin/benchmark \
-    -lSDL2 -lSDL2_gfx -lSDL2_ttf -lSDL2_image -lm -lrt -lpthread \
+    -lm -lrt \
     -Wall -Wunused-variable
 
 # Verify if compilation succeeded

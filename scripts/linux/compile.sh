@@ -16,14 +16,32 @@ fi
 
 gcc \
     -Iinclude \
-    src/*.c src/utils/*.c src/render/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c \
-    -o ./bin/play \
-    -lSDL2 -lSDL2_gfx -lSDL2_ttf -lSDL2_image -lm -lrt -lpthread \
+    src/main.c src/utils/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c \
+    -o ./bin/awesim \
+    -lm -lrt \
     -Wall -Wunused-variable
 
 # Check if compilation was successful
 if [ $? -eq 0 ]; then
-    echo "✅ Compilation successful. Executable created at: ./bin/play"
+    echo "✅ Compilation successful. Executable created at: ./bin/awesim"
+else
+    echo "❌ Compilation failed. Please check the errors above."
+    exit 1
+fi
+
+
+echo "Compiling render server source files..."
+
+gcc \
+    -Iinclude \
+    src/render_server.c src/render/*.c src/utils/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c \
+    -o ./bin/awesim_render_server \
+    -lSDL2 -lSDL2_gfx -lSDL2_ttf -lSDL2_image -lm -lrt \
+    -Wall -Wunused-variable
+
+# Check if compilation was successful
+if [ $? -eq 0 ]; then
+    echo "✅ Compilation successful. Executable created at: ./bin/awesim_render_server"
 else
     echo "❌ Compilation failed. Please check the errors above."
     exit 1

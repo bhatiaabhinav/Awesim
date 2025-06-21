@@ -14,12 +14,9 @@ fi
 
 gcc \
     -Iinclude \
-    src/benchmark/*.c src/utils/*.c src/render/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c \
+    src/benchmark.c src/utils/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c \
     -o ./bin/benchmark \
-    `sdl2-config --cflags --libs` \
-    `pkg-config --cflags --libs sdl2_ttf` \
-    `pkg-config --cflags --libs sdl2_image` \
-    -lSDL2 -lSDL2_gfx -lSDL2_ttf -lSDL2_image -lm -lpthread \
+    -lm \
     -Wall -Wunused-variable
 
 # Verify if compilation succeeded

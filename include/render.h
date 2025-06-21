@@ -10,11 +10,6 @@
 #define WINDOW_SIZE_WIDTH 1000
 #define WINDOW_SIZE_HEIGHT 1000
 
-extern double SCALE;
-
-extern int PAN_X;
-extern int PAN_Y;
-
 // Lane visualization constants
 #define LANE_CENTER_LINE_THICKNESS from_inches(16)
 #define DOTTED_LINE_LENGTH from_feet(10)
@@ -33,10 +28,22 @@ extern int PAN_Y;
 #define ARC_NUM_POINTS 8   // Number of points to approximate quarter arcs
 #define MAX_FONT_SIZE 128
 
+extern SDL_Renderer* renderer;
+extern SDL_Window* window;
+extern double SCALE;
+extern int PAN_X;
+extern int PAN_Y;
+extern int fonts_initialized;
+extern TTF_Font* font_cache[MAX_FONT_SIZE];
 extern SDL_Texture* road_name_texture_cache[MAX_NUM_ROADS][MAX_FONT_SIZE];
 extern SDL_Texture* intersection_name_texture_cache[MAX_NUM_INTERSECTIONS][MAX_FONT_SIZE];
 extern SDL_Texture* lane_id_texture_cache[MAX_NUM_LANES][MAX_FONT_SIZE];
 extern SDL_Texture* car_id_texture_cache[MAX_CARS_IN_SIMULATION][MAX_FONT_SIZE];
+
+bool init_sdl();
+void cleanup_sdl();
+SimCommand handle_sdl_events();
+void render(Simulation* sim);
 
 // Converts world coordinates to screen coordinates relative to screen center.
 SDL_Point to_screen_coords(const Coordinates point, const int width, const int height);
@@ -69,7 +76,7 @@ void drawQuarterCircleOutline(SDL_Renderer *renderer, const int center_x, const 
 void render_car(SDL_Renderer* renderer, const Car* car, Map* map, const bool paint_id);
 
 // Renders the entire simulation state: roads, cars, lanes, traffic.
-void render_sim(SDL_Renderer* renderer, Simulation* sim, const bool draw_lanes, const bool draw_cars, const bool draw_track_lines, const bool draw_traffic_lights, const bool draw_car_ids, const bool draw_lane_ids, const bool draw_road_names, const bool benchmark);
+void render_sim(SDL_Renderer* renderer, Simulation* sim, const bool draw_lanes, const bool draw_cars, const bool draw_track_lines, const bool draw_traffic_lights, const bool draw_car_ids, const bool draw_lane_ids, const bool draw_road_names, int hud_font_size, const bool benchmark);
 
 // thickLineRGBA(renderer, p1.x, p1.y, p2.x, p2.y, thickness, color.r, color.g, color.b, color.a);
 
@@ -88,11 +95,7 @@ int filledPolygonRGBA_ignore_if_outside_screen(SDL_Renderer * renderer, const Si
 
 int polygonRGBA_ignore_if_outside_screen(SDL_Renderer * renderer, const Sint16 * vx, const Sint16 * vy, int n, Uint8 r, Uint8 g, Uint8 b, Uint8 a);
 
-int init_text_rendering(const char* font_path);
-void cleanup_text_rendering();
-
-// Alignment options
-// Alignment options
+// Text alignment options
 typedef enum {
     ALIGN_TOP_LEFT,      // Text starts at (x, y)
     ALIGN_TOP_CENTER,    // Top edge centered at x, y at top

@@ -10,10 +10,10 @@ windres scripts/windows/resource.rc -O coff -o scripts/windows/resource.o
 gcc ^
     -Iinclude ^
     -D_WIN32_WINNT=0x0A00 ^
-    src/*.c src/utils/*.c src/render/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c ^
+    src/main.c src/utils/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c ^
     scripts/windows/resource.o ^
     -o .\bin\awesim.exe ^
-    -lSDL2main -lSDL2 -lSDL2_gfx -lSDL2_ttf -lSDL2_image -lm -lpthread ^
+    -lm -lws2_32 ^
     -Wall -Wunused-variable
 
 REM Check if compilation succeeded
@@ -24,3 +24,22 @@ IF %ERRORLEVEL% NEQ 0 (
 
 echo ✅ Compilation successful. Executable created at: .\bin\awesim.exe
 
+
+echo Compiling renderer server source files...
+
+gcc ^
+    -Iinclude ^
+    -D_WIN32_WINNT=0x0A00 ^
+    src/render_server.c src/utils/*.c src/render/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c ^
+    scripts/windows/resource.o ^
+    -o .\bin\awesim_render_server.exe ^
+    -lSDL2main -lSDL2 -lSDL2_gfx -lSDL2_ttf -lSDL2_image -lm -lws2_32 ^
+    -Wall -Wunused-variable
+
+REM Check if compilation succeeded
+IF %ERRORLEVEL% NEQ 0 (
+    echo ❌ Render server compilation failed. Please check the errors above.
+    exit /b %ERRORLEVEL%
+)
+
+echo ✅ Compilation successful. Executable created at: .\bin\awesim_render_server.exe

@@ -268,14 +268,26 @@ typedef enum {
 #define MINOR_RED_EXTENSION 2
 #define ID_NULL -1
 
+// Typedef Definitions
+
+typedef int LaneId;
+typedef int RoadId;
+typedef int IntersectionId;
+typedef int CarId;
+
 // Forward Declarations
+
 typedef struct Car Car;
 typedef struct Road Road;
 typedef struct Lane Lane;
 typedef struct Intersection Intersection;
 typedef struct Map Map;
 typedef struct Simulation Simulation;
-Car* sim_get_car(Simulation* sim, int id);
+Car* sim_get_car(Simulation* sim, CarId id);
+double car_get_lane_progress(const Car* self);
+CarId car_get_id(const Car* self);
+int car_get_lane_rank(const Car* self);
+void car_set_lane_rank(Car* self, int rank);
 
 // Degradations: Represents grip degradation across segments of a lane.
 typedef struct {
@@ -290,11 +302,6 @@ typedef enum {
     QUARTER_ARC_LANE
 } LaneType;
 
-typedef int LaneId;
-typedef int RoadId;
-typedef int IntersectionId;
-typedef int CarId;
-
 // Lane structure representing a single traffic lane.
 struct Lane {
     LaneId id;                 // Unique identifier for the lane
@@ -306,7 +313,8 @@ struct Lane {
     double grip;
     Degradations degradations;
 
-    LaneId connections[3];             // Indices of connected lanes (left, stright, right)
+    LaneId connections_incoming[3];    // Indices of incoming lanes (left , straight, right). On non-intersections, there is no incoming left or incomg right, there is just incoming straight (which could be coming in from a curved road, too, which would be the case when this lane is output of a simple turn connector between two perpendicular straight roads). On intersections, left means that a vehicle took a left turn to enter this lane, straight means that a vehicle entered this lane from the straight lane, and right means that a vehicle took a right turn to enter this lane.
+    LaneId connections[3];             // Indices of connected lanes (left, stright, right). For simple turn connectors between two perpendicular straight roads, use "straight", since vehicles don't use an indicator in such cases. Left and right have meaning only for intersections.
     LaneId adjacents[2];               // Indices of adjacent lanes (left, right)
     LaneId merges_into_id;
     double merges_into_start;
@@ -331,12 +339,15 @@ struct Lane {
     IntersectionId intersection_id;    // The intersection this lane belongs to, if any
     bool is_at_intersection;        // True if this lane is at an intersection, false otherwise
 
-    CarId cars_ids[MAX_CARS_PER_LANE]; // Array of cars currently in this lane
+    CarId cars_ids[MAX_CARS_PER_LANE]; // Array of cars currently in this lane, ordered/ranked by their position on the lane in descending order (i.e., the first car (index = 0) is the one closest to the end of the lane).
     int num_cars;                  // Number of cars currently in this lane
 };
 
 
 // Lane Setters
+void lane_set_connection_incoming_left(Lane* self, const Lane* lane);
+void lane_set_connection_incoming_straight(Lane* self, const Lane* lane);
+void lane_set_connection_incoming_right(Lane* self, const Lane* lane);
 void lane_set_connection_left(Lane* self, const Lane* lane);
 void lane_set_connection_straight(Lane* self, const Lane* lane);
 void lane_set_connection_right(Lane* self, const Lane* lane);
@@ -353,8 +364,9 @@ void lane_set_intersection(Lane* self, const Intersection* intersection);
 void lane_set_name(Lane* self, const char* name);
 
 // Lane Vehicle Management
-void lane_add_car(Lane* self, CarId car_id);
-void lane_remove_car(Lane* self, CarId car_id);
+void lane_add_car(Lane* self, Car* car, Simulation* sim);
+void lane_remove_car(Lane* self, Car* car, Simulation* sim);
+void lane_move_car(Lane* self, Car* car, Simulation* sim);
 
 // Lane Getters
 int lane_get_id(const Lane* self);
@@ -369,6 +381,12 @@ Coordinates lane_get_end_point(const Lane* self);
 Coordinates lane_get_center(const Lane* self);
 Meters lane_get_length(const Lane* self);
 Degradations lane_get_degradations(const Lane* self);
+LaneId lane_get_connection_incoming_left_id(const Lane* self);
+Lane* lane_get_connection_incoming_left(const Lane* self, Map* map);
+LaneId lane_get_connection_incoming_straight_id(const Lane* self);
+Lane* lane_get_connection_incoming_straight(const Lane* self, Map* map);
+LaneId lane_get_connection_incoming_right_id(const Lane* self);
+Lane* lane_get_connection_incoming_right(const Lane* self, Map* map);
 LaneId lane_get_connection_left_id(const Lane* self);
 Lane* lane_get_connection_left(const Lane* self, Map* map);
 LaneId lane_get_connection_straight_id(const Lane* self);
@@ -389,11 +407,14 @@ IntersectionId lane_get_intersection_id(const Lane* self);
 bool lane_is_at_intersection(const Lane* self);
 Intersection* lane_get_intersection(const Lane* self, Map* map);
 int lane_get_num_cars(const Lane* self);
+// Returns the car ID at the given index in the lane. The index is 0-based, where 0 is the first car in the lane (the one closest to the end of the lane), and num_cars-1 is the last car in the lane (the one closest to the start of the lane). Interpret the index as a rank.
 CarId lane_get_car_id(const Lane* self, int index);
+// Returns the car at the given index in the lane. The index is 0-based, where 0 is the first car in the lane (the one closest to the end of the lane), and num_cars-1 is the last car in the lane (the one closest to the start of the lane). Interpret the index as a rank.
 Car* lane_get_car(const Lane* self, Simulation* sim, int index);
 
 // Fancier functions
 
+int lane_get_num_connections_incoming(const Lane* self);
 int lane_get_num_connections(const Lane* self);
 bool lane_is_merge_available(const Lane* self);
 bool lane_is_exit_lane_available(const Lane* self, double progress);
@@ -598,7 +619,7 @@ void intersection_update(Intersection* self, Seconds dt);
 void print_traffic_state(const Intersection* intersection);
 
 Intersection* road_leads_to_intersection(const Road* road, Map* map);
-
+Intersection* road_comes_from_intersection(const Road* road, Map* map);
 
 
 
@@ -730,6 +751,7 @@ struct Car {
     LaneId lane_id;                   // current lane
     double lane_progress;          // progress in the lane as a fraction of the lane length.
     Meters lane_progress_meters;   // progress in the lane in meters. Should be set by the simulation engine. Is a product of lane_progress and lane length.
+    int lane_rank;              // rank of the car in the lane, where 0 is the first car in the lane (the one closest to the end of the lane), and num_cars-1 is the last car in the lane (the one closest to the start of the lane).
     MetersPerSecond speed;              // current speed. Should be set by the simulation engine.
     double damage;                      // damage level of the car. 0.0 for no damage and 1.0 for total damage.
 
@@ -747,7 +769,7 @@ void car_init(Car* car, Dimensions dimensions, CarCapabilities capabilities, Car
 
 
 // getters:
-
+CarId car_get_id(const Car* self);
 Dimensions car_get_dimensions(const Car* self);
 Meters car_get_length(const Car* self); 
 Meters car_get_width(const Car* self);
@@ -759,6 +781,7 @@ Lane* car_get_lane(const Car* self, Map* map);
 double car_get_lane_progress(const Car* self);
 // Returns car progress x lane length in meters.
 Meters car_get_lane_progress_meters(const Car* self);
+int car_get_lane_rank(const Car* self);
 MetersPerSecond car_get_speed(const Car* self);
 double car_get_damage(const Car* self);
 
@@ -773,6 +796,7 @@ CarIndictor car_get_indicator_lane(const Car* self);
 void car_set_lane(Car* self, const Lane* lane);
 // Sets the lane progress of the car. The progress should be between 0.0 and 1.0. Will be clipped automatically.
 void car_set_lane_progress(Car* self, double progress, Meters progress_meters);
+void car_set_lane_rank(Car* self, int rank);
 // Sets the speed of the car. The speed should be between 0.0 and max_speed_capability. Will be clipped automatically.
 void car_set_speed(Car* self, MetersPerSecond speed);
 // Sets the acceleration of the car. The acceleration will be clipped automatically as per the car's capable acceleration profile.
@@ -1142,8 +1166,9 @@ typedef struct Simulation {
 
     bool is_synchronized; // Whether the simulation is synchronized with wall time. If true, the simulation will run in real-time, simulating `simulation_speedup` seconds of simulation time per second of wall time. If false, the simulation will run as fast as possible without synchronization.
     double simulation_speedup; // How many seconds of simulation time to simulate per second of wall time. Default is 1.0, meaning real-time simulation.
-    bool is_rendering_window_open; // Whether the rendering window is open. If true, the simulation is being rendered in an SDL window. If false, the simulation is not being rendered. The rendering thread sets this variable to true when the rendering window is opened and to false when the rendering window is closed.
     bool should_quit_when_rendering_window_closed; // Whether the simulation should quit when the rendering window is closed. If true, the `simulate` function will return when the rendering window is closed, allowing the simulation to exit gracefully. If false, the simulation will continue running even if the rendering window is closed, allowing for background processing or other tasks to continue.
+    int render_socket; // Socket handle for render server connection
+    bool is_connected_to_render_server; // Flag indicating connection status
 } Simulation;
 
  // Allocate memory for a new Simulation instance. The memory is not initialized and contains garbage values.
@@ -1157,11 +1182,23 @@ void sim_init(Simulation* sim);
 // Add a car to the simulation
 Car* sim_get_new_car(Simulation* self);
 
+// Function to connect to render server
+bool sim_connect_to_render_server(Simulation* self, const char* server_ip, int port);
+// Function to disconnect from render server
+void sim_disconnect_from_render_server(Simulation* self);
+// The render server may issue these commands to the simulation
+typedef enum {
+    COMMAND_NONE,
+    COMMAND_QUIT,
+    COMMAND_SIM_INCREASE_SPEED,
+    COMMAND_SIM_DECREASE_SPEED,
+} SimCommand;
+
 // --- Getters ---
 Map* sim_get_map(Simulation* self);
 ClockReading sim_get_initial_clock_reading(Simulation* self);
 int sim_get_num_cars(const Simulation* self);
-Car* sim_get_car(Simulation* self, int id);
+Car* sim_get_car(Simulation* self, CarId id);
 Seconds sim_get_time(Simulation* self);
 Seconds sim_get_dt(const Simulation* self);
 Weather sim_get_weather(Simulation* self);
@@ -1199,11 +1236,6 @@ void simulate(Simulation* self, Seconds sim_duration);
 
 // Advance simulation by one timestep (dt)
 void sim_step(Simulation* self);
-
-// Start rendering thread in SDL window asynchronously. This function will create a new thread that will render the simulation in an SDL window. The simulation must be initialized before calling this function.
-int sim_open_rendering_window(Simulation* sim);
-// Close the rendering thread and clean up SDL resources. Will not free the simulation instance, so it must be done separately.
-void sim_close_rendering_window();
 
 
 struct TrackIntersectionPoint {
@@ -1263,4 +1295,3 @@ void awesim_map_setup(Map* map, Meters city_width);
 
 void awesim_setup(Simulation* sim, Meters city_width, int num_cars, Seconds dt, ClockReading initial_clock_reading, Weather weather);
 
-int main(int argc, char* argv[]);

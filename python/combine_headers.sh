@@ -24,7 +24,4 @@ mkdir -p bin
     done
 ) > "$output_header"
 
-# Add dummy main for CFFI compatibility (if needed)
-echo "int main(int argc, char* argv[]);" >> "$output_header"
-
 echo "✅ Combined headers into $output_header"

@@ -1,14 +1,13 @@
 #include "awesim.h"
-#include "render.h"
 #include "logging.h"
 #include <stdio.h>
 #include <sys/time.h>
-#include <SDL2/SDL_image.h>
-#include <SDL2/SDL_ttf.h>
 #ifdef _WIN32
 #include <windows.h>
 #endif
 
+static char* SERVER_IP = "127.0.0.1";
+static int SERVER_PORT = 4242;
 
 int main(int argc, char* argv[]) {
     Meters city_width = argc >= 2 ? meters(atof(argv[1])) : meters(1000); // width of the city in meters. Prefer to read from command line argument, else use default.
@@ -36,13 +35,24 @@ int main(int argc, char* argv[]) {
     }
     awesim_setup(sim, city_width, num_cars, dt, initial_clock_reading, weather);
     sim_set_synchronized(sim, true, 1.0); // Enable synchronization with wall time at 1x speedup
-    sim_set_should_quit_when_rendering_window_closed(sim, true); // Quit simulation when rendering window is closed
-    sim_open_rendering_window(sim);
+
+    // Connect to render server
+    SERVER_IP = argc >= 5 ? argv[4] : SERVER_IP;            // Default to localhost if not specified
+    SERVER_PORT = argc >= 6 ? atoi(argv[5]) : SERVER_PORT;  // Default port if not specified
+
+    if (sim_connect_to_render_server(sim, SERVER_IP, SERVER_PORT)) {
+        sim_set_should_quit_when_rendering_window_closed(sim, true);
+        LOG_INFO("Running in rendered mode with server at %s:%d", SERVER_IP, SERVER_PORT);
+    } else {
+        LOG_WARN("Failed to connect to render server, running in headless mode");
+    }
 
     simulate(sim, seconds_to_simulate); // Run the simulation for the specified duration
     printf("Simulation completed. Total simulated time: %.2f seconds.\n", sim_get_time(sim));
-    
-    while (sim->is_rendering_window_open) sleep_ms(100);
+
+    if (sim->is_connected_to_render_server) {
+        sim_disconnect_from_render_server(sim);
+    }
     sim_free(sim);
     LOG_INFO("Simulation cleaned up");
     LOG_INFO("Exiting program.");

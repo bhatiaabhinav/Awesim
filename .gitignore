@@ -69,3 +69,5 @@ bin/
 # Python Virtual Environments
 .env/
 env/
+
+*.log

@@ -6,7 +6,7 @@
 #include <stdint.h>
 
 void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, const bool draw_cars,
-                const bool draw_track_lines, const bool draw_traffic_lights, const bool draw_car_ids, const bool draw_lane_ids, const bool draw_road_names, const bool benchmark)
+                const bool draw_track_lines, const bool draw_traffic_lights, const bool draw_car_ids, const bool draw_lane_ids, const bool draw_road_names, int hud_font_size, const bool benchmark)
 {
     Map *map = sim_get_map(sim);
 
@@ -189,4 +189,18 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
         elapsed_us = (double)(end - start) * 1e6 / SDL_GetPerformanceFrequency();
         if (benchmark) printf("Cars: %.2f us\n", elapsed_us);
     }
+
+    // Render time stats
+    char time_stats[40];
+    ClockReading clock_reading = sim_get_clock_reading(sim);
+    snprintf(time_stats, sizeof(time_stats), "%s %02d:%02d:%02d  (>> %.1fx)",
+             day_of_week_strings[clock_reading.day_of_week],
+             clock_reading.hours, clock_reading.minutes, (int)clock_reading.seconds,
+             sim->simulation_speedup);
+    render_text(renderer, time_stats, WINDOW_SIZE_WIDTH - 10, 10, 255, 255, 255, 255,
+                hud_font_size, ALIGN_TOP_RIGHT, false, NULL);
+
+    // Render weather stats
+    render_text(renderer, weather_strings[sim->weather], WINDOW_SIZE_WIDTH - 10, 20 + hud_font_size,
+                255, 255, 255, 255, hud_font_size, ALIGN_TOP_RIGHT, false, NULL);
 }

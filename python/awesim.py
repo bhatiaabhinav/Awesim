@@ -32,10 +32,10 @@ init_weather = libsim.WEATHER_SUNNY
 libsim.awesim_setup(sim, city_width, num_cars, 0.02, init_clock, init_weather)  # set's up sim variables, awesim map and adds cars randomly
 libsim.sim_set_agent_enabled(sim, True)         # car 0 won't be NPC
 decision_interval = 0.1
-total_play_time = 8.0
+total_play_time = 4.0
 agent = libsim.sim_get_agent_car(sim)
 libsim.sim_set_synchronized(sim, True, 1.0)  # synchronize simulation with real time
-libsim.sim_open_rendering_window(sim)
+libsim.sim_connect_to_render_server(sim, "127.0.0.1".encode('utf-8'), 4242)  # before this, start the server with `./bin/awesim_render_server 4242`
 
 while libsim.sim_get_time(sim) < total_play_time:
     situation = libsim.situational_awareness_build(agent, sim)  # holds most variables needed for decision making
@@ -45,5 +45,5 @@ while libsim.sim_get_time(sim) < total_play_time:
     libsim.car_set_indicator_turn(agent, libsim.INDICATOR_NONE)
     libsim.simulate(sim, decision_interval)    # simulate 0.1 seconds
 
-libsim.sim_close_rendering_window()  # close rendering window
+libsim.sim_disconnect_from_render_server(sim)  # close rendering window
 libsim.sim_free(sim)
