@@ -84,8 +84,14 @@ void render_car(SDL_Renderer* renderer, const Car* car, Map* map, const bool pai
         vx[i] = (Sint16)screen_corners[i].x;
         vy[i] = (Sint16)screen_corners[i].y;
     }
-    filledPolygonRGBA_ignore_if_outside_screen(renderer, vx, vy, 4, CAR_COLOR.r, CAR_COLOR.g, CAR_COLOR.b, CAR_COLOR.a);
-    polygonRGBA_ignore_if_outside_screen(renderer, vx, vy, 4, CAR_COLOR.r, CAR_COLOR.g, CAR_COLOR.b, 255);
+    int r = CAR_COLOR.r, g = CAR_COLOR.g, b = CAR_COLOR.b, a = CAR_COLOR.a;
+    if (car->id == 0) {
+        r = 0;
+        g = 0;
+        b = 255; // Special color for the player car
+    }
+    filledPolygonRGBA_ignore_if_outside_screen(renderer, vx, vy, 4, r, g, b, a);
+    polygonRGBA_ignore_if_outside_screen(renderer, vx, vy, 4, r, g, b, 255);
 
     int light_thickness = (int)(from_inches(6.0) * SCALE);
     light_thickness = fmax(light_thickness, 1); // Ensure light thickness is at least 1
