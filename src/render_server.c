@@ -27,13 +27,13 @@ static int server_fd = -1; // Server socket file descriptor
 static int client_fd = -1; // Client socket file descriptor
 struct sockaddr_in server_addr = {0}; // Server address structure
 
-// Initialize network (socket, bind, listen, accept)
-static int init_network() {
+// Initialize server socket (socket, bind, listen)
+static bool init_server_socket() {
     #ifdef _WIN32
         WSADATA wsaData;
         if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
             LOG_ERROR("WSAStartup failed");
-            return -1;
+            return false;
         }
     #endif
 
@@ -43,7 +43,7 @@ static int init_network() {
         #ifdef _WIN32
             WSACleanup();
         #endif
-        return -1;
+        return false;
     }
 
     server_addr.sin_family = AF_INET;
@@ -56,7 +56,7 @@ static int init_network() {
         #ifdef _WIN32
             WSACleanup();
         #endif
-        return -1;
+        return false;
     }
 
     if (listen(server_fd, 1) == -1) {
@@ -65,25 +65,24 @@ static int init_network() {
         #ifdef _WIN32
             WSACleanup();
         #endif
-        return -1;
+        return false;
     }
 
     LOG_INFO("Listening on port %d...", PORT);
+    return true;
+}
 
+// Accept a client connection
+static bool accept_client() {
     struct sockaddr_in client_addr;
     socklen_t addr_len = sizeof(client_addr);
     client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &addr_len);
     if (client_fd == -1) {
         LOG_ERROR("Accept failed");
-        CLOSE_SOCKET(server_fd);
-        #ifdef _WIN32
-            WSACleanup();
-        #endif
-        return -1;
+        return false;
     }
-
     LOG_INFO("Client connected");
-    return 0;
+    return true;
 }
 
 static bool send_command() {
@@ -107,7 +106,7 @@ static int recv_full(int sockfd, char* buffer, int len) {
         int bytes = recv(sockfd, buffer + total_received, len - total_received, 0);
         if (bytes <= 0) {
             if (bytes == 0) {
-                LOG_INFO("Socket disconnected");
+                LOG_DEBUG("Socket disconnected");
             } else {
                 LOG_ERROR("Socket disconnected ungracefully or error occurred");
             }
@@ -140,12 +139,21 @@ static bool receive_message(Simulation* sim, char* receive_buffer) {
 int main(int argc, char* argv[]) {
     LOG_INFO("Starting render server");
     int port = PORT; // Default port
-    if (argc >= 2) {
-        port = atoi(argv[1]);
-        if (port <= 0 || port > 65535) {
-            LOG_ERROR("Invalid port number: %s. Using default port %d", argv[1], PORT);
+    bool persistent = false;
+
+    // Parse command-line arguments
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--persistent") == 0) {
+            LOG_DEBUG("Persistent mode enabled");
+            persistent = true;
         } else {
-            PORT = port; // Update port if valid
+            port = atoi(argv[i]);
+            if (port <= 0 || port > 65535) {
+                LOG_ERROR("Invalid port number: %s. Using default port %d", argv[i], PORT);
+                port = PORT;
+            } else {
+                PORT = port; // Update port if valid
+            }
         }
     }
     Simulation* sim = sim_malloc();
@@ -159,8 +167,8 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
-    // Initialize network
-    if (init_network() != 0) {
+    // Initialize server socket
+    if (!init_server_socket()) {
         sim_free(sim);
         free(receive_buffer);
         return EXIT_FAILURE;
@@ -168,7 +176,6 @@ int main(int argc, char* argv[]) {
 
     // Initialize SDL
     if (!init_sdl()) {
-        CLOSE_SOCKET(client_fd);
         CLOSE_SOCKET(server_fd);
         #ifdef _WIN32
             WSACleanup();
@@ -179,30 +186,67 @@ int main(int argc, char* argv[]) {
     }
 
     bool quit = false;
-    bool fatal_error = false;
-    while (!quit) {
-        command = handle_sdl_events();
-        if (command == COMMAND_QUIT) {
-            LOG_INFO("Quit event received.");
-            quit = true;
-            continue;
-        }
-        fatal_error = receive_message(sim, receive_buffer);
-        if (fatal_error) {
-            quit = true;
-            continue;
-        }
-        render(sim);
-        send_command();
-    }
+    if (persistent) {
+        while (!quit) {
+            if (!accept_client()) {
+                continue; // Try accepting another client
+            }
 
-    // Send final quit command
-    command = COMMAND_QUIT;
-    if (!fatal_error) send_command();
+            bool client_disconnected = false;
+            while (!client_disconnected && !quit) {
+                command = handle_sdl_events();
+                if (command == COMMAND_QUIT) {
+                    LOG_INFO("Quit event received.");
+                    send_command();
+                    quit = true;
+                    break;
+                }
+                if (receive_message(sim, receive_buffer)) {
+                    client_disconnected = true;
+                    continue;
+                }
+                render(sim);
+                if (send_command()) {
+                    client_disconnected = true;
+                }
+            }
+
+            CLOSE_SOCKET(client_fd);
+            LOG_INFO("Client disconnected");
+        }
+    } else {
+        if (!accept_client()) {
+            CLOSE_SOCKET(server_fd);
+            #ifdef _WIN32
+                WSACleanup();
+            #endif
+            sim_free(sim);
+            free(receive_buffer);
+            return EXIT_FAILURE;
+        }
+
+        while (!quit) {
+            command = handle_sdl_events();
+            if (command == COMMAND_QUIT) {
+                LOG_INFO("Quit event received.");
+                quit = true;
+                send_command();
+                continue;
+            }
+            if (receive_message(sim, receive_buffer)) {
+                quit = true;
+                continue;
+            }
+            render(sim);
+            send_command();
+        }
+
+        CLOSE_SOCKET(client_fd);
+        LOG_INFO("Client disconnected");
+    }
 
     // Cleanup
     LOG_DEBUG("Cleaning up resources");
-    CLOSE_SOCKET(client_fd);
     CLOSE_SOCKET(server_fd);
     #ifdef _WIN32
         WSACleanup();
