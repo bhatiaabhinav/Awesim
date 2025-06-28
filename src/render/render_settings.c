@@ -1,6 +1,6 @@
 #include "render.h"
 
-int WINDOW_SIZE_WIDTH = 1500;
+int WINDOW_SIZE_WIDTH = 1000;
 int WINDOW_SIZE_HEIGHT = 1000;
 
 
