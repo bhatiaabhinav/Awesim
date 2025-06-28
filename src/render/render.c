@@ -5,17 +5,8 @@ static double last_render_t = 0.0;  // Last render time for FPS calculation
 static double render_fps = 0.0;     // Render FPS
 
 void render(Simulation *sim) {
-    bool draw_lanes = true;
-    bool draw_cars = true;
-    bool draw_track_lines = false;
-    bool draw_traffic_lights = true;
-    bool draw_car_ids = true;
-    bool draw_lane_ids = true;
-    bool draw_road_names = true;
-    int hud_font_size = 20;
-    bool benchmark = false;
-    render_sim(renderer, sim, draw_lanes, draw_cars, draw_track_lines, draw_traffic_lights,
-                draw_car_ids, draw_lane_ids, draw_road_names, hud_font_size, benchmark);
+    render_sim(renderer, sim, DRAW_LANES, DRAW_CARS, DRAW_TRACK_LINES, DRAW_TRAFFIC_LIGHTS,
+                DRAW_CAR_IDS, DRAW_LANE_IDS, DRAW_ROAD_NAMES, HUD_FONT_SIZE, false);
 
     // Render FPS stats
     char fps_stats[24];

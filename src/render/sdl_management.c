@@ -182,6 +182,14 @@ SimCommand handle_sdl_events() {
         } else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_LEFT) {
             command = COMMAND_SIM_DECREASE_SPEED; // Slow down command
             LOG_DEBUG("Left arrow key pressed, decreasing speed");
+        } else if (event.type == SDL_KEYUP && event.key.keysym.sym == SDLK_f) {
+            CAMERA_CENTERED_ON_CAR_ENABLED = !CAMERA_CENTERED_ON_CAR_ENABLED; // Toggle following agent
+            LOG_DEBUG("F key pressed, toggling follow car. Now %s", CAMERA_CENTERED_ON_CAR_ENABLED ? "enabled" : "disabled");
+        } else if (event.type == SDL_KEYUP && event.key.keysym.sym == SDLK_r) {
+            LOG_DEBUG("R key pressed, recentering camere to (0, 0)");
+            CAMERA_CENTERED_ON_CAR_ENABLED = false; // Disable following agent
+            PAN_X = 0;
+            PAN_Y = 0;
         } else if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT) {
             mouse_start_x = event.button.x;
             mouse_start_y = event.button.y;

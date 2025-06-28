@@ -8,6 +8,16 @@
 
 SDL_Texture* car_id_texture_cache[MAX_CARS_IN_SIMULATION][MAX_FONT_SIZE] = {{NULL}};
 
+static bool should_highlight_car(const Car* car) {
+    // Check if the car ID is in the highlighted cars array
+    for (int i = 0; HIGHLIGHTED_CARS[i] != ID_NULL; i++) {
+        if (HIGHLIGHTED_CARS[i] == car->id) {
+            return true;
+        }
+    }
+    return false;
+}
+
 typedef struct {
     Coordinates position;
     double angle;
@@ -46,6 +56,12 @@ CarPose get_car_pose(const Car* car, Map* map) {
 
 void render_car(SDL_Renderer* renderer, const Car* car, Map* map, const bool paint_id) {
     CarPose pose = get_car_pose(car, map);
+
+    if (CAMERA_CENTERED_ON_CAR_ENABLED && car->id == CAMERA_CENTERED_ON_CAR_ID) {
+        PAN_X = (int)(pose.position.x * SCALE);
+        PAN_Y = (int)(-pose.position.y * SCALE);
+    }
+
     double width = car->dimensions.x;
     double length = car->dimensions.y;
 
@@ -84,14 +100,9 @@ void render_car(SDL_Renderer* renderer, const Car* car, Map* map, const bool pai
         vx[i] = (Sint16)screen_corners[i].x;
         vy[i] = (Sint16)screen_corners[i].y;
     }
-    int r = CAR_COLOR.r, g = CAR_COLOR.g, b = CAR_COLOR.b, a = CAR_COLOR.a;
-    if (car->id == 0) {
-        r = 0;
-        g = 0;
-        b = 255; // Special color for the player car
-    }
-    filledPolygonRGBA_ignore_if_outside_screen(renderer, vx, vy, 4, r, g, b, a);
-    polygonRGBA_ignore_if_outside_screen(renderer, vx, vy, 4, r, g, b, 255);
+    SDL_Color car_color = should_highlight_car(car) ? HIGHLIGHTED_CAR_COLOR : CAR_COLOR;
+    filledPolygonRGBA_ignore_if_outside_screen(renderer, vx, vy, 4, car_color.r, car_color.g, car_color.b, car_color.a);
+    polygonRGBA_ignore_if_outside_screen(renderer, vx, vy, 4, car_color.r, car_color.g, car_color.b, 255);
 
     int light_thickness = (int)(from_inches(6.0) * SCALE);
     light_thickness = fmax(light_thickness, 1); // Ensure light thickness is at least 1

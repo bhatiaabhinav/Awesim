@@ -8,12 +8,25 @@
 
 SDL_Texture* lane_id_texture_cache[MAX_NUM_LANES][MAX_FONT_SIZE] = {{NULL}};
 
+static bool should_highlight_lane(const Lane* lane) {
+    // Check if the lane ID is in the highlighted lanes array
+    for (int i = 0; HIGHLIGHTED_LANES[i] != ID_NULL; i++) {
+        if (HIGHLIGHTED_LANES[i] == lane->id) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Render a solid center line for the lane based on type.
 void render_lane_center_line(SDL_Renderer* renderer, const Lane* lane, Map* map, const SDL_Color color, bool dotted) {
     int width = WINDOW_SIZE_WIDTH;
     int height = WINDOW_SIZE_HEIGHT;
     int thickness = (int)(LANE_CENTER_LINE_THICKNESS * SCALE);
     thickness = fclamp(thickness, 1, 1);
+    if (should_highlight_lane(lane)) {
+        thickness += 1; // Increase thickness for highlighted lanes
+    }
 
     if (lane->type == LINEAR_LANE) {
         SDL_Point start = to_screen_coords(lane->start_point, width, height);
@@ -81,7 +94,8 @@ void render_lane_linear(SDL_Renderer* renderer, const Lane* lane, Map* map, cons
     };
 
     // Fill lane with gray
-    SDL_SetRenderDrawColor(renderer, 128, 128, 128, 255);
+    SDL_Color lane_color = should_highlight_lane(lane) ? HIGHLIGHTED_LANE_COLOR : ROAD_COLOR;
+    SDL_SetRenderDrawColor(renderer, lane_color.r, lane_color.g, lane_color.b, lane_color.a);
     SDL_RenderFillRect_ignore_if_outside_screen(renderer, &lane_rect);
 
     // Determine left/right edge line positions
@@ -246,7 +260,8 @@ void render_lane_quarterarc(SDL_Renderer* renderer, const Lane* lane, Map* map, 
     }
 
     // Draw the lane surface (gray)
-    filledPolygonRGBA_ignore_if_outside_screen(renderer, vx, vy, 2 * (ARC_NUM_POINTS + 1), 128, 128, 128, 255);
+    SDL_Color lane_color = should_highlight_lane(lane) ? HIGHLIGHTED_LANE_COLOR : ROAD_COLOR;
+    filledPolygonRGBA_ignore_if_outside_screen(renderer, vx, vy, 2 * (ARC_NUM_POINTS + 1), lane_color.r, lane_color.g, lane_color.b, lane_color.a);
 
     if (paint_lines) {
         // Determine appropriate color and thickness for the left boundary

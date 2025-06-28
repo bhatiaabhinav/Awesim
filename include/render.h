@@ -6,9 +6,23 @@
 #include "car.h"
 #include "sim.h"
 
-// Rendering constants
-#define WINDOW_SIZE_WIDTH 1000
-#define WINDOW_SIZE_HEIGHT 1000
+// Settings
+extern int WINDOW_SIZE_WIDTH;
+extern int WINDOW_SIZE_HEIGHT;
+extern bool DRAW_LANES;
+extern bool DRAW_CARS;
+extern bool DRAW_TRACK_LINES;
+extern bool DRAW_TRAFFIC_LIGHTS;
+extern bool DRAW_CAR_IDS;
+extern bool DRAW_LANE_IDS;
+extern bool DRAW_ROAD_NAMES;
+extern int HUD_FONT_SIZE;
+extern CarId CAMERA_CENTERED_ON_CAR_ID;
+extern bool CAMERA_CENTERED_ON_CAR_ENABLED;
+extern const CarId HIGHLIGHTED_CARS[];
+extern const LaneId HIGHLIGHTED_LANES[];
+extern SDL_Color HIGHLIGHTED_CAR_COLOR; // Color for highlighted cars
+extern SDL_Color HIGHLIGHTED_LANE_COLOR; // Color for highlighted lanes
 
 // Lane visualization constants
 #define LANE_CENTER_LINE_THICKNESS from_inches(16)
@@ -20,6 +34,7 @@
 #define ARROW_SIZE from_feet(4.5)
 #define CAR_COLOR (SDL_Color){74, 103, 65, 255}         // Olive greenish color
 #define BACKGROUND_COLOR (SDL_Color){0, 0, 0, 255}  // black
+#define ROAD_COLOR (SDL_Color){128, 128, 128, 255} // gray
 #define LANE_CENTER_LINE_COLOR (SDL_Color){100, 100, 255, 255}  // blue
 #define RED_LIGHT_COLOR (SDL_Color){200, 30, 30, 255}       // Soft red
 #define GREEN_LIGHT_COLOR (SDL_Color){50, 200, 50, 255}     // Soft green
