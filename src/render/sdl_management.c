@@ -141,7 +141,7 @@ bool init_sdl() {
     }
     LOG_DEBUG("Renderer created successfully");
 
-    if (!init_text_rendering("assets/fonts/Roboto.ttf")) {
+    if (!init_text_rendering(FONT_PATH)) {
         LOG_ERROR("Text rendering initialization failed");
         SDL_DestroyRenderer(renderer);
         SDL_DestroyWindow(window);
@@ -229,11 +229,14 @@ SimCommand handle_sdl_events() {
         } else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_LEFT) {
             command = COMMAND_SIM_DECREASE_SPEED; // Slow down command
             LOG_DEBUG("Left arrow key pressed, decreasing speed");
+        } else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_SPACE) {
+            command = COMMAND_SIM_PAUSE; // Pause command
+            LOG_DEBUG("Space key pressed, toggling pause");
         } else if (event.type == SDL_KEYUP && event.key.keysym.sym == SDLK_f) {
             CAMERA_CENTERED_ON_CAR_ENABLED = !CAMERA_CENTERED_ON_CAR_ENABLED; // Toggle following agent
             LOG_DEBUG("F key pressed, toggling follow car. Now %s", CAMERA_CENTERED_ON_CAR_ENABLED ? "enabled" : "disabled");
         } else if (event.type == SDL_KEYUP && event.key.keysym.sym == SDLK_r) {
-            LOG_DEBUG("R key pressed, recentering camere to (0, 0)");
+            LOG_DEBUG("R key pressed, recentering camera to (0, 0)");
             CAMERA_CENTERED_ON_CAR_ENABLED = false; // Disable following agent
             PAN_X = 0;
             PAN_Y = 0;

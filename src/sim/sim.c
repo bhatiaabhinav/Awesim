@@ -83,6 +83,7 @@ void sim_init(Simulation* sim) {
     sim->weather = WEATHER_SUNNY;
     sim->is_agent_enabled = false; // Agent car is disabled by default
     sim->is_synchronized = false; // Not synchronized by default
+    sim->is_paused = false; // Simulation is not paused by default
     sim->simulation_speedup = 1.0; // Default to real-time speed
     sim->should_quit_when_rendering_window_closed = false; // Default behavior is to not quit when rendering window is closed
     sim->render_socket = -1; // Invalid socket handle by default

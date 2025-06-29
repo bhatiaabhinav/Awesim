@@ -193,10 +193,11 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
     // Render time stats
     char time_stats[40];
     ClockReading clock_reading = sim_get_clock_reading(sim);
-    snprintf(time_stats, sizeof(time_stats), "%s %02d:%02d:%02d  (>> %.1fx)",
-             day_of_week_strings[clock_reading.day_of_week],
-             clock_reading.hours, clock_reading.minutes, (int)clock_reading.seconds,
-             sim->simulation_speedup);
+snprintf(time_stats, sizeof(time_stats), "%s %02d:%02d:%02d  (%s %.1fx)",
+         day_of_week_strings[clock_reading.day_of_week],
+         clock_reading.hours, clock_reading.minutes, (int)clock_reading.seconds,
+         sim->is_paused ? "⏸" : (approxeq(sim->simulation_speedup, 1.0, 1e-6) ? "▸" : "▸▸"),
+         sim->simulation_speedup);
     render_text(renderer, time_stats, WINDOW_SIZE_WIDTH - 10, 10, 255, 255, 255, 255,
                 hud_font_size, ALIGN_TOP_RIGHT, false, NULL);
 

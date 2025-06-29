@@ -28,3 +28,5 @@ const LaneId HIGHLIGHTED_LANES[] = {
 
 SDL_Color HIGHLIGHTED_CAR_COLOR = {0, 0, 255, 255}; // Blue color for highlighted cars
 SDL_Color HIGHLIGHTED_LANE_COLOR = {192, 192, 192, 255}; // Light gray color for highlighted lanes
+
+const char* FONT_PATH = "assets/fonts/FreeSans.ttf"; // Default font path

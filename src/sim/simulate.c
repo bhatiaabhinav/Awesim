@@ -103,6 +103,11 @@ static void sim_sync_with_render_server(Simulation* self) {
     int bytes = recv(self->render_socket, (char*)&command, 1, 0);
     if (bytes == 1) {
         switch (command) {
+            case COMMAND_SIM_PAUSE: // Pause the simulation
+                self->is_paused = !self->is_paused; // Toggle pause state
+                LOG_DEBUG("Received toggle pause command, simulation is now %s", 
+                          self->is_paused ? "paused" : "resumed");
+                break;
             case COMMAND_SIM_DECREASE_SPEED: // Slow down
                 self->simulation_speedup -= self->simulation_speedup < 1.01 ? 0.1 : 1.0;
                 self->simulation_speedup = fmax(self->simulation_speedup, 0.0);
@@ -165,7 +170,7 @@ void simulate(Simulation* self, Seconds sim_duration) {
         }
 
         double delta_wall_t = get_sys_time_seconds() - t_prev;
-        double simulation_speedup = self->simulation_speedup;
+        double simulation_speedup = self->is_paused ? 0.0 : self->simulation_speedup; // If paused, speedup is 0
         sim_time += delta_wall_t * simulation_speedup;
         sim_integrate(self, sim_time - self->time);     // make sim catch up to sim_time.
         t_prev = get_sys_time_seconds();                // update previous wall time

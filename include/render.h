@@ -24,6 +24,7 @@ extern const CarId HIGHLIGHTED_CARS[];
 extern const LaneId HIGHLIGHTED_LANES[];
 extern SDL_Color HIGHLIGHTED_CAR_COLOR; // Color for highlighted cars
 extern SDL_Color HIGHLIGHTED_LANE_COLOR; // Color for highlighted lanes
+extern const char* FONT_PATH;
 
 // Lane visualization constants
 #define LANE_CENTER_LINE_THICKNESS from_inches(16)

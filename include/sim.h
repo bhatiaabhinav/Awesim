@@ -80,6 +80,7 @@ typedef struct Simulation {
     bool is_agent_enabled; // Whether car 0 is an agent (true) or an NPC (false). False by default. When true, car 0 is the agent car and must be controlled using car_set_acceleration, car_set_indicator_turn, and car_set_indicator_lane functions outside the sim loop.
 
     bool is_synchronized; // Whether the simulation is synchronized with wall time. If true, the simulation will run in real-time, simulating `simulation_speedup` seconds of simulation time per second of wall time. If false, the simulation will run as fast as possible without synchronization.
+    bool is_paused; // Whether the simulation is paused. If true, the simulation will not advance time until it is resumed.
     double simulation_speedup; // How many seconds of simulation time to simulate per second of wall time. Default is 1.0, meaning real-time simulation.
     bool should_quit_when_rendering_window_closed; // Whether the simulation should quit when the rendering window is closed. If true, the `simulate` function will return when the rendering window is closed, allowing the simulation to exit gracefully. If false, the simulation will continue running even if the rendering window is closed, allowing for background processing or other tasks to continue.
     int render_socket; // Socket handle for render server connection
@@ -107,6 +108,7 @@ typedef enum {
     COMMAND_QUIT,
     COMMAND_SIM_INCREASE_SPEED,
     COMMAND_SIM_DECREASE_SPEED,
+    COMMAND_SIM_PAUSE
 } SimCommand;
 
 // --- Getters ---

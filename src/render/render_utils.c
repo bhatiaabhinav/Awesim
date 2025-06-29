@@ -221,7 +221,7 @@ void render_text(SDL_Renderer* renderer, const char* text, int x, int y, Uint8 r
 
         // Create text surface
         SDL_Color color = {r, g, b, a};
-        SDL_Surface* surface = TTF_RenderText_Solid(font, text, color);
+        SDL_Surface* surface = TTF_RenderUTF8_Solid(font, text, color);
         if (!surface) {
             LOG_ERROR("TTF_RenderText_Solid failed: %s", TTF_GetError());
             return;
