@@ -11,7 +11,7 @@ bool DRAW_TRAFFIC_LIGHTS = true;       // Draw traffic lights
 bool DRAW_CAR_IDS = true;              // Draw car IDs
 bool DRAW_LANE_IDS = true;             // Draw lane IDs
 bool DRAW_ROAD_NAMES = true;           // Draw road names
-int HUD_FONT_SIZE = 20;                // Font size for HUD text
+int HUD_FONT_SIZE = 24;                // Font size for HUD text
 
 // Keep the screen centered on the following car ID:
 int CAMERA_CENTERED_ON_CAR_ID = 0;              // Car 0 is "agent" car
