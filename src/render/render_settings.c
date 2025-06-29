@@ -2,11 +2,11 @@
 
 int WINDOW_SIZE_WIDTH = 1000;
 int WINDOW_SIZE_HEIGHT = 1000;
-
+bool ENABLE_DOUBLE_CLICK_TO_TOGGLE_FULLSCREEN = true;
 
 bool DRAW_LANES = true;                // Draw lanes
 bool DRAW_CARS = true;                 // Draw cars
-bool DRAW_TRACK_LINES = true;         // Draw track lines (center lines on lanes)
+bool DRAW_TRACK_LINES = false;         // Draw track lines (center lines on lanes)
 bool DRAW_TRAFFIC_LIGHTS = true;       // Draw traffic lights
 bool DRAW_CAR_IDS = true;              // Draw car IDs
 bool DRAW_LANE_IDS = true;             // Draw lane IDs

@@ -114,7 +114,8 @@ bool init_sdl() {
     LOG_DEBUG("SDL initialized successfully");
 
     window = SDL_CreateWindow("Awesim", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-                              WINDOW_SIZE_WIDTH, WINDOW_SIZE_HEIGHT, SDL_WINDOW_SHOWN);
+                              WINDOW_SIZE_WIDTH, WINDOW_SIZE_HEIGHT,
+                              SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
     if (!window) {
         LOG_ERROR("Window could not be created! SDL_Error: %s", SDL_GetError());
         SDL_Quit();
@@ -167,6 +168,10 @@ void cleanup_sdl() {
 
 static bool dragging = false;
 static int mouse_start_x = 0, mouse_start_y = 0;
+static Uint32 last_click_time = 0;
+static int last_click_x = 0, last_click_y = 0;
+#define DOUBLE_CLICK_TIME_MS 300
+#define DOUBLE_CLICK_DISTANCE 5
 
 // Handle SDL events
 SimCommand handle_sdl_events() {
@@ -176,6 +181,48 @@ SimCommand handle_sdl_events() {
         if (event.type == SDL_QUIT) {
             command = COMMAND_QUIT; // Quit command
             LOG_DEBUG("Quit event received");
+        } else if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
+            WINDOW_SIZE_WIDTH = event.window.data1;
+            WINDOW_SIZE_HEIGHT = event.window.data2;
+            LOG_DEBUG("Window resized to %dx%d", WINDOW_SIZE_WIDTH, WINDOW_SIZE_HEIGHT);
+        } else if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_DISPLAY_CHANGED) {
+            SDL_DestroyRenderer(renderer);
+            renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+            if (!renderer) {
+                LOG_ERROR("Renderer could not be recreated! SDL_Error: %s", SDL_GetError());
+                command = COMMAND_QUIT;
+            } else {
+                LOG_DEBUG("Renderer recreated for display change");
+            }
+        } else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_F11) {
+            static int is_fullscreen = 0;
+            is_fullscreen = !is_fullscreen;
+            if (is_fullscreen) {
+                SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP);
+                LOG_DEBUG("Switched to fullscreen mode");
+            } else {
+                SDL_SetWindowFullscreen(window, 0);
+                LOG_DEBUG("Switched to windowed mode");
+            }
+            SDL_GetWindowSize(window, &WINDOW_SIZE_WIDTH, &WINDOW_SIZE_HEIGHT);
+            LOG_DEBUG("Window size updated to %dx%d", WINDOW_SIZE_WIDTH, WINDOW_SIZE_HEIGHT);
+        } else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE) {
+            if (SDL_GetWindowFlags(window) & (SDL_WINDOW_FULLSCREEN | SDL_WINDOW_FULLSCREEN_DESKTOP)) {
+                SDL_SetWindowFullscreen(window, 0);
+                SDL_GetWindowSize(window, &WINDOW_SIZE_WIDTH, &WINDOW_SIZE_HEIGHT);
+                LOG_DEBUG("ESC key pressed, exited fullscreen mode. Window size: %dx%d", WINDOW_SIZE_WIDTH, WINDOW_SIZE_HEIGHT);
+            }
+        } else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_RETURN &&
+                   (SDL_GetModState() & KMOD_ALT)) {
+            if (SDL_GetWindowFlags(window) & SDL_WINDOW_MAXIMIZED) {
+                SDL_RestoreWindow(window);
+                LOG_DEBUG("Window restored");
+            } else {
+                SDL_MaximizeWindow(window);
+                LOG_DEBUG("Window maximized");
+            }
+            SDL_GetWindowSize(window, &WINDOW_SIZE_WIDTH, &WINDOW_SIZE_HEIGHT);
+            LOG_DEBUG("Window size updated to %dx%d", WINDOW_SIZE_WIDTH, WINDOW_SIZE_HEIGHT);
         } else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_RIGHT) {
             command = COMMAND_SIM_INCREASE_SPEED; // Speed up command
             LOG_DEBUG("Right arrow key pressed, increasing speed");
@@ -194,6 +241,28 @@ SimCommand handle_sdl_events() {
             mouse_start_x = event.button.x;
             mouse_start_y = event.button.y;
             dragging = true;
+            if (ENABLE_DOUBLE_CLICK_TO_TOGGLE_FULLSCREEN) {
+                Uint32 current_time = SDL_GetTicks();
+                int dx = event.button.x - last_click_x;
+                int dy = event.button.y - last_click_y;
+                if (current_time - last_click_time <= DOUBLE_CLICK_TIME_MS &&
+                    abs(dx) <= DOUBLE_CLICK_DISTANCE && abs(dy) <= DOUBLE_CLICK_DISTANCE) {
+                    static int is_fullscreen = 0;
+                    is_fullscreen = !is_fullscreen;
+                    if (is_fullscreen) {
+                        SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP);
+                        LOG_DEBUG("Double-click detected, switched to fullscreen mode");
+                    } else {
+                        SDL_SetWindowFullscreen(window, 0);
+                        LOG_DEBUG("Double-click detected, switched to windowed mode");
+                    }
+                    SDL_GetWindowSize(window, &WINDOW_SIZE_WIDTH, &WINDOW_SIZE_HEIGHT);
+                    LOG_DEBUG("Window size updated to %dx%d", WINDOW_SIZE_WIDTH, WINDOW_SIZE_HEIGHT);
+                }
+                last_click_time = current_time;
+                last_click_x = event.button.x;
+                last_click_y = event.button.y;
+            }
         } else if (event.type == SDL_MOUSEBUTTONUP && event.button.button == SDL_BUTTON_LEFT) {
             dragging = false;
         } else if (event.type == SDL_MOUSEMOTION && dragging) {

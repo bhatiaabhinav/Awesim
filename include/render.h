@@ -9,6 +9,7 @@
 // Settings
 extern int WINDOW_SIZE_WIDTH;
 extern int WINDOW_SIZE_HEIGHT;
+extern bool ENABLE_DOUBLE_CLICK_TO_TOGGLE_FULLSCREEN;
 extern bool DRAW_LANES;
 extern bool DRAW_CARS;
 extern bool DRAW_TRACK_LINES;
