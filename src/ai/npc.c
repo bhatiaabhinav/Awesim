@@ -7,6 +7,28 @@
 #include <stdlib.h>
 
 
+// Left Turn Procedure for Intersections
+// void left_turn_intersection(Car* self, Simulation* sim) {
+    
+// }
+
+// // Right Turn Procedure for Intersections
+// void right_turn_intersection(Car* self, Simulation* sim) {
+    
+// }
+
+// // Stop Sign Procedure
+// void stop_sign_intersection(Car* self, Simulation* sim) {
+    
+// }
+
+// // Overtaking procedure on highways
+// void overtaking(Car* self, Simulation* sim) {
+
+// }
+
+
+
 void npc_car_make_decisions(Car* self, Simulation* sim) {
     Seconds dt = sim_get_dt(sim);
     SituationalAwareness* situation = sim_get_situational_awareness(sim, self->id);
@@ -141,11 +163,6 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
 
         switch (light) {
         case TRAFFIC_LIGHT_STOP:
-            should_brake = true;
-            if (!is_emergency_braking_possible) {
-                should_brake = false;
-            }
-            break;
         case TRAFFIC_LIGHT_RED:
             should_brake = true;
             if (!is_emergency_braking_possible) {

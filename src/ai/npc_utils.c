@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
+#include <math.h>
 
 CarIndictor turn_sample_possible(const SituationalAwareness* situation) {
     if (situation->is_approaching_dead_end) {
@@ -115,6 +116,7 @@ bool car_should_yield_at_intersection(const Car* self, Simulation* sim, const Si
 
         // NOTE: Assuming intersection_get_road_... functions exist and take (Intersection*, Map*)
         // and return const Road*. The original road.h showed direct member access.
+        //TODO: (6/26) Check intersection lanes logic here! 
         switch (my_dir) {
             case DIRECTION_EAST: //
                 opposite_approach_straight_road = intersection_get_road_westbound_from(intersection_obj, map);
@@ -154,20 +156,38 @@ bool car_should_yield_at_intersection(const Car* self, Simulation* sim, const Si
                 Meters oncoming_dist_to_their_stop_line = oncoming_lane_length - oncoming_progress_m - (oncoming_car_length / 2.0);
                 Meters oncoming_speed = car_get_speed(oncoming_car);
 
-                bool oncoming_is_a_factor = false;
+                // Compute time for the oncoming car to reach its stop‐line (seconds) # TODO: this should not be the stop line but the line wihtin the interesection
+                double time_to_oncoming_enter = (oncoming_speed > meters(0.1))
+                ? (oncoming_dist_to_their_stop_line / oncoming_speed)
+                : INFINITY;
 
-                // Check if oncoming car is already in the intersection's conflict area for our turn
-                // (i.e., past its stop line but not too far past the typical conflict zone width).
-                // A typical intersection might be 15-20m wide.
-                if (oncoming_dist_to_their_stop_line < meters(0) && oncoming_dist_to_their_stop_line > -meters(15.0)) {
-                    // Car is in the intersection, 0 to 15m past its stop line.
-                    // Its presence is a factor, regardless of its current speed (it might be stopped/braking).
-                    oncoming_is_a_factor = true;
+                const double TIME_THRESHOLD_S = 3.0;        // 3-second rule
+                const Meters CONFLICT_ZONE_LEN = meters(15.0); // spatial cap for “already in intersection”
+
+                bool oncoming_is_a_factor = false;
+                // (a) if it’s already in the intersection (but not way past it), or
+                // (b) if it can get there within 3 seconds
+                if (
+                    (oncoming_dist_to_their_stop_line >= meters(0) &&
+                    time_to_oncoming_enter <= TIME_THRESHOLD_S))
+                {
+                oncoming_is_a_factor = true;
                 }
-                // Else, check if it's approaching and poses a threat based on speed and proximity.
-                else if (oncoming_dist_to_their_stop_line >= meters(0) && oncoming_dist_to_their_stop_line < meters(20) && oncoming_speed > meters(1.0)) {
-                    oncoming_is_a_factor = true;
-                }
+
+                // bool oncoming_is_a_factor = false;
+
+                // // Check if oncoming car is already in the intersection's conflict area for our turn
+                // // (i.e., past its stop line but not too far past the typical conflict zone width).
+                // // A typical intersection might be 15-20m wide.
+                // if (oncoming_dist_to_their_stop_line < meters(0) && oncoming_dist_to_their_stop_line > -meters(15.0)) { //TODO: (6/26) Change the meteres to seconds (3 second rule). Makes it dependent on speed and distance. 
+                //     // Car is in the intersection, 0 to 15m past its stop line.
+                //     // Its presence is a factor, regardless of its current speed (it might be stopped/braking).
+                //     oncoming_is_a_factor = true;
+                // }
+                // // Else, check if it's approaching and poses a threat based on speed and proximity.
+                // else if (oncoming_dist_to_their_stop_line >= meters(0) && oncoming_dist_to_their_stop_line < meters(20) && oncoming_speed > meters(1.0)) {
+                //     oncoming_is_a_factor = true;
+                // }
 
                 if (oncoming_is_a_factor) {
                     // If the ego car is already (almost) stopped at its line, it must yield.
