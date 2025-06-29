@@ -39,7 +39,8 @@ libsim.sim_connect_to_render_server(sim, "127.0.0.1".encode('utf-8'), 4242)  # b
 
 print(f"Running simulation for {total_play_time} seconds with decision interval of {decision_interval} seconds. Press Ctrl+C to stop.")
 while libsim.sim_get_time(sim) < total_play_time:
-    situation = libsim.situational_awareness_build(agent, sim)  # holds most of the state variables needed for decision making
+    libsim.situational_awareness_build(sim, agent.id)  # holds most of the state variables needed for decision making
+    situation = libsim.sim_get_situational_awareness(sim, agent.id)  # get situational awareness for the agent
     distance_to_lead_vehicle = situation.distance_to_lead_vehicle   # example variable
     # set action space variables:
     libsim.car_set_acceleration(agent, 4.0)     # 0-60mph in ~4.5s

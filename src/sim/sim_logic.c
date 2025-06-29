@@ -41,7 +41,12 @@ void sim_integrate(Simulation* self, Seconds time_period) {
         }
         LOG_TRACE("Updated intersections");
 
+        LOG_TRACE("Building situational awareness for all cars");
+        for(int car_id=0; car_id < self->num_cars; car_id++) {
+            situational_awareness_build(self, car_id);
+        }
 
+        LOG_TRACE("Having all NPC cars make decisions");
         for(int car_id=0; car_id < self->num_cars; car_id++) {
             Car* car = sim_get_car(self, car_id);
             if (!sim_is_agent_enabled(self) || car_id > 0) {
@@ -51,6 +56,11 @@ void sim_integrate(Simulation* self, Seconds time_period) {
                 // Assume that the first car (id 0) is the agent car and it is controlled externally.
                 LOG_TRACE("Skipping decision-making for agent car %d, assuming it is controlled externally using car_set_acceleration, car_set_indicator_turn, and car_set_indicator_lane functions.", car->id);
             }
+        }
+
+        LOG_TRACE("Updating map and car state for all cars");
+        for(int car_id=0; car_id < self->num_cars; car_id++) {
+            Car* car = sim_get_car(self, car_id);
             Lane* lane = car_get_lane(car, map);
             double progress = car_get_lane_progress(car);
             Meters s = car_get_lane_progress_meters(car);
@@ -184,6 +194,13 @@ void sim_integrate(Simulation* self, Seconds time_period) {
             const char* road_name = road ? road->name : intersection ? intersection->name : "Unknown";
             LOG_TRACE("Car %d processing complete: Updated state: lane %d (%s), progress %.2f (%.2f miles), speed = %.2f mps (%.2f mph), acceleration = %.2f mpss", car->id, lane->id, road_name, progress, to_miles(s), v, to_mph(v), a);
         }
+
+        LOG_TRACE("Marking current situational awareness as invalid for all cars since the simulation has advanced.");
+        for(int car_id=0; car_id < self->num_cars; car_id++) {
+            SituationalAwareness* sa = sim_get_situational_awareness(self, car_id);
+            sa->is_valid = false; // Reset situational awareness validity for the next iteration
+        }
+
         self->time += dt;
     }
     LOG_TRACE("Simulation advanced to time %.2f", self->time);

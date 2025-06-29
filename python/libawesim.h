@@ -878,6 +878,8 @@ struct BrakingDistance {
 typedef struct BrakingDistance BrakingDistance;
 
 struct SituationalAwareness {
+    bool is_valid;                          // Is this situational awareness valid? If false, all other fields should be ignored.
+
     // Path
     bool is_approaching_dead_end;           // Does this lane not connect to any other lane?
     const Intersection* intersection;       // Relevant intersection, if any.
@@ -927,9 +929,11 @@ struct SituationalAwareness {
 };
 typedef struct SituationalAwareness SituationalAwareness;
 
+SituationalAwareness* sim_get_situational_awareness(Simulation* self, CarId id);    // Forward declaration
+void situational_awareness_build(Simulation* sim, CarId car_id);
+
 // Set acceleration, indicator_turn, indicator_lane.
 void npc_car_make_decisions(Car* self, Simulation* sim);
-SituationalAwareness situational_awareness_build(const Car* car, Simulation* sim);
 
 // sample a turn that is feasible from the current lane
 CarIndictor turn_sample_possible(const SituationalAwareness* situation);
@@ -1158,6 +1162,7 @@ typedef struct Simulation {
     Map map;       // Simulation map
     ClockReading initial_clock_reading; // Start clock
     Car cars[MAX_CARS_IN_SIMULATION];  // Car list; car[0] = agent
+    SituationalAwareness situational_awarenesses[MAX_CARS_IN_SIMULATION]; // Situational awareness for each car
     int num_cars;   // Number of cars in simulation
     Seconds time;   // Time simulated so far
     Seconds dt;     // Simulation engine's time resolution for integration (in seconds)
@@ -1199,6 +1204,7 @@ Map* sim_get_map(Simulation* self);
 ClockReading sim_get_initial_clock_reading(Simulation* self);
 int sim_get_num_cars(const Simulation* self);
 Car* sim_get_car(Simulation* self, CarId id);
+SituationalAwareness* sim_get_situational_awareness(Simulation* self, CarId id);
 Seconds sim_get_time(Simulation* self);
 Seconds sim_get_dt(const Simulation* self);
 Weather sim_get_weather(Simulation* self);

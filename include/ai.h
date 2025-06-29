@@ -30,6 +30,8 @@ struct BrakingDistance {
 typedef struct BrakingDistance BrakingDistance;
 
 struct SituationalAwareness {
+    bool is_valid;                          // Is this situational awareness valid? If false, all other fields should be ignored.
+
     // Path
     bool is_approaching_dead_end;           // Does this lane not connect to any other lane?
     const Intersection* intersection;       // Relevant intersection, if any.
@@ -79,9 +81,11 @@ struct SituationalAwareness {
 };
 typedef struct SituationalAwareness SituationalAwareness;
 
+SituationalAwareness* sim_get_situational_awareness(Simulation* self, CarId id);    // Forward declaration
+void situational_awareness_build(Simulation* sim, CarId car_id);
+
 // Set acceleration, indicator_turn, indicator_lane.
 void npc_car_make_decisions(Car* self, Simulation* sim);
-SituationalAwareness situational_awareness_build(const Car* car, Simulation* sim);
 
 // sample a turn that is feasible from the current lane
 CarIndictor turn_sample_possible(const SituationalAwareness* situation);

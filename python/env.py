@@ -209,7 +209,8 @@ class AwesimEnv(gym.Env):
         self.episode_reward = 0.0
 
         # Get initial observation
-        situation = self.libsim.situational_awareness_build(self.agent, self.sim)
+        self.libsim.situational_awareness_build(self.sim, self.agent.id)
+        situation = self.libsim.sim_get_situational_awareness(self.sim, self.agent.id)
         observation = self._extract_observation(situation)
 
         info = {
@@ -238,7 +239,8 @@ class AwesimEnv(gym.Env):
         self.current_time = self.libsim.sim_get_time(self.sim)
 
         # Get new observation
-        situation = self.libsim.situational_awareness_build(self.agent, self.sim)
+        self.libsim.situational_awareness_build(self.sim, self.agent.id)
+        situation = self.libsim.sim_get_situational_awareness(self.sim, self.agent.id)
         observation = self._extract_observation(situation)
 
         # Calculate reward

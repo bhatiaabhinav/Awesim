@@ -87,6 +87,9 @@ void sim_init(Simulation* sim) {
     sim->should_quit_when_rendering_window_closed = false; // Default behavior is to not quit when rendering window is closed
     sim->render_socket = -1; // Invalid socket handle by default
     sim->is_connected_to_render_server = false; // Not connected to render server by default
+    for (int i = 0; i < MAX_CARS_IN_SIMULATION; i++) {
+        sim->situational_awarenesses[i].is_valid = false; // Initialize situational awareness for each car
+    }
 }
 
 Car* sim_get_new_car(Simulation* self) {
@@ -120,6 +123,11 @@ int sim_get_num_cars(const Simulation* self) {
 Car* sim_get_car(Simulation* self, CarId id) {
     if (!self || id < 0 || id >= self->num_cars) return NULL;
     return &self->cars[id];
+}
+
+SituationalAwareness* sim_get_situational_awareness(Simulation* self, CarId id) {
+    if (!self || id < 0 || id >= self->num_cars) return NULL;
+    return &self->situational_awarenesses[id];
 }
 
 Seconds sim_get_time(Simulation* self) {
