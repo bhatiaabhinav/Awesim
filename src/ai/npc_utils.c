@@ -87,7 +87,7 @@ bool car_should_yield_at_intersection(const Car* self, Simulation* sim, const Si
     // TODO: Fix left turn yielding when the oncoming car stops or breaks in the middle of the intersection. The current ego car assumes the car maintains its speed and does not stop, which is not always true.
     // TODO: Tune the hyperparameters for yield decision making.
     Map* map = sim_get_map(sim); //
-    if (!situation->is_approaching_intersection && !situation->is_on_intersection) { //
+    if (!situation->is_an_intersection_upcoming && !situation->is_on_intersection) { //
         return false; // Not at an intersection
     }
 

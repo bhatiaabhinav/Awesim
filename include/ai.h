@@ -31,24 +31,27 @@ typedef struct BrakingDistance BrakingDistance;
 
 struct SituationalAwareness {
     bool is_valid;                          // Is this situational awareness valid? If false, all other fields should be ignored.
+    Seconds timestamp;                     // Timestamp of the situational awareness
 
     // Path
     bool is_approaching_dead_end;           // Does this lane not connect to any other lane?
     const Intersection* intersection;       // Relevant intersection, if any.
     bool is_on_intersection;                // Are we already on the intersection?
-    bool is_approaching_intersection;       // Are we approaching an intersection?
-    bool is_stopped_at_intersection;        // Have we stopped at intersection?
+    bool is_an_intersection_upcoming;       // Are we approaching an intersection at the end of this road?
+    bool is_stopped_at_intersection;        // Have we stopped at an intersection (defined as an intersection upcoming AND approaching end of lane AND speed < 0.1 mph)?
     const Road* road;                       // Current road
     const Lane* lane;                       // Current lane
     const Lane* lane_left;                  // if exits (in the same travel direction)
     const Lane* lane_right;                 // if exists
     Meters distance_to_intersection;        // Distance to the next intersection
     Meters distance_to_end_of_lane;         // Distance to the lane’s end
-    bool is_close_to_end_of_lane;           // Is the distance to the lane’s end less than 10 m?
-    bool is_on_leftmost_lane;             // Is this the leftmost lane?
-    bool is_on_rightmost_lane;            // Is this the rightmost lane?
-    double lane_progress;                  // Progress in the lane (0.0 to 1.0)
-    Meters lane_progress_m;                // Progress in the lane in meters
+    Meters distance_to_end_of_lane_from_leading_edge;         // Distance to the lane’s end from the leading edge of the car
+    bool is_approaching_end_of_lane;        // Is the distance from the car's leading edge to the lane’s end less than 50 m?
+    bool is_at_end_of_lane;                 // Is the distance from the car's leading edge to the lane’s end less than 4 m?
+    bool is_on_leftmost_lane;               // Is this the leftmost lane?
+    bool is_on_rightmost_lane;              // Is this the rightmost lane?
+    double lane_progress;                   // Progress in the lane (0.0 to 1.0)
+    Meters lane_progress_m;                 // Progress in the lane in meters
 
     // Intent and Feasibility
     bool is_turn_possible[3];               // does this lane have a left, straight, right connection?  
@@ -78,9 +81,17 @@ struct SituationalAwareness {
     // Meters distance_to_vehicle_left;       // Distance to the left vehicle       // TODO
     // Meters distance_to_vehicle_right;      // Distance to the right vehicle      // TODO
     BrakingDistance braking_distance;
+
+    // Some historical summarization
+    MetersPerSecond slowest_speed_yet_on_current_lane; // Slowest speed on the current lane so far
+    Meters slowest_speed_position; // Position on the current lane where the slowest speed was observed
+    MetersPerSecond slowest_speed_yet_at_end_of_lane; // Slowest speed at the end of the current lane so far
+    bool full_stopped_yet_at_end_of_lane; // Have we properly stopped at the end of the lane yet? This is used to detect if stop signs are being respected. We consider it a full stop if slowest speed at the end of the lane is less than 0.1 mph
+    bool rolling_stopped_yet_at_end_of_lane; // Have we yet done a "rolling stop" at the end of the lane? This is used to detect if stop signs are being almost respected. We consider it a rolling stop if slowest speed at the end of the lane is less than 5 mph
 };
 typedef struct SituationalAwareness SituationalAwareness;
 
+Seconds sim_get_time(Simulation* self); // Get the current simulation time. Forward declaration.
 SituationalAwareness* sim_get_situational_awareness(Simulation* self, CarId id);    // Forward declaration
 void situational_awareness_build(Simulation* sim, CarId car_id);
 

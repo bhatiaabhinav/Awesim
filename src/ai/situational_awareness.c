@@ -11,9 +11,16 @@ void situational_awareness_build(Simulation* sim, CarId car_id) {
     }
     Car* car = sim_get_car(sim, car_id);
     SituationalAwareness* situation = sim_get_situational_awareness(sim, car_id);
-    memset(situation, 0, sizeof(SituationalAwareness)); // Initialize all fields to zero or false
+    if (situation->is_valid) {
+        LOG_TRACE("Situational awareness for car %d is already valid. No need to rebuild.", car_id);
+        return;
+    }
+
+    const Lane* lane_prev_t = situation->lane; // Previous lane, used to detect lane changes.
+
     LOG_TRACE("\nBuilding situational awareness for car %d:", car->id);
     Map* map = sim_get_map(sim);
+    Meters car_half_length = car_get_length(car) / 2.0; // Half the length of the car
     const Lane* lane = car_get_lane(car, map);
     const Road* road = lane_get_road(lane, map);    // Road we are on. May be NULL if we are already on an intersection.
     const Intersection* intersection = lane_get_intersection(lane, map); // Intersection we are on. May be NULL if we are not on an intersection.
@@ -23,6 +30,7 @@ void situational_awareness_build(Simulation* sim, CarId car_id) {
     Meters lane_length = lane_get_length(lane);
     Direction lane_dir = lane->direction;
     Meters distance_to_end_of_lane = lane_length - lane_progress_m;
+    Meters distance_to_end_of_lane_from_leading_edge = distance_to_end_of_lane - car_half_length; // Distance to the end of the lane from the leading edge of the car.
     LOG_TRACE("Car %d is %.2f meters (progress = %.2f), travelling at %.2f mph along lane %d (dir = %d) on %s", car->id, lane_progress_m, lane_progress, to_mph(car_speed), lane->id, lane_dir, road ? road_get_name(road) : intersection_get_name(intersection));
     const Intersection* intersection_upcoming = road ? road_leads_to_intersection(road, map) : NULL;   // may be null if we are already on an intersection or this road does not lead to an intersection.
 
@@ -34,9 +42,9 @@ void situational_awareness_build(Simulation* sim, CarId car_id) {
     } else {
         situation->is_on_intersection = false;
         situation->intersection = intersection_upcoming; // may be NULL
-        situation->is_approaching_intersection = intersection_upcoming != NULL;
-        situation->is_stopped_at_intersection = intersection_upcoming && (fabs(to_mph(car_get_speed(car))) < 1) && (distance_to_end_of_lane < 50.0);
-        if (intersection_upcoming) LOG_TRACE("Car %d is approaching intersection %s in %.2f meters. Stopped for it = %d", car->id, intersection_get_name(intersection_upcoming), distance_to_end_of_lane, situation->is_stopped_at_intersection);
+        situation->is_an_intersection_upcoming = intersection_upcoming != NULL;
+        situation->is_stopped_at_intersection = intersection_upcoming && (fabs(to_mph(car_get_speed(car))) < 0.1) && (distance_to_end_of_lane_from_leading_edge < 50.0);
+        if (intersection_upcoming) LOG_TRACE("Car %d is approaching intersection %s in %.2f meters (from car's leading edge). Stopped for it = %d", car->id, intersection_get_name(intersection_upcoming), distance_to_end_of_lane_from_leading_edge, situation->is_stopped_at_intersection);
     }
     situation->road = road;
     situation->lane = lane;
@@ -46,7 +54,9 @@ void situational_awareness_build(Simulation* sim, CarId car_id) {
     situation->lane_right = adjacent_right;
     situation->distance_to_intersection = intersection_upcoming ? distance_to_end_of_lane : 1e6;
     situation->distance_to_end_of_lane = distance_to_end_of_lane;
-    situation->is_close_to_end_of_lane = distance_to_end_of_lane < 50.0;
+    situation->distance_to_end_of_lane_from_leading_edge = distance_to_end_of_lane_from_leading_edge;
+    situation->is_approaching_end_of_lane = distance_to_end_of_lane_from_leading_edge < 50.0;
+    situation->is_at_end_of_lane = distance_to_end_of_lane_from_leading_edge < 4.0;
     situation->is_on_leftmost_lane = road ? lane == road_get_leftmost_lane(road, map) : false;
     situation->is_on_rightmost_lane = road ? lane == road_get_rightmost_lane(road, map) : false;
     situation->lane_progress = lane_progress;
@@ -200,6 +210,37 @@ void situational_awareness_build(Simulation* sim, CarId car_id) {
     situation->braking_distance = car_compute_braking_distance(car);
     LOG_TRACE("Car %d: Braking distance: capable=%.2f m, preferred=%.2f m, preferred smooth=%.2f m", car->id, situation->braking_distance.capable, situation->braking_distance.preferred, situation->braking_distance.preferred_smooth);
 
+    if (lane_prev_t && lane == lane_prev_t) {
+        // No lane change detected, just update the position and speed
+        if (car_speed < situation->slowest_speed_yet_on_current_lane) {
+            situation->slowest_speed_yet_on_current_lane = car_speed;
+            situation->slowest_speed_position = lane_progress_m;
+            LOG_TRACE("Car %d has achieved slowest speed yet on current lane = %.2f mph at progress %.2f", car->id, to_mph(situation->slowest_speed_yet_on_current_lane), situation->slowest_speed_position / lane_length);
+        }
+    } else {
+        // Lane change detected, reset the slowest speed
+        LOG_TRACE("Car %d has just changed lanes from %d to %d. So, resetting slowest speed yet on current lane and the corresponding position.", car->id, lane_prev_t ? lane_prev_t->id : -1, lane->id);
+        situation->slowest_speed_yet_on_current_lane = car_speed;
+        situation->slowest_speed_position = lane_progress_m;
+    }
+
+    if (situation->is_at_end_of_lane) {
+        situation->slowest_speed_yet_at_end_of_lane = fmin(situation->slowest_speed_yet_at_end_of_lane, car_speed);
+        if (!situation->full_stopped_yet_at_end_of_lane && to_mph(car_speed) < 0.1) {
+            situation->full_stopped_yet_at_end_of_lane = true; // Consider it a full stop if speed is less than 0.1 mph
+        }
+        if (!situation->rolling_stopped_yet_at_end_of_lane && to_mph(car_speed) < 5.0) {
+            situation->rolling_stopped_yet_at_end_of_lane = true; // Consider it a rolling stop if speed is less than 5 mph
+        }
+        LOG_TRACE("Car %d is at the end of lane %d (%.2f m from leading edge), slowest speed yet at end of lane = %.2f mph. Rolling stop achieved = %d, full stop achieved = %d.", car->id, lane->id, distance_to_end_of_lane_from_leading_edge, to_mph(situation->slowest_speed_yet_at_end_of_lane), situation->rolling_stopped_yet_at_end_of_lane, situation->full_stopped_yet_at_end_of_lane);
+    } else {
+        situation->slowest_speed_yet_at_end_of_lane = car_speed;
+        situation->full_stopped_yet_at_end_of_lane = false;
+        situation->rolling_stopped_yet_at_end_of_lane = false;
+    }
+
+
     LOG_TRACE("Situational awareness built for car %d\n", car->id);
     situation->is_valid = true; // Mark situational awareness as valid
+    situation->timestamp = sim_get_time(sim); // Set the timestamp of the situational awareness
 }

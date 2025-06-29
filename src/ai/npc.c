@@ -36,9 +36,9 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
     CarIndictor rand_turn = turn_sample_possible(situation);
     CarIndictor rand_lane_change = lane_change_sample_possible(situation);
 
-    if (situation->is_approaching_intersection) {
+    if (situation->is_an_intersection_upcoming) {
         // Whe approaching an intersection, turn and lane change decision will depend on distance to intersection. If we are far off, we can randomly change lanes or change turn intent. Else, we should not change lanes or change turn intent.
-        if (situation->is_close_to_end_of_lane || situation->braking_distance.preferred_smooth >= 1.1 * distance_to_stop_line) {
+        if (situation->is_approaching_end_of_lane || situation->braking_distance.preferred_smooth >= 1.1 * distance_to_stop_line) {
             // Should not change lanes or change turn intent.
             // printf("0. Not changing lanes or turn intent\n");
             turn_indicator = car_get_indicator_turn(self);  // whatever it is
@@ -118,7 +118,7 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
             }
         }
     } else {
-        if (!situation->is_approaching_dead_end && (situation->is_close_to_end_of_lane || situation->braking_distance.preferred_smooth >= distance_to_stop_line)) {
+        if (!situation->is_approaching_dead_end && (situation->is_approaching_end_of_lane || situation->braking_distance.preferred_smooth >= distance_to_stop_line)) {
             // start changing speed to match speed limit of the next lane
             accel = car_compute_acceleration_cruise(self, lane_get_speed_limit(situation->lane_next_after_turn[turn_indicator]) + self->preferences.average_speed_offset);
         } else {
@@ -134,7 +134,7 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
         should_brake = true;
     }
 
-    if (situation->is_approaching_intersection) {
+    if (situation->is_an_intersection_upcoming) {
         TrafficLight light = situation->light_for_turn[turn_indicator];
         bool is_emergency_braking_possible = (situation->braking_distance.capable <= distance_to_stop_line + meters(1) + 1e-6);
         bool is_comfy_braking_possible = (situation->braking_distance.preferred_smooth <= distance_to_stop_line + 1e-6);
