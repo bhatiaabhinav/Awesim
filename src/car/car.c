@@ -21,6 +21,9 @@ void car_init(Car* car, Dimensions dimensions, CarCapabilities capabilities, Car
     car->acceleration = 0.0;
     car->indicator_turn = INDICATOR_NONE;
     car->indicator_lane = INDICATOR_NONE;
+    car->request_indicated_lane = false;
+    car->request_indicated_turn = false;
+    car->auto_turn_off_indicators = true; // Default to true, can be changed later
 }
 
 void car_free(Car* self) {
@@ -51,6 +54,9 @@ double car_get_damage(const Car* self) { return self->damage; }
 MetersPerSecondSquared car_get_acceleration(const Car* self) { return self->acceleration; }
 CarIndictor car_get_indicator_turn(const Car* self) { return self->indicator_turn; }
 CarIndictor car_get_indicator_lane(const Car* self) { return self->indicator_lane; }
+bool car_get_request_indicated_lane(const Car* self) { return self->request_indicated_lane; }
+bool car_get_request_indicated_turn(const Car* self) { return self->request_indicated_turn; }
+bool car_get_auto_turn_off_indicators(const Car* self) { return self->auto_turn_off_indicators; }
 
 void car_set_lane(Car* self, const Lane* lane) {
     self->lane_id = lane->id;
@@ -106,4 +112,33 @@ void car_set_indicator_turn(Car* self, CarIndictor indicator) {
 
 void car_set_indicator_lane(Car* self, CarIndictor indicator) {
     self->indicator_lane = indicator;
+}
+
+void car_set_request_indicated_lane(Car* self, bool request) {
+    self->request_indicated_lane = request;
+}
+void car_set_request_indicated_turn(Car* self, bool request) {
+    self->request_indicated_turn = request;
+}
+
+void car_set_indicator_turn_and_request(Car* self, CarIndictor indicator) {
+    car_set_indicator_turn(self, indicator);
+    if (indicator != INDICATOR_NONE) {
+        car_set_request_indicated_turn(self, true);
+    } else {
+        car_set_request_indicated_turn(self, false);
+    }
+}
+
+void car_set_indicator_lane_and_request(Car* self, CarIndictor indicator) {
+    car_set_indicator_lane(self, indicator);
+    if (indicator != INDICATOR_NONE) {
+        car_set_request_indicated_lane(self, true);
+    } else {
+        car_set_request_indicated_lane(self, false);
+    }
+}
+
+void car_set_auto_turn_off_indicators(Car* self, bool auto_turn_off) {
+    self->auto_turn_off_indicators = auto_turn_off;
 }

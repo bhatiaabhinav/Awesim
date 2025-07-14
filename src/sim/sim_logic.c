@@ -66,6 +66,8 @@ void sim_integrate(Simulation* self, Seconds time_period) {
             Meters s = car_get_lane_progress_meters(car);
             CarIndictor lane_change_intent = car_get_indicator_lane(car);
             CarIndictor turn_intent = car_get_indicator_turn(car);
+            bool request_lane_change = car_get_request_indicated_lane(car);
+            bool request_turn = car_get_request_indicated_turn(car);
             MetersPerSecondSquared a = car_get_acceleration(car);
             MetersPerSecond v = car_get_speed(car);
 
@@ -73,19 +75,27 @@ void sim_integrate(Simulation* self, Seconds time_period) {
 
             Lane* adjacent_left = lane_get_adjacent_left(lane, map);
             Lane* adjacent_right = lane_get_adjacent_right(lane, map);
-            if(lane_change_intent == INDICATOR_LEFT && adjacent_left && adjacent_left->direction == lane->direction) {
+            if(request_lane_change && lane_change_intent == INDICATOR_LEFT && adjacent_left && adjacent_left->direction == lane->direction) {
                 // TODO: ignore lane change if this is an NPC if a collision is possible with another vehicle
                 // TODO: Allow non-NPC to do unsafe lane change (and receive a penalty for that).
                 // TODO: Maybe it is ok to allow to NPCs to do unsafe lane changes as well? So that they can pass the leading vehicle?
                 lane = adjacent_left;
-                lane_change_intent = INDICATOR_NONE;   // Important: To mark lane change intent already executed, so that merge is ignored if a merge is available on the new lane.
+                request_lane_change = false; // Reset request after lane change
                 LOG_TRACE("Car %d changed to left lane %d", car->id, lane->id);
-            } else if (lane_change_intent == INDICATOR_RIGHT && adjacent_right) {
+                if (car_get_auto_turn_off_indicators(car)) {
+                    lane_change_intent = INDICATOR_NONE; // Automatically turn off indicators after lane change
+                    LOG_TRACE("Car %d: Automatically turned off lane change indicator after changing to left lane %d", car->id, lane->id);
+                }
+            } else if (request_lane_change && lane_change_intent == INDICATOR_RIGHT && adjacent_right) {
                 assert(adjacent_right->direction == lane->direction && "How did this happen? Map error!");
                 // TODO: ignore lane change if this is an NPC if a collision is possible with another vehicle
                 lane = adjacent_right;
-                lane_change_intent = INDICATOR_NONE;
+                request_lane_change = false; // Reset request after lane change
                 LOG_TRACE("Car %d changed to right lane %d", car->id, lane->id);
+                if (car_get_auto_turn_off_indicators(car)) {
+                    lane_change_intent = INDICATOR_NONE; // Automatically turn off indicators after lane change
+                    LOG_TRACE("Car %d: Automatically turned off lane change indicator after changing to right lane %d", car->id, lane->id);
+                }
             } else {
                 // Do nothing
             }
@@ -139,13 +149,17 @@ void sim_integrate(Simulation* self, Seconds time_period) {
             bool merge_available = lane_is_merge_available(lane);
             bool merge_intent = lane_change_intent == INDICATOR_LEFT || approaching_dead_end;
             bool is_merge_safe = true;  // todo
-            if (merge_available && merge_intent && is_merge_safe) {
+            if (merge_available && request_lane_change && merge_intent && is_merge_safe) {
                 Lane* merges_into = lane_get_merge_into(lane, map);
                 s += lane->merges_into_start * merges_into->length;
                 lane = merges_into;
                 progress = s / lane->length;
-                lane_change_intent = INDICATOR_NONE;
+                request_lane_change = false; // Reset request after merge
                 LOG_TRACE("Car %d is merged into lane %d at progress %.2f (s = %.2f)", car->id, lane->id, progress, s);
+                if (car_get_auto_turn_off_indicators(car)) {
+                    lane_change_intent = INDICATOR_NONE; // Automatically turn off indicators after merge
+                    LOG_TRACE("Car %d: Automatically turned off lane change indicator after merging into lane %d", car->id, lane->id);
+                }
             }
 
             // ---------- handle turn -----------------------
@@ -156,14 +170,22 @@ void sim_integrate(Simulation* self, Seconds time_period) {
                 Lane* connection_straight = lane_get_connection_straight(lane, map);
                 Lane* connection_right = lane_get_connection_right(lane, map);
                 LOG_TRACE("Car %d: Progress %.2f (s = %.2f) exceeds lane length %.2f. Handling turn. Connections: left = %d, straight = %d, right = %d", car->id, progress, s, lane->length, lane->connections[0], lane->connections[1], lane->connections[2]);
-                if (turn_intent == INDICATOR_LEFT && connection_left) {
+                if (request_turn && turn_intent == INDICATOR_LEFT && connection_left) {
                     lane = connection_left;
-                    turn_intent = INDICATOR_NONE; // Mark turn intent as executed.
-                    LOG_TRACE("Car %d turned left into lane %d. Indicator turned off.", car->id, lane->id);
-                } else if (turn_intent == INDICATOR_RIGHT && connection_right) {
+                    request_turn = false; // Reset request after turn
+                    LOG_TRACE("Car %d turned left into lane %d.", car->id, lane->id);
+                    if (car_get_auto_turn_off_indicators(car)) {
+                        turn_intent = INDICATOR_NONE; // Mark turn intent as executed.
+                        LOG_TRACE("Car %d: Automatically turned off turn indicator after turning left into lane %d", car->id, lane->id);
+                    }
+                } else if (request_turn && turn_intent == INDICATOR_RIGHT && connection_right) {
                     lane = connection_right;
-                    turn_intent = INDICATOR_NONE; // Mark turn intent as executed.
-                    LOG_TRACE("Car %d turned right into lane %d. Indicator turned off.", car->id, lane->id);
+                    request_turn = false; // Reset request after turn
+                    LOG_TRACE("Car %d turned right into lane %d.", car->id, lane->id);
+                    if (car_get_auto_turn_off_indicators(car)) {
+                        turn_intent = INDICATOR_NONE; // Mark turn intent as executed.
+                        LOG_TRACE("Car %d: Automatically turned off turn indicator after turning right into lane %d", car->id, lane->id);
+                    }
                 } else {
                     lane = connection_straight;
                     LOG_TRACE("Car %d went straight into lane %d", car->id, lane->id);
@@ -177,12 +199,16 @@ void sim_integrate(Simulation* self, Seconds time_period) {
             bool exit_intent = lane_change_intent == INDICATOR_RIGHT;
             // exit_intent = true; // ! for debugging
             bool exit_available = lane_is_exit_lane_available(lane, progress);
-            if (exit_intent && exit_available) {
+            if (request_lane_change && exit_intent && exit_available) {
                 s = (progress - lane->exit_lane_start) * lane->length;
                 lane = lane_get_exit_lane(lane, map);
                 progress = s / lane->length;
-                lane_change_intent = INDICATOR_NONE; // Mark exit intent as executed.
+                request_lane_change = false; // Reset request after exit
                 LOG_TRACE("Car %d exited into lane %d at progress %.2f (s = %.2f)", car->id, lane->id, progress, s);
+                if (car_get_auto_turn_off_indicators(car)) {
+                    lane_change_intent = INDICATOR_NONE; // Automatically turn off indicators after exit
+                    LOG_TRACE("Car %d: Automatically turned off lane change indicator after exiting into lane %d", car->id, lane->id);
+                }
             }
             s = progress * lane->length; // update s after all changes to lane and progress.
 

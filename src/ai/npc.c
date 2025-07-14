@@ -241,8 +241,8 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
     // printf("11. Setting acceleration to %f\n\n", accel);
     accel = 0.95 * accel + 0.05 * car_get_acceleration(self); // smooth the acceleration
     car_set_acceleration(self, accel);
-    car_set_indicator_turn(self, turn_indicator);
-    car_set_indicator_lane(self, lane_change_indicator);
+    car_set_indicator_turn_and_request(self, turn_indicator);
+    car_set_indicator_lane_and_request(self, lane_change_indicator);
 }
 
 
