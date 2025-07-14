@@ -186,14 +186,8 @@ SimCommand handle_sdl_events() {
             WINDOW_SIZE_HEIGHT = event.window.data2;
             LOG_DEBUG("Window resized to %dx%d", WINDOW_SIZE_WIDTH, WINDOW_SIZE_HEIGHT);
         } else if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_DISPLAY_CHANGED) {
-            SDL_DestroyRenderer(renderer);
-            renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-            if (!renderer) {
-                LOG_ERROR("Renderer could not be recreated! SDL_Error: %s", SDL_GetError());
-                command = COMMAND_QUIT;
-            } else {
-                LOG_DEBUG("Renderer recreated for display change");
-            }
+            SDL_GetWindowSize(window, &WINDOW_SIZE_WIDTH, &WINDOW_SIZE_HEIGHT);
+            LOG_DEBUG("Display changed, window size: %dx%d", WINDOW_SIZE_WIDTH, WINDOW_SIZE_HEIGHT);
         } else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_F11) {
             static int is_fullscreen = 0;
             is_fullscreen = !is_fullscreen;
