@@ -1,5 +1,5 @@
-#ifndef ACTIONS_H
-#define ACTIONS_H
+#pragma once
+
 /*
  * High-level driving actions for NPC and scripted AI cars.
  * Each routine returns `true` once the manoeuvre is finished
@@ -7,10 +7,6 @@
  *
  * The implementation lives in actions.c.
  */
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #include "ai.h"     /* Car, Simulation, numeric units, enums, …              */
 #include "map.h"    /* Lane, road geometry utilities                         */
@@ -80,8 +76,3 @@ bool cruise(Car *self, float target_speed);
  */
 bool cruise_continue(Car *self, Simulation *sim, double duration);
 
-#ifdef __cplusplus
-} // extern "C"
-#endif
-
-#endif /* ACTIONS_H */
