@@ -222,11 +222,8 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
     // If we are at an intersection and making a left turn, then we should stop immediately (not necessarily at the stop line). Same case for right turn from right lane.
     if (should_brake && car_should_yield_at_intersection(self, sim, situation, turn_indicator)) {
         // printf("Breaking on Left Yield!\n");
-        position_target = car_position;
-        position_target_overshoot_buffer = meters(1);
-        speed_at_target = 0;
-        MetersPerSecondSquared accel_to_stop_at_lane_end = car_compute_acceleration_chase_target(self, position_target, speed_at_target, position_target_overshoot_buffer, speed_cruise);
-        accel = fmin(accel, accel_to_stop_at_lane_end); // take the minimum of the two accelerations
+        MetersPerSecondSquared accel_to_stop_asap = car_compute_acceleration_stop(self, false);
+        accel = fmin(accel, accel_to_stop_asap); // take the minimum of the two accelerations
     }
     else if (should_brake) {
         // printf("10. Potentially braking\n");

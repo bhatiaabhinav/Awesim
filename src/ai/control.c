@@ -186,23 +186,68 @@ MetersPerSecondSquared car_compute_acceleration_chase_target(const Car* car, Met
     return accel;
 }
 
+MetersPerSecondSquared car_compute_acceleration_adjust_speed(const Car* car, MetersPerSecond speed_target, bool use_preferred_accel_profile) {
+    MetersPerSecond speed_current = car_get_speed(car);
+    MetersPerSecondSquared accel;
+    CarAccelProfile profile = use_preferred_accel_profile ? car_accel_profile_get_effective(car->capabilities.accel_profile, car->preferences.acceleration_profile) : car->capabilities.accel_profile;
+    ControlError error = {0, speed_current - speed_target};
+    MetersPerSecondSquared acc_eps = 0.1;
+    if (speed_target > 0) {
+        if (speed_target < speed_current) {
+            // we are going too fast. Slow down.
+            accel = control_speed_compute_bounded_accel(error, profile.max_deceleration, MPH_60);
+        } else if (speed_current < speed_target) {
+            if (speed_current < 0) {
+                // first we need to stop if we are in reverse gear
+                accel = control_speed_compute_bounded_accel((ControlError){0, speed_current}, profile.max_deceleration, MPH_60) + acc_eps;
+            } else {
+                // we are going too slow. Speed up.
+                accel = control_speed_compute_bounded_accel(error, profile.max_acceleration, MPH_60);
+            }
+        } else {
+            accel = 0; // already at target speed
+        }
+    } else if (speed_target < 0) {
+        if (speed_target < speed_current) {
+            if (speed_current < 0) {
+                // continue to speed up in reverse gear
+                accel = control_speed_compute_bounded_accel(error, profile.max_acceleration_reverse_gear, MPH_60);
+            } else {
+                // first, we need to stop if we are in forward gear
+                accel = control_speed_compute_bounded_accel((ControlError){0, speed_current}, profile.max_deceleration, MPH_60) - acc_eps;
+            }
+        } else if (speed_current < speed_target) {
+            // brake to slow down in reverse gear
+            accel = control_speed_compute_bounded_accel(error, profile.max_deceleration, MPH_60);
+        } else {
+            accel = 0; // already at target speed
+        }
+    } else {
+        if (speed_current == 0) {
+            accel = 0; // already at target speed
+        } else {
+            accel = control_speed_compute_bounded_accel((ControlError){0, speed_current}, profile.max_deceleration, MPH_60); // brake to stop
+        }
+    }
+    return accel;
+}
+
 MetersPerSecondSquared car_compute_acceleration_cruise(const Car* car, MetersPerSecond speed_target) {
     if (speed_target < 0) {
         fprintf(stderr, "Error: speed_target must be non-negative\n");
         exit(EXIT_FAILURE);
     }
-    MetersPerSecond speed_current = car_get_speed(car);
-    MetersPerSecondSquared accel;
-    CarAccelProfile preferred = car_accel_profile_get_effective(car->capabilities.accel_profile, car->preferences.acceleration_profile);
-    ControlError error = {0, speed_current - speed_target};
-    if (speed_current > speed_target) {
-        accel = control_speed_compute_bounded_accel(error, preferred.max_deceleration, MPH_60);
-        // printf("Shedding speed: %f\r", accel);
-    } else {
-        accel = control_speed_compute_bounded_accel(error, preferred.max_acceleration, MPH_60);
-        // printf("Gaining speed: %f\r", accel);
-    }
-    return accel;
+    return car_compute_acceleration_adjust_speed(car, speed_target, true);
+}
+
+MetersPerSecondSquared car_compute_acceleration_stop(const Car* car, bool use_preferred_accel_profile) {
+    return car_compute_acceleration_adjust_speed(car, 0, use_preferred_accel_profile);
+}
+
+MetersPerSecondSquared car_compute_acceleration_stop_max_brake(const Car* car, bool use_preferred_accel_profile) {
+    CarAccelProfile profile = use_preferred_accel_profile ? car_accel_profile_get_effective(car->capabilities.accel_profile, car->preferences.acceleration_profile) : car->capabilities.accel_profile;
+    MetersPerSecond speed = car_get_speed(car);
+    return speed >= 0 ? -profile.max_deceleration : profile.max_deceleration;
 }
 
 

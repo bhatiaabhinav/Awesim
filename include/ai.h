@@ -106,8 +106,21 @@ CarIndictor lane_change_sample_possible(const SituationalAwareness* situation);
 
 bool car_is_lane_change_dangerous(const Car* car, Simulation* sim, const SituationalAwareness* situation, CarIndictor lane_change_indicator);
 
+// Compute the acceleration required to chase an *external* target position and speed. The function automatically accounts for the car's acceleration capabilities and preferences. The overshoot buffer specifies the position error that the car will try its best to avoid by applying max capable braking. Use cases of this function include following a lead vehicle and coming to a stop at a target position.
 MetersPerSecondSquared car_compute_acceleration_chase_target(const Car* car, Meters position_target, MetersPerSecond speed_target, Meters position_target_overshoot_buffer, MetersPerSecond speed_limit);
+
+// Compute the acceleration required to adjust the car's speed to a target speed using a proportional controller, limited by either the car's capabilities (if use_preferred_accel_profile is false) or the car's preferred acceleration profile (if use_preferred_accel_profile is true).
+MetersPerSecondSquared car_compute_acceleration_adjust_speed(const Car* car, MetersPerSecond speed_target, bool use_preferred_accel_profile);
+
+// Alias for car_compute_acceleration_adjust_speed with a non-negative speed_target and preferred acceleration profile.
 MetersPerSecondSquared car_compute_acceleration_cruise(const Car* car, MetersPerSecond speed_target);
+
+// Alias for car_compute_acceleration_adjust_speed with speed_target = 0.
+MetersPerSecondSquared car_compute_acceleration_stop(const Car* car, bool use_preferred_accel_profile);
+
+// Applies max linear braking with magnitude = car's preferred max braking (if use_preferred_accel_profile is true) or car's max capable braking (if use_preferred_accel_profile is false).
+MetersPerSecondSquared car_compute_acceleration_stop_max_brake(const Car* car, bool use_preferred_accel_profile);
+
 BrakingDistance car_compute_braking_distance(const Car* car);
 
 bool car_should_yield_at_intersection(const Car* car, Simulation* sim, const SituationalAwareness* situation, CarIndictor turn_indicator);
