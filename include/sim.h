@@ -165,7 +165,7 @@ struct TrackIntersectionPoint {
 };
 typedef struct TrackIntersectionPoint TrackIntersectionPoint;
 
-TrackIntersectionPoint track_intersection_check(const Lane* lane1, const Lane* lane2);
+// TrackIntersectionPoint track_intersection_check(const Lane* lane1, const Lane* lane2);
 // TrackIntersectionPoint track_intersection_check_linear_linear(const LinearLane* lane1, const LinearLane* lane2);
 // TrackIntersectionPoint track_intersection_check_linear_curved(const LinearLane* lane1, const QuarterArcLane* lane2);
 // TrackIntersectionPoint track_intersection_check_curved_curved(const QuarterArcLane* lane1, const QuarterArcLane* lane2);
