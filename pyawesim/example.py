@@ -13,15 +13,30 @@ agent = sim_get_agent_car(sim)
 sim_set_synchronized(sim, True, 1.0)  # synchronize simulation with real time  
 sim_connect_to_render_server(sim, "127.0.0.1", 4242)  # before this, start the server with `../bin/awesim_render_server 4242 --persistent`  
 
+current_procedure = "cruise"
+
 print(f"Running simulation for {total_play_time} seconds with decision interval of {decision_interval} seconds. Press Ctrl+C to stop.")
 while sim_get_time(sim) < total_play_time:  
     situational_awareness_build(sim, agent.id)  # holds most of the state variables needed for decision making  
     situation = sim_get_situational_awareness(sim, agent.id)  # get situational awareness for the agent  
     distance_to_lead_vehicle = situation.distance_to_lead_vehicle   # example variable
-    # set action space variables:
-    car_set_acceleration(agent, 4.0)     # 0-60mph in ~4.5s  
-    car_set_indicator_lane(agent, INDICATOR_NONE)  
-    car_set_indicator_turn(agent, INDICATOR_NONE)  
+    speed = car_get_speed(agent)
+
+    if current_procedure == "cruise":
+        print(f"trying to cruise. current speed = {to_mph(speed)} mph.\n")
+        cruising_completed = cruise(agent, from_mph(30))
+        if cruising_completed:
+            print(f"Agent {agent.id} is cruising at 30 mph.\n")
+            current_procedure = "merge"
+    elif current_procedure == "merge":
+        # every 5 seconds, change merging direction:
+        merge_direction = 'r' if sim_get_time(sim) % 10 < 5 else 'l'
+        print(f"trying to merge {merge_direction}. current speed = {to_mph(speed)} mph.\n")
+        merging_completed = merge(agent, sim, merge_direction, 5.0) # try to merge in the given direction with a 5 second duration
+        if merging_completed:
+            print("Merging completed")
+            current_procedure = "cruise"
+
     simulate(sim, decision_interval)    # simulate 0.1 seconds  
 print("Simulation finished.")
 
