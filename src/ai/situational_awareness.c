@@ -159,7 +159,7 @@ void situational_awareness_build(Simulation* sim, CarId car_id) {
     situation->exit_lane = (situation->is_exit_available || situation->is_exit_available_eventually) ? lane_get_exit_lane(lane, map) : NULL;
     situation->lane_target_for_indicator[INDICATOR_LEFT] = situation->merges_into_lane ? situation->merges_into_lane : situation->lane_left;
     situation->lane_target_for_indicator[INDICATOR_NONE] = situation->lane;
-    situation->lane_target_for_indicator[INDICATOR_RIGHT] = situation->exit_lane ? situation->exit_lane : situation->lane_right;
+    situation->lane_target_for_indicator[INDICATOR_RIGHT] = (situation->exit_lane && situation->is_exit_possible)  ? situation->exit_lane : situation->lane_right;
     LaneId left_outcome_id = situation->lane_target_for_indicator[INDICATOR_LEFT] ? situation->lane_target_for_indicator[INDICATOR_LEFT]->id : ID_NULL;
     LaneId straight_outcome_id = situation->lane_target_for_indicator[INDICATOR_NONE] ? situation->lane_target_for_indicator[INDICATOR_NONE]->id : ID_NULL;
     LaneId right_outcome_id = situation->lane_target_for_indicator[INDICATOR_RIGHT] ? situation->lane_target_for_indicator[INDICATOR_RIGHT]->id : ID_NULL;
