@@ -53,6 +53,111 @@ CarPose get_car_pose(const Car* car, Map* map) {
     return pose;
 }
 
+static void render_indicator(SDL_Renderer* renderer, const Car* car, CarIndictor indicator, const CarPose pose, double length, double width, int screen_width, int screen_height, int light_thickness, double cos_a, double sin_a, Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
+
+    if (indicator == INDICATOR_NONE) return; // No indicator to render
+
+    // Blinking logic: 500ms on, 500ms off (1000ms period)
+    Uint32 current_time = SDL_GetTicks();
+    const Uint32 blink_period = 1000; // 1 second
+    const Uint32 blink_on_duration = 500; // 0.5 seconds
+
+    if ((current_time % blink_period) > blink_on_duration) return;
+    
+    double indicator_length = width / 4; // Length of the indicator dash
+
+    // Define local points for indicators
+    Vec2D local_front_side_start, local_front_side_end; // Side indicator
+    Vec2D local_back_start, local_back_end;             // Back indicator
+    Vec2D local_front_edge_start, local_front_edge_end; // Original front edge indicator
+
+    if (indicator == INDICATOR_RIGHT) { // Left side indicators
+        // Front side indicator: left edge, 25% from front
+        double x_pos = length / 2 - 0.25 * length; // 25% from front
+        local_front_side_start = (Vec2D){x_pos - indicator_length / 2, -width / 2};
+        local_front_side_end = (Vec2D){x_pos + indicator_length / 2, -width / 2};
+        // Back indicator: left side of back edge
+        local_back_start = (Vec2D){-length / 2, -width / 2};
+        local_back_end = (Vec2D){-length / 2, -width / 2 + indicator_length};
+        // Original front edge indicator: left side of front edge
+        local_front_edge_start = (Vec2D){length / 2, -width / 2};
+        local_front_edge_end = (Vec2D){length / 2, -width / 2 + indicator_length};
+    } else if (indicator == INDICATOR_LEFT) { // INDICATOR_LEFT: Right side indicators
+        // Front side indicator: right edge, 25% from front
+        double x_pos = length / 2 - 0.25 * length; // 25% from front
+        local_front_side_start = (Vec2D){x_pos - indicator_length / 2, width / 2};
+        local_front_side_end = (Vec2D){x_pos + indicator_length / 2, width / 2};
+        // Back indicator: right side of back edge
+        local_back_start = (Vec2D){-length / 2, width / 2 - indicator_length};
+        local_back_end = (Vec2D){-length / 2, width / 2};
+        // Original front edge indicator: right side of front edge
+        local_front_edge_start = (Vec2D){length / 2, width / 2 - indicator_length};
+        local_front_edge_end = (Vec2D){length / 2, width / 2};
+    } else {
+        return; // Invalid indicator type
+    }
+
+    // Transform to world coordinates
+    Coordinates world_front_side_start, world_front_side_end;
+    Coordinates world_back_start, world_back_end;
+    Coordinates world_front_edge_start, world_front_edge_end;
+
+    // Front side start
+    double x_local = local_front_side_start.x;
+    double y_local = local_front_side_start.y;
+    world_front_side_start.x = pose.position.x + x_local * cos_a - y_local * sin_a;
+    world_front_side_start.y = pose.position.y + x_local * sin_a + y_local * cos_a;
+
+    // Front side end
+    x_local = local_front_side_end.x;
+    y_local = local_front_side_end.y;
+    world_front_side_end.x = pose.position.x + x_local * cos_a - y_local * sin_a;
+    world_front_side_end.y = pose.position.y + x_local * sin_a + y_local * cos_a;
+
+    // Back start
+    x_local = local_back_start.x;
+    y_local = local_back_start.y;
+    world_back_start.x = pose.position.x + x_local * cos_a - y_local * sin_a;
+    world_back_start.y = pose.position.y + x_local * sin_a + y_local * cos_a;
+
+    // Back end
+    x_local = local_back_end.x;
+    y_local = local_back_end.y;
+    world_back_end.x = pose.position.x + x_local * cos_a - y_local * sin_a;
+    world_back_end.y = pose.position.y + x_local * sin_a + y_local * cos_a;
+
+    // Original front edge start
+    x_local = local_front_edge_start.x;
+    y_local = local_front_edge_start.y;
+    world_front_edge_start.x = pose.position.x + x_local * cos_a - y_local * sin_a;
+    world_front_edge_start.y = pose.position.y + x_local * sin_a + y_local * cos_a;
+
+    // Original front edge end
+    x_local = local_front_edge_end.x;
+    y_local = local_front_edge_end.y;
+    world_front_edge_end.x = pose.position.x + x_local * cos_a - y_local * sin_a;
+    world_front_edge_end.y = pose.position.y + x_local * sin_a + y_local * cos_a;
+
+    // Convert to screen coordinates
+    SDL_Point screen_front_side_start = to_screen_coords(world_front_side_start, screen_width, screen_height);
+    SDL_Point screen_front_side_end = to_screen_coords(world_front_side_end, screen_width, screen_height);
+    SDL_Point screen_back_start = to_screen_coords(world_back_start, screen_width, screen_height);
+    SDL_Point screen_back_end = to_screen_coords(world_back_end, screen_width, screen_height);
+    SDL_Point screen_front_edge_start = to_screen_coords(world_front_edge_start, screen_width, screen_height);
+    SDL_Point screen_front_edge_end = to_screen_coords(world_front_edge_end, screen_width, screen_height);
+
+    // Draw thick lines for indicators
+    // FRONT_SIDE_INDICATOR
+    thickLineRGBA_ignore_if_outside_screen(renderer, screen_front_side_start.x, screen_front_side_start.y, 
+                                            screen_front_side_end.x, screen_front_side_end.y, light_thickness, r, g, b, a);
+    // BACK_INDICATOR
+    thickLineRGBA_ignore_if_outside_screen(renderer, screen_back_start.x, screen_back_start.y, 
+                                            screen_back_end.x, screen_back_end.y, light_thickness, r, g, b, a);
+    // FRONT_EDGE_INDICATOR (comment out if not needed)
+    thickLineRGBA_ignore_if_outside_screen(renderer, screen_front_edge_start.x, screen_front_edge_start.y, 
+                                            screen_front_edge_end.x, screen_front_edge_end.y, light_thickness, r, g, b, a);
+}
+
 
 void render_car(SDL_Renderer* renderer, const Car* car, Map* map, const bool paint_id) {
     CarPose pose = get_car_pose(car, map);
@@ -214,105 +319,10 @@ void render_car(SDL_Renderer* renderer, const Car* car, Map* map, const bool pai
                                               screen_right_taillight_end.x, screen_right_taillight_end.y, light_thickness, taillight_r, taillight_g, taillight_b, taillight_a);
     }
 
-    // Draw turn indicators (only if not braking)
-    if (car->indicator_turn != INDICATOR_NONE) {
-        // Blinking logic: 500ms on, 500ms off (1000ms period)
-        Uint32 current_time = SDL_GetTicks();
-        const Uint32 blink_period = 1000; // 1 second
-        const Uint32 blink_on_duration = 500; // 0.5 seconds
-        if ((current_time % blink_period) < blink_on_duration) {
-            double indicator_length = width / 4; // Length of the indicator dash
-
-            // Define local points for indicators
-            Vec2D local_front_side_start, local_front_side_end; // Side indicator
-            Vec2D local_back_start, local_back_end;             // Back indicator
-            Vec2D local_front_edge_start, local_front_edge_end; // Original front edge indicator
-
-            if (car->indicator_turn == INDICATOR_RIGHT) { // Left side indicators
-                // Front side indicator: left edge, 25% from front
-                double x_pos = length / 2 - 0.25 * length; // 25% from front
-                local_front_side_start = (Vec2D){x_pos - indicator_length / 2, -width / 2};
-                local_front_side_end = (Vec2D){x_pos + indicator_length / 2, -width / 2};
-                // Back indicator: left side of back edge
-                local_back_start = (Vec2D){-length / 2, -width / 2};
-                local_back_end = (Vec2D){-length / 2, -width / 2 + indicator_length};
-                // Original front edge indicator: left side of front edge
-                local_front_edge_start = (Vec2D){length / 2, -width / 2};
-                local_front_edge_end = (Vec2D){length / 2, -width / 2 + indicator_length};
-            } else { // INDICATOR_LEFT: Right side indicators
-                // Front side indicator: right edge, 25% from front
-                double x_pos = length / 2 - 0.25 * length; // 25% from front
-                local_front_side_start = (Vec2D){x_pos - indicator_length / 2, width / 2};
-                local_front_side_end = (Vec2D){x_pos + indicator_length / 2, width / 2};
-                // Back indicator: right side of back edge
-                local_back_start = (Vec2D){-length / 2, width / 2 - indicator_length};
-                local_back_end = (Vec2D){-length / 2, width / 2};
-                // Original front edge indicator: right side of front edge
-                local_front_edge_start = (Vec2D){length / 2, width / 2 - indicator_length};
-                local_front_edge_end = (Vec2D){length / 2, width / 2};
-            }
-
-            // Transform to world coordinates
-            Coordinates world_front_side_start, world_front_side_end;
-            Coordinates world_back_start, world_back_end;
-            Coordinates world_front_edge_start, world_front_edge_end;
-
-            // Front side start
-            double x_local = local_front_side_start.x;
-            double y_local = local_front_side_start.y;
-            world_front_side_start.x = pose.position.x + x_local * cos_a - y_local * sin_a;
-            world_front_side_start.y = pose.position.y + x_local * sin_a + y_local * cos_a;
-
-            // Front side end
-            x_local = local_front_side_end.x;
-            y_local = local_front_side_end.y;
-            world_front_side_end.x = pose.position.x + x_local * cos_a - y_local * sin_a;
-            world_front_side_end.y = pose.position.y + x_local * sin_a + y_local * cos_a;
-
-            // Back start
-            x_local = local_back_start.x;
-            y_local = local_back_start.y;
-            world_back_start.x = pose.position.x + x_local * cos_a - y_local * sin_a;
-            world_back_start.y = pose.position.y + x_local * sin_a + y_local * cos_a;
-
-            // Back end
-            x_local = local_back_end.x;
-            y_local = local_back_end.y;
-            world_back_end.x = pose.position.x + x_local * cos_a - y_local * sin_a;
-            world_back_end.y = pose.position.y + x_local * sin_a + y_local * cos_a;
-
-            // Original front edge start
-            x_local = local_front_edge_start.x;
-            y_local = local_front_edge_start.y;
-            world_front_edge_start.x = pose.position.x + x_local * cos_a - y_local * sin_a;
-            world_front_edge_start.y = pose.position.y + x_local * sin_a + y_local * cos_a;
-
-            // Original front edge end
-            x_local = local_front_edge_end.x;
-            y_local = local_front_edge_end.y;
-            world_front_edge_end.x = pose.position.x + x_local * cos_a - y_local * sin_a;
-            world_front_edge_end.y = pose.position.y + x_local * sin_a + y_local * cos_a;
-
-            // Convert to screen coordinates
-            SDL_Point screen_front_side_start = to_screen_coords(world_front_side_start, screen_width, screen_height);
-            SDL_Point screen_front_side_end = to_screen_coords(world_front_side_end, screen_width, screen_height);
-            SDL_Point screen_back_start = to_screen_coords(world_back_start, screen_width, screen_height);
-            SDL_Point screen_back_end = to_screen_coords(world_back_end, screen_width, screen_height);
-            SDL_Point screen_front_edge_start = to_screen_coords(world_front_edge_start, screen_width, screen_height);
-            SDL_Point screen_front_edge_end = to_screen_coords(world_front_edge_end, screen_width, screen_height);
-
-            // Draw thick lines for indicators
-            // FRONT_SIDE_INDICATOR
-            thickLineRGBA_ignore_if_outside_screen(renderer, screen_front_side_start.x, screen_front_side_start.y, 
-                                                  screen_front_side_end.x, screen_front_side_end.y, light_thickness, 255, 0, 0, 255);
-            // BACK_INDICATOR
-            thickLineRGBA_ignore_if_outside_screen(renderer, screen_back_start.x, screen_back_start.y, 
-                                                  screen_back_end.x, screen_back_end.y, light_thickness, 255, 0, 0, 255);
-            // FRONT_EDGE_INDICATOR (comment out if not needed)
-            thickLineRGBA_ignore_if_outside_screen(renderer, screen_front_edge_start.x, screen_front_edge_start.y, 
-                                                  screen_front_edge_end.x, screen_front_edge_end.y, light_thickness, 255, 0, 0, 255);
-        }
-    }
+    // render turn indicator with red, and lane change indicator with dark orange. turn indicator draws over lane change indicator.
+    render_indicator(renderer, car, car->indicator_lane, pose, length, width, screen_width, screen_height, light_thickness, cos_a, sin_a, 255, 140, 0, 255); // Lane change indicator in dark orange
+    render_indicator(renderer, car, car->indicator_turn, pose, length, width, screen_width, screen_height, light_thickness, cos_a, sin_a, 255, 0, 0, 255); // Turn indicator in red
+    
 
     // Render car ID
     if (paint_id) {
