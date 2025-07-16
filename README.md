@@ -61,15 +61,13 @@ Each header file is implemented in a corresponding folder within the `src/` dire
 
 ## Python Bindings
 
-To generate a shared library, run:
+To generate bindings, first install swig using `sudo apt install swig` on Linux or `brew install swig` on macOS. On Windows, download the swig installer from the [SWIG website](http://www.swig.org/download.html) or use a package manager like Chocolatey or use [MSYS2](https://www.msys2.org/).
 
-```bash
-sh scripts/linux/compile_so.sh
-```
-on Linux or MacOS. For Windows, use `scripts/windows/compile_dll.bat`.
+Create a Python virtual environment and install the required dependencies with `pip install -r pyawesim/requirements.txt`. Activate the virtual environment.
 
-To use the shared library from Python, create a Python virtual environment and install `cffi` module using pip. That's it. See example script `python/awesim.py` for usage.
+Finally, run `sh pyawesim/generate_bindings.sh` (on Linux/macOS) or `pyawesim\generate_bindings.bat` (on Windows) to generate the Python bindings.
 
+See the `pyawesim/example.py` file for an example of how to use the bindings.
 
 ## Todos
 

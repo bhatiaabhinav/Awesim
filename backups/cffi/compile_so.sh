@@ -19,7 +19,7 @@ gcc \
     -Iinclude \
     src/utils/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c \
     -o ./bin/libawesim.so \
-    -lm -lrt \
+    -lm -lrt \  # remove -lrt for mac
     -Wall -Wunused-variable
 
 if [ $? -eq 0 ]; then
