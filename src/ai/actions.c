@@ -110,7 +110,7 @@ bool merge(Car *self, Simulation *sim, const char *direction, double duration) {
     }
 
     /* Already in the desired lane? */
-    if (car_get_lane_id(self) == target_lane->id) {
+    if (car_get_lane_id(self) == target_lane->id) {  // TODO: this is wrong. We need to correctly track the target lane specified in prev call and check if we are in it now.
         car_set_indicator_lane(self, INDICATOR_NONE);
         _merge_started_at[cid] = 0;            // reset timer
         return true;                           // merge complete
@@ -119,14 +119,15 @@ bool merge(Car *self, Simulation *sim, const char *direction, double duration) {
     /* Safety check – wait if dangerous. */
     if (car_is_lane_change_dangerous(self, sim, s, ind)) {
         car_set_indicator_lane(self, ind);     // keep signalling
+        car_set_request_indicated_lane(self, false); // don't request lane change yet
         return false;                          // still waiting
     }
 
     /* Safe: initiate lane change & hold cruise. */
-    car_set_indicator_lane(self, ind);
+    car_set_indicator_lane_and_request(self, ind);
     _cruise_to_speed(self,
         lane_get_speed_limit(target_lane) + self->preferences.average_speed_offset);
-    return false;                              // merge in progress
+    return true;                              // For now, assume the sim will merge right away. TODO: correctly track the target lane previously specified and check if we are in it now.
 }
 
 // ────────────────────────────────────────────────────────────────

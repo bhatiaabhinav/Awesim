@@ -57,7 +57,7 @@ bool car_is_lane_change_dangerous(const Car* car, Simulation* sim, const Situati
     Meters my_hypothetical_target_progress_m = lane_target->length * my_hypothetical_target_progress;
     Meters car_half_length = car_get_length(car) / 2;
     for (int i = 0; i < lane_target->num_cars; i++) {
-        const Car* other_car = lane_get_car(lane_target, sim, i);
+        const Car* other_car = lane_get_car(lane_target, sim, i);   // TODO: consider cars from the prev and next lanes of the target lane as well
         if (other_car == car) continue; // skip self
         Meters other_car_progress_m = car_get_lane_progress_meters(other_car);
         
