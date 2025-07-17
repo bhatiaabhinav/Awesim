@@ -6,3 +6,4 @@ __pycache__/
 build/
 *_wrap.c
 *.egg-info/
+bindings.py
