@@ -21,7 +21,7 @@ typedef enum {
     PROCEDURE_STATUS_INITIALIZED,                       // Returned by procedure_init if the procedure is possible and the state variables have been initialized.
     PROCEDURE_STATUS_IN_PROGRESS,                       // Returned by procedure_step if the procedure is in progress and will continue updating in the next step.
     PROCEDURE_STATUS_COMPLETED,                         // Returned by procedure_step if the procedure has completed successfully.
-    PROCEDURE_STATUS_FAILED_REASON_IMPOSSIBLE,          // Returned by procedure_step if the procedure becomes impossible during execution.
+    PROCEDURE_STATUS_FAILED_REASON_NOW_IMPOSSIBLE,      // Returned by procedure_step if the procedure becomes impossible during execution.
     PROCEDURE_STATUS_FAILED_REASON_TIMEDOUT,            // Returned by procedure_step if the procedure has timed out.
     PROCEDURE_STATUS_FAILED_REASON_UNINITIALIZED,       // Returned by procedure_step if the procedure was not initialized properly.
 } ProcedureStatusCode;

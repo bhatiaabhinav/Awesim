@@ -64,7 +64,7 @@ ProcedureStatusCode procedure_step(Simulation* sim, Car* car, Procedure* procedu
         LOG_ERROR("No procedure initialized or in progress for car %d. Cannot step.", car->id);
         return PROCEDURE_STATUS_FAILED_REASON_UNINITIALIZED; // Procedure not initialized properly
     }
-    ProcedureStatusCode status = procedure->status;
+    ProcedureStatusCode status;
     switch (procedure->type) {
         case PROCEDURE_TURN:
             status = procedure_turn_step(sim, car, procedure);
@@ -90,7 +90,7 @@ ProcedureStatusCode procedure_step(Simulation* sim, Car* car, Procedure* procedu
         case PROCEDURE_STATUS_COMPLETED:
             LOG_DEBUG("Procedure %d completed successfully for car %d.", procedure->type, car->id);
             break;
-        case PROCEDURE_STATUS_FAILED_REASON_IMPOSSIBLE:
+        case PROCEDURE_STATUS_FAILED_REASON_NOW_IMPOSSIBLE:
             LOG_WARN("Procedure %d failed for car %d due to impossibility.", procedure->type, car->id);
             break;
         case PROCEDURE_STATUS_FAILED_REASON_TIMEDOUT:
