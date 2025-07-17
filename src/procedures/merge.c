@@ -30,12 +30,25 @@ ProcedureStatusCode procedure_merge_init(Simulation* sim, Car* car, Procedure* p
             return PROCEDURE_STATUS_INIT_FAILED_REASON_ARGUMENT_ERROR; // Invalid direction
         }
     }
+    if (cruise_speed_desired < 0) {
+        LOG_ERROR("Car %d: Invalid cruise speed desired for merge procedure: %.2f m/s.", car->id, cruise_speed_desired);
+        return PROCEDURE_STATUS_INIT_FAILED_REASON_ARGUMENT_ERROR; // Invalid cruise speed
+    }
+    if (is_cruise_adaptive && follow_distance_in_seconds <= 0) {
+        LOG_ERROR("Car %d: Invalid follow distance for adaptive cruise: %.2f seconds.", car->id, follow_distance_in_seconds);
+        return PROCEDURE_STATUS_INIT_FAILED_REASON_ARGUMENT_ERROR; // Invalid follow distance
+    }
 
     // validate possibility
     SituationalAwareness* situation = sim_get_situational_awareness(sim, car->id);
     const Lane* target_lane = situation->lane_target_for_indicator[ind];
     if (!target_lane) {
+        LOG_ERROR("Car %d: Target lane for merge is not available.", car->id);
         return PROCEDURE_STATUS_INIT_FAILED_REASON_IMPOSSIBLE;
+    }
+    if (car_get_speed(car) < 0) {
+        LOG_ERROR("Car %d: Cannot initiate merge procedure while car is reversing.", car->id);
+        return PROCEDURE_STATUS_INIT_FAILED_REASON_IMPOSSIBLE; // Cannot merge while reversing
     }
 
     // All looks good, store state variables
@@ -48,6 +61,12 @@ ProcedureStatusCode procedure_merge_init(Simulation* sim, Car* car, Procedure* p
     procedure->state[5] = is_cruise_adaptive;
     procedure->state[6] = follow_distance_in_seconds;
     procedure->state[7] = use_preferred_accel_profile;
+
+
+    // Clear car's control variables
+    car_reset_all_control_variables(car);
+
+    LOG_DEBUG("Car %d: merge procedure initialized. Target lane: %d, Timeout: %.2f seconds.", car->id, target_lane->id, timeout_duration);
 
     return PROCEDURE_STATUS_INITIALIZED;
 }
@@ -69,6 +88,7 @@ ProcedureStatusCode procedure_merge_step(Simulation* sim, Car* car, Procedure* p
 
     // check success
     if (situation->lane->id == target_lane_id) {
+        LOG_DEBUG("Car %d: merge procedure completed successfully into lane %d.", car->id, target_lane_id);
         car_set_indicator_lane(car, INDICATOR_NONE);    // turn off indicator
         car_set_request_indicated_lane(car, false);     // reset request
         set_acceleration_cruise_control(car, situation, cruise_speed_desired, is_cruise_adaptive, follow_distance_in_seconds, use_preferred_acc_profile); // maintain cruise
@@ -117,9 +137,7 @@ ProcedureStatusCode procedure_merge_step(Simulation* sim, Car* car, Procedure* p
 }
 
 void procedure_merge_cancel(Simulation* sim, Car* car, Procedure* procedure) {
-    LOG_INFO("Cancelling merge procedure for car %d.", car->id);
-    car_set_indicator_lane(car, INDICATOR_NONE);    // turn off indicator
-    car_set_request_indicated_lane(car, false);     // reset request
-    car_set_acceleration(car, 0);                   // maintain current speed
+    LOG_DEBUG("Cancelling merge procedure for car %d.", car->id);
+    car_reset_all_control_variables(car); // reset all control variables
     return;
 }
