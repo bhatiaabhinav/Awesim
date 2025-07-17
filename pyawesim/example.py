@@ -28,16 +28,10 @@ while sim_get_time(sim) < total_play_time:
     if status != PROCEDURE_STATUS_IN_PROGRESS and status != PROCEDURE_STATUS_INITIALIZED:
         if current_procedure == PROCEDURE_CRUISE:
             print("Initializing CRUISE procedure...")
-            args = np.array([5.0, 13.0, 1.0, 2.0, 1.0], dtype=np.float64)  # cruise speed, follow distance, adaptive cruise control, preferred acceleration profile
-            c_ptr = args.__array_interface__['data'][0]
-            status = procedure_init(sim, agent, procedure, PROCEDURE_CRUISE, c_ptr)
+            status = procedure_init(sim, agent, procedure, PROCEDURE_CRUISE, [5.0, 13.0, 1.0, 2.0, 1.0])
         elif current_procedure == PROCEDURE_MERGE:
-            print("Initializing MERGE procedure...")
-            merge_direction = INDICATOR_RIGHT if sim_get_time(sim) % 10 < 5 else INDICATOR_LEFT
-            args = np.array([float(merge_direction), 5.0, 13.0, 1.0, 2.0, 1.0], dtype=np.float64)
-            c_ptr = args.__array_interface__['data'][0]
-            status = procedure_init(sim, agent, procedure, PROCEDURE_MERGE, c_ptr)
-
+            merge_direction = INDICATOR_RIGHT if rand_0_to_1() < 0.75 else INDICATOR_LEFT
+            status = procedure_init(sim, agent, procedure, PROCEDURE_MERGE, [float(merge_direction), 5.0, 13.0, 1.0, 2.0, 1.0])
         if status != PROCEDURE_STATUS_INITIALIZED:
             print(f"Agent {agent.id} failed to initialize procedure {current_procedure}. Status: {status}. Switching to default control for this step.\n")
             status = PROCEDURE_STATUS_NONE

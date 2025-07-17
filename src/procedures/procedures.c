@@ -3,7 +3,7 @@
 #include "ai.h"
 #include "logging.h"
 
-ProcedureStatusCode procedure_init(Simulation* sim, Car* car, Procedure* procedure, ProcedureType procedure_type, const double* args) {
+ProcedureStatusCode procedure_init(Simulation* sim, Car* car, Procedure* procedure, ProcedureType procedure_type, const double* args, int num_args) {
     if (procedure->status == PROCEDURE_STATUS_INITIALIZED || procedure->status == PROCEDURE_STATUS_IN_PROGRESS) {
         LOG_ERROR("Procedure already initialized or in progress for car %d. Please let it finish or cancel it before initializing a new one.", car->id);
         return PROCEDURE_STATUS_INIT_FAILED_REASON_ANOTHER_PROCEDURE_IN_PROGRESS; // Another procedure is already in progress
@@ -43,7 +43,7 @@ ProcedureStatusCode procedure_init(Simulation* sim, Car* car, Procedure* procedu
                 LOG_ERROR("Procedure %d initialization failed for car %d due to argument error.", procedure_type, car->id);
                 break;
             case PROCEDURE_STATUS_INIT_FAILED_REASON_IMPOSSIBLE:
-                LOG_WARN("Procedure %d initialization failed for car %d due to impossibility.", procedure_type, car->id);
+                LOG_ERROR("Procedure %d initialization failed for car %d due to impossibility.", procedure_type, car->id);
                 break;
             case PROCEDURE_STATUS_INIT_FAILED_REASON_UNNECESSARY:
                 LOG_WARN("Procedure %d initialization for car %d is unnecessary.", procedure_type, car->id);

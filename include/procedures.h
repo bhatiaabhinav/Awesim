@@ -41,7 +41,7 @@ typedef struct {
 
 // Initializes a procedure with the specified type and arguments. Will invoke the appropriate initialization function (turn_init, merge_init etc.) based on the procedure type.
 // Returns a ProcedureStatusCode indicating the result of initialization.
-ProcedureStatusCode procedure_init(Simulation* sim, Car* car, Procedure* procedure, ProcedureType procedure_type, const double* args);
+ProcedureStatusCode procedure_init(Simulation* sim, Car* car, Procedure* procedure, ProcedureType procedure_type, const double* args, int num_args);
 
 // Advances the procedure by one simulation step. Will invoke the appropriate step function (turn_step, merge_step etc.) based on the procedure type.
 // Returns a ProcedureStatusCode indicating whether the procedure is in progress, completed, or failed.

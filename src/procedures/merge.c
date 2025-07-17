@@ -43,7 +43,7 @@ ProcedureStatusCode procedure_merge_init(Simulation* sim, Car* car, Procedure* p
     SituationalAwareness* situation = sim_get_situational_awareness(sim, car->id);
     const Lane* target_lane = situation->lane_target_for_indicator[ind];
     if (!target_lane) {
-        LOG_ERROR("Car %d: Target lane for merge is not available.", car->id);
+        LOG_ERROR("Car %d: Target lane (indicator %d) for merge is not available.", car->id, ind);
         return PROCEDURE_STATUS_INIT_FAILED_REASON_IMPOSSIBLE;
     }
     if (car_get_speed(car) < 0) {
