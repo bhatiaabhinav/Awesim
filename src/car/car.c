@@ -142,3 +142,11 @@ void car_set_indicator_lane_and_request(Car* self, CarIndictor indicator) {
 void car_set_auto_turn_off_indicators(Car* self, bool auto_turn_off) {
     self->auto_turn_off_indicators = auto_turn_off;
 }
+
+void car_reset_all_control_variables(Car* self) {
+    car_set_indicator_lane(self, INDICATOR_NONE);
+    car_set_request_indicated_lane(self, false);
+    car_set_indicator_turn(self, INDICATOR_NONE);
+    car_set_request_indicated_turn(self, false);
+    car_set_acceleration(self, 0);
+}

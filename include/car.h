@@ -153,7 +153,8 @@ void car_set_indicator_turn_and_request(Car* self, CarIndictor indicator);
 void car_set_indicator_lane_and_request(Car* self, CarIndictor indicator);
 // Sets whether the sim should automatically turn off the car's indicators after the requested lane change or turn is completed.
 void car_set_auto_turn_off_indicators(Car* self, bool auto_turn_off);
-
+// Resets all control variables of the car to their default values: all indicators off, no requests, acceleration set to 0.
+void car_reset_all_control_variables(Car* self);
 
 
 
