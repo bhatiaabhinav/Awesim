@@ -5,6 +5,7 @@
 #include "car.h"
 #include "map.h"
 #include "ai.h"
+#include "procedures.h"
 
 #define MAX_CARS_IN_SIMULATION 1024 // Maximum number of cars in the simulation
 #define MAX_NUM_HAZARDS_EACH_TYPE 1024 // Maximum number of hazards of each type
@@ -73,6 +74,7 @@ typedef struct Simulation {
     ClockReading initial_clock_reading; // Start clock
     Car cars[MAX_CARS_IN_SIMULATION];  // Car list; car[0] = agent
     SituationalAwareness situational_awarenesses[MAX_CARS_IN_SIMULATION]; // Situational awareness for each car
+    Procedure ongoing_procedures[MAX_CARS_IN_SIMULATION]; // Ongoing procedures for each car
     int num_cars;   // Number of cars in simulation
     Seconds time;   // Time simulated so far
     Seconds dt;     // Simulation engine's time resolution for integration (in seconds)
@@ -117,6 +119,7 @@ ClockReading sim_get_initial_clock_reading(Simulation* self);
 int sim_get_num_cars(const Simulation* self);
 Car* sim_get_car(Simulation* self, CarId id);
 SituationalAwareness* sim_get_situational_awareness(Simulation* self, CarId id);
+Procedure* sim_get_ongoing_procedure(Simulation* self, CarId id);
 Seconds sim_get_time(Simulation* self);
 Seconds sim_get_dt(const Simulation* self);
 Weather sim_get_weather(Simulation* self);

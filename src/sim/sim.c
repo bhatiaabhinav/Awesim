@@ -90,6 +90,11 @@ void sim_init(Simulation* sim) {
     sim->is_connected_to_render_server = false; // Not connected to render server by default
     for (int i = 0; i < MAX_CARS_IN_SIMULATION; i++) {
         sim->situational_awarenesses[i].is_valid = false; // Initialize situational awareness for each car
+        sim->ongoing_procedures[i].type = PROCEDURE_NONE;
+        sim->ongoing_procedures[i].status = PROCEDURE_STATUS_NONE; // Initialize procedure status
+        for (int j = 0; j < MAX_PROCEDURE_STATE_VARS; j++) {
+            sim->ongoing_procedures[i].state[j] = 0.0; // Initialize procedure state variables
+        }
     }
 }
 
@@ -129,6 +134,11 @@ Car* sim_get_car(Simulation* self, CarId id) {
 SituationalAwareness* sim_get_situational_awareness(Simulation* self, CarId id) {
     if (!self || id < 0 || id >= self->num_cars) return NULL;
     return &self->situational_awarenesses[id];
+}
+
+Procedure* sim_get_ongoing_procedure(Simulation* self, CarId id) {
+    if (!self || id < 0 || id >= self->num_cars) return NULL;
+    return &self->ongoing_procedures[id];
 }
 
 Seconds sim_get_time(Simulation* self) {
