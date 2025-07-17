@@ -1,5 +1,6 @@
 #include "ai.h"
 #include "utils.h"
+#include "logging.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -94,7 +95,7 @@ MetersPerSecondSquared control_speed_compute_bounded_accel(ControlError error, M
 
 
 // Target may be moving or stationary
-MetersPerSecondSquared car_compute_acceleration_chase_target(const Car* car, Meters position_target, MetersPerSecond speed_target, Meters position_target_overshoot_buffer, MetersPerSecond speed_limit) {
+MetersPerSecondSquared car_compute_acceleration_chase_target(const Car* car, Meters position_target, MetersPerSecond speed_target, Meters position_target_overshoot_buffer, MetersPerSecond speed_limit, bool use_preferred_accel_profile) {
     Meters position_current = car_get_lane_progress_meters(car);
     MetersPerSecond speed_current = car_get_speed(car);
     // printf("position_current: %f, speed_current: %f\n", position_current, speed_current);
@@ -104,7 +105,7 @@ MetersPerSecondSquared car_compute_acceleration_chase_target(const Car* car, Met
     // printf("Position error: %f, Speed error: %f\n", position_error, speed_error);
     ControlError error = {position_error, speed_error};
     CarAccelProfile capable = car->capabilities.accel_profile;
-    CarAccelProfile preferred = car_accel_profile_get_effective(car->capabilities.accel_profile, car->preferences.acceleration_profile);
+    CarAccelProfile preferred = use_preferred_accel_profile ? car_accel_profile_get_effective(car->capabilities.accel_profile, car->preferences.acceleration_profile) : capable;
     MetersPerSecondSquared accel;
     const MetersPerSecondSquared acc_eps = 0.1;
 
@@ -232,12 +233,12 @@ MetersPerSecondSquared car_compute_acceleration_adjust_speed(const Car* car, Met
     return accel;
 }
 
-MetersPerSecondSquared car_compute_acceleration_cruise(const Car* car, MetersPerSecond speed_target) {
+MetersPerSecondSquared car_compute_acceleration_cruise(const Car* car, MetersPerSecond speed_target, bool use_preferred_accel_profile) {
     if (speed_target < 0) {
         fprintf(stderr, "Error: speed_target must be non-negative\n");
         exit(EXIT_FAILURE);
     }
-    return car_compute_acceleration_adjust_speed(car, speed_target, true);
+    return car_compute_acceleration_adjust_speed(car, speed_target, use_preferred_accel_profile);
 }
 
 MetersPerSecondSquared car_compute_acceleration_stop(const Car* car, bool use_preferred_accel_profile) {
@@ -248,6 +249,31 @@ MetersPerSecondSquared car_compute_acceleration_stop_max_brake(const Car* car, b
     CarAccelProfile profile = use_preferred_accel_profile ? car_accel_profile_get_effective(car->capabilities.accel_profile, car->preferences.acceleration_profile) : car->capabilities.accel_profile;
     MetersPerSecond speed = car_get_speed(car);
     return speed >= 0 ? -profile.max_deceleration : profile.max_deceleration;
+}
+
+MetersPerSecondSquared car_compute_acceleration_adaptive_cruise(const Car* car, const SituationalAwareness* situation, MetersPerSecond speed_target, MetersPerSecond lead_car_distance_in_seconds_target, bool use_preferred_accel_profile) {
+    if (speed_target < 0) {
+        LOG_ERROR("Error: Car %d speed_target must be non-negative. Received: %f", car_get_id(car), speed_target);
+        exit(EXIT_FAILURE);
+    }
+    const Car* lead_car = situation->lead_vehicle;
+    // First, check if there is a lead car
+    if (!lead_car) {
+        // No lead car, just cruise at the target speed
+        return car_compute_acceleration_adjust_speed(car, speed_target, use_preferred_accel_profile);
+    } else {
+        // There is a lead car, compute the acceleration to maintain a safe following distance
+        MetersPerSecond car_speed = car_get_speed(car);
+        Meters car_position = car_get_lane_progress_meters(car);
+
+        Meters target_distance_from_next_car = fmax(car_speed, 0) * lead_car_distance_in_seconds_target + from_feet(3);
+        Meters car_lengths_offset = (car_get_length(car) + car_get_length(situation->lead_vehicle)) / 2;
+        target_distance_from_next_car += car_lengths_offset;
+        Meters position_target = car_position + situation->distance_to_lead_vehicle - target_distance_from_next_car;
+        Meters position_target_overshoot_buffer = target_distance_from_next_car - car_lengths_offset - from_feet(1.0); // let's call being within 1.0 feet of the next car as a crash.
+        MetersPerSecond speed_at_target = car_get_speed(situation->lead_vehicle);
+        return car_compute_acceleration_chase_target(car, position_target, speed_at_target, position_target_overshoot_buffer, speed_target, use_preferred_accel_profile);
+    }
 }
 
 

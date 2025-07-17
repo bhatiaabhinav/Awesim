@@ -103,7 +103,7 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
         position_target = car_position + situation->distance_to_lead_vehicle - target_distance_from_next_car;
         position_target_overshoot_buffer = target_distance_from_next_car - car_lengths_offset - from_feet(1.0); // let's call being within 1.0 feet of the next car as a crash.
         speed_at_target = car_get_speed(situation->lead_vehicle);
-        accel = car_compute_acceleration_chase_target(self, position_target, speed_at_target, position_target_overshoot_buffer, speed_cruise);
+        accel = car_compute_acceleration_chase_target(self, position_target, speed_at_target, position_target_overshoot_buffer, speed_cruise, true);
         // accel += situation->lead_vehicle->acceleration; // add the lead vehicle's acceleration to our acceleration to account for the fact that we are following it and it may be accelerating or braking.
 
         // If are already within 2.0 feet of the lead vehicle, let's try to change lanes to avoid rear-ending it.
@@ -121,9 +121,9 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
     } else {
         if (!situation->is_approaching_dead_end && (situation->is_approaching_end_of_lane || situation->braking_distance.preferred_smooth >= distance_to_stop_line)) {
             // start changing speed to match speed limit of the next lane
-            accel = car_compute_acceleration_cruise(self, lane_get_speed_limit(situation->lane_next_after_turn[turn_indicator]) + self->preferences.average_speed_offset);
+            accel = car_compute_acceleration_cruise(self, lane_get_speed_limit(situation->lane_next_after_turn[turn_indicator]) + self->preferences.average_speed_offset, true);
         } else {
-            accel = car_compute_acceleration_cruise(self, speed_cruise);
+            accel = car_compute_acceleration_cruise(self, speed_cruise, true);
         }
     }
 
@@ -230,7 +230,7 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
         position_target = car_position + distance_to_stop_line;
         position_target_overshoot_buffer = meters(1);
         speed_at_target = 0;
-        MetersPerSecondSquared accel_to_stop_at_lane_end = car_compute_acceleration_chase_target(self, position_target, speed_at_target, position_target_overshoot_buffer, speed_cruise);
+        MetersPerSecondSquared accel_to_stop_at_lane_end = car_compute_acceleration_chase_target(self, position_target, speed_at_target, position_target_overshoot_buffer, speed_cruise, true);
         accel = fmin(accel, accel_to_stop_at_lane_end); // take the minimum of the two accelerations
     }
 

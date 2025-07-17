@@ -25,7 +25,7 @@ static bool _turn_finished(const SituationalAwareness *s) {
 /** Convenience: set desired cruise speed with the regular acceleration
  *  controller. */
 static void _cruise_to_speed(Car *self, MetersPerSecond target) {
-    MetersPerSecondSquared a = car_compute_acceleration_cruise(self, target);
+    MetersPerSecondSquared a = car_compute_acceleration_cruise(self, target, true);
     car_set_acceleration(self, a);
 }
 

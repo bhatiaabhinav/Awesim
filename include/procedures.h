@@ -1,13 +1,18 @@
 #pragma once
 
 #include "car.h"
+#include "ai.h"
+
+
+// TODO: Document meaning of each procedure, their arguments, and their success & failure conditions.
 
 typedef enum {
     PROCEDURE_NONE,     // No procedure going on. The car may be setting its control variables directly instead of through a high-level procedure.
     PROCEDURE_TURN,
-    PROCEDURE_MERGE,
+    PROCEDURE_MERGE,        // Merge into a lane (which maybe an adjacent lane, highway merge, or highway exit). The car will try to merge into the indicated direction while maintaining a safe distance from the lead vehicle.
     PROCEDURE_PASS,
-    PROCEDURE_CRUISE,
+    PROCEDURE_ADJUST_SPEED, // Adjust speed to a target speed. Procedure ends successfully when the speed is within a small epsilon of the target speed.
+    PROCEDURE_CRUISE,       // Cruise control procedure. The car will try to maintain a target speed for a specified duration. IF adaptive cruise is enabled, it will also maintain a safe distance from the lead vehicle.
     NUM_PROCEDURES
 } ProcedureType;
 
@@ -26,7 +31,7 @@ typedef enum {
     PROCEDURE_STATUS_FAILED_REASON_UNINITIALIZED,       // Returned by procedure_step if the procedure was not initialized properly.
 } ProcedureStatusCode;
 
-#define MAX_PROCEDURE_STATE_VARS 5              // Maximum number of state variables for a procedure
+#define MAX_PROCEDURE_STATE_VARS 8              // Maximum number of state variables for a procedure
 
 typedef struct {
     ProcedureType type;                         // Type of the procedure
@@ -69,7 +74,7 @@ void procedure_turn_cancel(Simulation* sim, Car* car, Procedure* procedure);
 
 // ---- MERGE procedure ----
 
-// Initializes a MERGE procedure.
+// Initializes a MERGE procedure. Arguments: CarIndicator direction (left/right), timeout_duration, desired cruise speed, whether cruise is adaptive, follow distance in seconds (if adaptive), whether to use preferred acceleration profile (0 or 1)
 ProcedureStatusCode procedure_merge_init(Simulation* sim, Car* car, Procedure* procedure, const double* args);
 
 // Advances a MERGE procedure.
@@ -91,9 +96,22 @@ ProcedureStatusCode procedure_pass_step(Simulation* sim, Car* car, Procedure* pr
 void procedure_pass_cancel(Simulation* sim, Car* car, Procedure* procedure);
 
 
+
+// ---- ADJUST SPEED procedure ----
+
+// Initializes an ADJUST SPEED procedure. Arguments: desired speed, tolerance, timeout duration, whether to use preferred acceleration profile (0 or 1)
+ProcedureStatusCode procedure_adjust_speed_init(Simulation* sim, Car* car, Procedure* procedure, const double* args);
+
+// Advances an ADJUST SPEED procedure.
+ProcedureStatusCode procedure_adjust_speed_step(Simulation* sim, Car* car, Procedure* procedure);
+
+// Cancels an ADJUST SPEED procedure.
+void procedure_adjust_speed_cancel(Simulation* sim, Car* car, Procedure* procedure);
+
+
 // ---- CRUISE procedure ----
 
-// Initializes a CRUISE procedure.
+// Initializes a CRUISE procedure. Arguments: duration, desired cruise speed, whether adaptive, follow duration in seconds (if adaptive), whether to use preferred acceleration profile (0 or 1)
 ProcedureStatusCode procedure_cruise_init(Simulation* sim, Car* car, Procedure* procedure, const double* args);
 
 // Advances a CRUISE procedure.
@@ -102,3 +120,10 @@ ProcedureStatusCode procedure_cruise_step(Simulation* sim, Car* car, Procedure* 
 // Cancels a CRUISE procedure.
 void procedure_cruise_cancel(Simulation* sim, Car* car, Procedure* procedure);
 
+
+
+// ---- Utility functions ----
+
+
+// Sets acceleration for adaptive (if enabled) cruise control based on desired cruise speed, follow distance in seconds to next vehicle (ignored if not adaptive), and acceleration profile.
+void set_acceleration_cruise_control(Car* car, const SituationalAwareness* situation, MetersPerSecond cruise_speed_desired, bool adaptive, MetersPerSecond follow_distance_in_seconds, bool use_preferred_acc_profile);

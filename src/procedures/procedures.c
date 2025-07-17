@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include "procedures.h"
+#include "ai.h"
 #include "logging.h"
 
 ProcedureStatusCode procedure_init(Simulation* sim, Car* car, Procedure* procedure, ProcedureType procedure_type, const double* args) {
@@ -21,6 +22,9 @@ ProcedureStatusCode procedure_init(Simulation* sim, Car* car, Procedure* procedu
             break;
         case PROCEDURE_PASS:
             status = procedure_pass_init(sim, car, procedure, args);
+            break;
+        case PROCEDURE_ADJUST_SPEED:
+            status = procedure_adjust_speed_init(sim, car, procedure, args);
             break;
         case PROCEDURE_CRUISE:
             status = procedure_cruise_init(sim, car, procedure, args);
@@ -75,6 +79,9 @@ ProcedureStatusCode procedure_step(Simulation* sim, Car* car, Procedure* procedu
         case PROCEDURE_PASS:
             status = procedure_pass_step(sim, car, procedure);
             break;
+        case PROCEDURE_ADJUST_SPEED:
+            status = procedure_adjust_speed_step(sim, car, procedure);
+            break;
         case PROCEDURE_CRUISE:
             status = procedure_cruise_step(sim, car, procedure);
             break;
@@ -118,6 +125,9 @@ void procedure_cancel(Simulation* sim, Car* car, Procedure* procedure) {
             case PROCEDURE_PASS:
                 procedure_pass_cancel(sim, car, procedure);
                 break;
+            case PROCEDURE_ADJUST_SPEED:
+                procedure_adjust_speed_cancel(sim, car, procedure);
+                break;
             case PROCEDURE_CRUISE:
                 procedure_cruise_cancel(sim, car, procedure);
                 break;
@@ -133,4 +143,17 @@ void procedure_cancel(Simulation* sim, Car* car, Procedure* procedure) {
     for (int i = 0; i < MAX_PROCEDURE_STATE_VARS; i++) {
         procedure->state[i] = 0.0; // Reset state variables after cancellation
     }
+}
+
+
+// --- Utility functions ---
+
+void set_acceleration_cruise_control(Car* car, const SituationalAwareness* situation, MetersPerSecond cruise_speed_desired, bool adaptive, MetersPerSecond follow_distance_in_seconds, bool use_preferred_acc_profile) {
+    MetersPerSecondSquared acc;
+    if (adaptive) {
+        acc = car_compute_acceleration_adaptive_cruise(car, situation, cruise_speed_desired, follow_distance_in_seconds, use_preferred_acc_profile);
+    } else {
+        acc = car_compute_acceleration_cruise(car, cruise_speed_desired, use_preferred_acc_profile);
+    }
+    car_set_acceleration(car, acc);
 }
