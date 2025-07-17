@@ -46,6 +46,15 @@ ProcedureStatusCode procedure_step(Simulation* sim, Car* car, Procedure* procedu
 void procedure_cancel(Simulation* sim, Car* car, Procedure* procedure);
 
 
+
+
+
+
+
+// ! THE FOLLOWING FUNCTIONS MUST *NOT* CHANGE `type` or `status` of the procedure. They should only manage the `state` variables of the procedure and return the appropriate status code for the function outcome.
+
+
+
 // ---- TURN procedure ----
 
 // Initializes a TURN procedure.
