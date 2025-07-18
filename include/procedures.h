@@ -9,10 +9,10 @@
 typedef enum {
     PROCEDURE_NONE,     // No procedure going on. The car may be setting its control variables directly instead of through a high-level procedure.
     PROCEDURE_TURN,
-    PROCEDURE_MERGE,        // Merge into a lane (which maybe an adjacent lane, highway merge, or highway exit). The car will try to merge into the indicated direction while maintaining a safe distance from the lead vehicle.
+    PROCEDURE_MERGE,        // Merge into a lane (which maybe an adjacent lane, highway merge, or highway exit). The car will try to merge into the indicated direction while maintaining a safe distance from the lead vehicle. Assumes no turns and lane changes other than the requested merge.
     PROCEDURE_PASS,
-    PROCEDURE_ADJUST_SPEED, // Adjust speed to a target speed. Procedure ends successfully when the speed is within a small epsilon of the target speed.
-    PROCEDURE_CRUISE,       // Cruise control procedure. The car will try to maintain a target speed for a specified duration. IF adaptive cruise is enabled, it will also maintain a safe distance from the lead vehicle.
+    PROCEDURE_ADJUST_SPEED, // Adjust speed to a target speed. Procedure ends successfully when the speed is within a small epsilon of the target speed. Assumes no lane changes and turns and ignores traffic.
+    PROCEDURE_CRUISE,       // Cruise control procedure. The car will try to maintain a target speed for a specified duration. IF adaptive cruise is enabled, it will also maintain a safe distance from the lead vehicle. Assumes no lane changes and turns.
     NUM_PROCEDURES
 } ProcedureType;
 
