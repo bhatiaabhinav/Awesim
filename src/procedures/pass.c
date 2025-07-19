@@ -184,6 +184,7 @@ ProcedureStatusCode procedure_pass_step(Simulation* sim, Car* car, Procedure* pr
         // Use an adaptive cruise control to pass the target vehicle
         set_acceleration_cruise_control(car, situation, desired, true, 2, use_preferred_acc_profile);
         return PROCEDURE_STATUS_IN_PROGRESS;
+    }
     // ------- Phase-2 (Merge back into original lane)-------
     if (phase == PASS_PHASE_MERGE_BACK) {
         ProcedureStatusCode mstat = procedure_merge_step(sim, car, &merge_proc);
