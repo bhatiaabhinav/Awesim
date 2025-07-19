@@ -7,10 +7,10 @@
 // TODO: Document meaning of each procedure, their arguments, and their success & failure conditions.
 
 typedef enum {
-    PROCEDURE_NONE,     // No procedure going on. The car may be setting its control variables directly instead of through a high-level procedure.
+    PROCEDURE_NONE,         // No procedure going on. The car may be setting its control variables directly instead of through a high-level procedure.
     PROCEDURE_TURN,
     PROCEDURE_MERGE,        // Merge into a lane (which maybe an adjacent lane, highway merge, or highway exit). The car will try to merge into the indicated direction while maintaining a safe distance from the lead vehicle. Assumes no turns and lane changes other than the requested merge.
-    PROCEDURE_PASS,
+    PROCEDURE_PASS,         // Overtake another vehicle. The car will try to pass the target by first attempting to merge on the left lane, then accelerating to the desired speed. If allowed, the ego car will merge into the target lane.
     PROCEDURE_ADJUST_SPEED, // Adjust speed to a target speed. Procedure ends successfully when the speed is within a small epsilon of the target speed. Assumes no lane changes and turns and ignores traffic.
     PROCEDURE_CRUISE,       // Cruise control procedure. The car will try to maintain a target speed for a specified duration. IF adaptive cruise is enabled, it will also maintain a safe distance from the lead vehicle. Assumes no lane changes and turns.
     NUM_PROCEDURES
@@ -31,7 +31,7 @@ typedef enum {
     PROCEDURE_STATUS_FAILED_REASON_UNINITIALIZED,       // Returned by procedure_step if the procedure was not initialized properly.
 } ProcedureStatusCode;
 
-#define MAX_PROCEDURE_STATE_VARS 8              // Maximum number of state variables for a procedure
+#define MAX_PROCEDURE_STATE_VARS 16              // Maximum number of state variables for a procedure
 
 typedef struct {
     ProcedureType type;                         // Type of the procedure
@@ -86,7 +86,7 @@ void procedure_merge_cancel(Simulation* sim, Car* car, Procedure* procedure);
 
 // ---- PASS procedure ----
 
-// Initializes a PASS procedure.
+// Initializes a PASS procedure. Arguments: timeout duration, desired pass speed, whether the car should merge back into original lane, distance buffer to determine if passed, whether to use preferred acceleration profile (0 or 1)
 ProcedureStatusCode procedure_pass_init(Simulation* sim, Car* car, Procedure* procedure, const double* args);
 
 // Advances a PASS procedure.
