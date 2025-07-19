@@ -37,11 +37,12 @@ typedef struct {
     ProcedureType type;                         // Type of the procedure
     ProcedureStatusCode status;                 // Status of the procedure, if initialized, in progress, completed, or failed.
     double state[MAX_PROCEDURE_STATE_VARS];     // State variables for the procedure, e.g., progress, start time, etc.
+    void *opaque;          /* user‑defined scratch pointer */
 } Procedure;
 
 // Initializes a procedure with the specified type and arguments. Will invoke the appropriate initialization function (turn_init, merge_init etc.) based on the procedure type.
 // Returns a ProcedureStatusCode indicating the result of initialization.
-ProcedureStatusCode procedure_init(Simulation* sim, Car* car, Procedure* procedure, ProcedureType procedure_type, const double* args, int num_args);
+ProcedureStatusCode procedure_init(Simulation* sim, Car* car, Procedure* procedure, ProcedureType procedure_type, const double* args);
 
 // Advances the procedure by one simulation step. Will invoke the appropriate step function (turn_step, merge_step etc.) based on the procedure type.
 // Returns a ProcedureStatusCode indicating whether the procedure is in progress, completed, or failed.
