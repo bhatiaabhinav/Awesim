@@ -11,9 +11,9 @@
  *  6  <spare for future use>     7 words for “pass” itself
  *  7 … 14   =  8 words for “merge” state (indices 0–7 inside merge)
  *--------------------------------------------------------------------- */
-#define PASS_LOCALS          7          /* words used by pass itself   */
-#define MERGE_STATE_WORDS    8          /* words required by merge     */
-#define PASS_STATE_WORDS     (PASS_LOCALS + MERGE_STATE_WORDS)
+#define PASS_LOCALS 7          /* words used by pass itself   */
+#define MERGE_STATE_WORDS 8          /* words required by merge     */
+#define PASS_STATE_WORDS (PASS_LOCALS + MERGE_STATE_WORDS)
 
 // Ensure enough space available for multiple procedures
 _Static_assert(PASS_STATE_WORDS <= MAX_PROCEDURE_STATE_VARS,
@@ -21,10 +21,10 @@ _Static_assert(PASS_STATE_WORDS <= MAX_PROCEDURE_STATE_VARS,
 
 
 typedef enum {
-    PASS_PHASE_MERGE_OUT   = 0, // Leave the target cars lane
-    PASS_PHASE_OVERTAKE    = 1, // Speed up to pass
-    PASS_PHASE_MERGE_BACK  = 2, // Get back into original lane to complete pass (optional)
-    PASS_PHASE_DONE        = 3
+    PASS_PHASE_MERGE_OUT = 0, // Leave the target cars lane
+    PASS_PHASE_OVERTAKE = 1, // Speed up to pass
+    PASS_PHASE_MERGE_BACK = 2, // Get back into original lane to complete pass (optional)
+    PASS_PHASE_DONE = 3
 } PassPhase;
 // --- PASS procedure ---
 
@@ -42,7 +42,7 @@ ProcedureStatusCode procedure_pass_init(Simulation* sim, Car* ego_car, Car* targ
         LOG_ERROR("Car %d: Invalid duration for pass procedure: %.2f seconds.", ego_car->id, duration);
         return PROCEDURE_STATUS_INIT_FAILED_REASON_ARGUMENT_ERROR;
     }
-    if (pass_speed_buffer < 0) {
+    if (pass_speed_desired < 0) {
         LOG_ERROR("Car %d: Invalid pass speed buffer for cruise procedure: %.2f m/s.", ego_car->id, pass_speed_buffer);
         return PROCEDURE_STATUS_INIT_FAILED_REASON_ARGUMENT_ERROR;
     }
@@ -55,10 +55,10 @@ ProcedureStatusCode procedure_pass_init(Simulation* sim, Car* ego_car, Car* targ
     if (pass_speed_desired > ego_car->capabilities.top_speed) {
         LOG_ERROR("Car %d: Pass speed %.2f mph exceeds car's top speed %.2f mph.", ego_car->id, to_mph(pass_speed_desired), to_mph(car->capabilities.top_speed));
         return PROCEDURE_STATUS_INIT_FAILED_REASON_IMPOSSIBLE; // Cruise speed exceeds max speed
+    if (pass_speed_desired > ego_car->capabilities.top_speed) {
+        LOG_ERROR("Car %d: Pass speed %.2f mph exceeds car's top speed %.2f mph.", ego_car->id, to_mph(pass_speed_desired), to_mph(ego_car->capabilities.top_speed));
+        return PROCEDURE_STATUS_INIT_FAILED_REASON_IMPOSSIBLE; // Cruise speed exceeds max speed
     }
-
-    // All looks good, store state variables
-    procedure->state[0] = sim_get_time(sim); // record start time
     procedure->state[1] = duration;
     procedure->state[2] = pass_speed_desired;
     procedure->state[3] = should_merge_back;
@@ -120,14 +120,15 @@ ProcedureStatusCode procedure_pass_step(Simulation* sim, Car* car, Procedure* pr
     double now = sim_get_time(sim);
     if (now - start_time > timeout_duration) {
         LOG_WARN("Car %d: merge procedure timed out after %.2f seconds.", car->id, timeout_duration);
+    double now = sim_get_time(sim);
+    double timeout_duration = duration; // Use duration as timeout
+    if (now - start_time > timeout_duration) {
+        LOG_WARN("Car %d: merge procedure timed out after %.2f seconds.", car->id, timeout_duration);
         car_set_indicator_lane(car, INDICATOR_NONE);    // turn off indicator
         car_set_request_indicated_lane(car, false);     // reset request
-        set_acceleration_cruise_control(car, situation, cruise_speed_desired, is_cruise_adaptive, follow_distance_in_seconds, use_preferred_acc_profile);  // maintain cruise
+        set_acceleration_cruise_control(car, NULL, pass_speed_desired, true, 2, use_preferred_acc_profile);  // maintain cruise
         return PROCEDURE_STATUS_FAILED_REASON_TIMEDOUT;
     }
-
-    // ------- Phase-0 (Leave target car's lane, try left lane first)-------
-    if (phase == PASS_PHASE_MERGE_OUT) {
         ProcedureStatusCode mstat = procedure_merge_step(sim, car, &merge_proc);
 
         if (mstat == PROCEDURE_STATUS_COMPLETED) {
@@ -150,7 +151,9 @@ ProcedureStatusCode procedure_pass_step(Simulation* sim, Car* car, Procedure* pr
 
                 const Lane *left  = sit->lane_left;
                 const Lane *right = sit->lane_right;
-                CarIndictor dir =
+                const Lane *left  = situation->lane_left;
+                const Lane *right = situation->lane_right;
+                CarIndicator dir =
                     (left  && left->id  == orig_lane) ? INDICATOR_LEFT  :
                     (right && right->id == orig_lane) ? INDICATOR_RIGHT :
                     (orig_lane < car_get_lane_id(car)) ? INDICATOR_LEFT  :
@@ -161,7 +164,7 @@ ProcedureStatusCode procedure_pass_step(Simulation* sim, Car* car, Procedure* pr
                     duration * 0.30,            // 30 % of whole pass
                     pass_speed_desired, 1,      // adaptive cruise afterwards
                     2,                          // Follow disatance in seconds
-                    use_pref_accel
+                    use_preferred_acc_profile
                 };
                 ProcedureStatusCode mstat = procedure_merge_init(sim, car, &merge_proc, merge_args);
 
@@ -176,13 +179,11 @@ ProcedureStatusCode procedure_pass_step(Simulation* sim, Car* car, Procedure* pr
         }
         MetersPerSecond desired = pass_speed_desired;
         if (pass_speed_desired <= car_get_speed(target)){
-            MetersPerSecond desired = car_get_speed(target) + mps(5); // If the desired speed is less than the target's speed we set a desired speed to ensure passing
+            desired = car_get_speed(target) + mps(5); // If the desired speed is less than the target's speed we set a desired speed to ensure passing
         }
         // Use an adaptive cruise control to pass the target vehicle
-        set_acceleration_cruise_control(car, sit, desired, true, 2, use_pref_accel);
+        set_acceleration_cruise_control(car, situation, desired, true, 2, use_preferred_acc_profile);
         return PROCEDURE_STATUS_IN_PROGRESS;
-    }
-
     // ------- Phase-2 (Merge back into original lane)-------
     if (phase == PASS_PHASE_MERGE_BACK) {
         ProcedureStatusCode mstat = procedure_merge_step(sim, car, &merge_proc);
