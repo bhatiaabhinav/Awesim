@@ -1,322 +1,171 @@
-import os
+from typing import Any, SupportsFloat, Union
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
-from typing import Dict, Any, Tuple, Optional
-
+from bindings import *
 
 class AwesimEnv(gym.Env):
-    pass
-#     """
-#     Gymnasium environment for the Awesim driving simulator.
-
-#     Action Space:
-#         - acceleration: continuous value (typically -10.0 to 10.0 m/s²)
-#         - lane_indicator: discrete (0=NONE, 1=LEFT, 2=RIGHT)
-#         - turn_indicator: discrete (0=NONE, 1=LEFT, 2=RIGHT)
-
-#     Observation Space:
-#         Dictionary containing various situational awareness variables
-#     """
-
-#     metadata = {"render_modes": ["human"], "render_fps": 10}
-
-#     def __init__(self,
-#                  city_width: int = 1000,
-#                  num_cars: int = 256,
-#                  decision_interval: float = 0.1,
-#                  max_episode_time: float = 100.0,
-#                  render_mode: Optional[str] = None,
-#                  render_server_ip: str = "127.0.0.1",
-#                  render_server_port: int = 4242):
-
-#         super().__init__()
-
-#         # Environment parameters
-#         self.city_width = city_width
-#         self.num_cars = num_cars
-#         self.decision_interval = decision_interval
-#         self.max_episode_time = max_episode_time
-#         self.render_mode = render_mode
-#         self.render_server_ip = render_server_ip
-#         self.render_server_port = render_server_port
-
-#         # Initialize CFFI
-#         self._init_cffi()
-
-#         # Action space: [acceleration, lane_indicator, turn_indicator]
-#         self.action_space = spaces.Dict({
-#             'acceleration': spaces.Box(low=-10.0, high=10.0, shape=(1,), dtype=np.float32),
-#             'lane_indicator': spaces.Discrete(3),  # 0=NONE, 1=LEFT, 2=RIGHT
-#             'turn_indicator': spaces.Discrete(3)   # 0=NONE, 1=LEFT, 2=RIGHT
-#         })
-
-#         # Observation space (will be updated after first reset)
-#         # This is a placeholder - actual observation space depends on situational_awareness_build output
-#         self.observation_space = spaces.Dict({
-#             'distance_to_lead_vehicle': spaces.Box(low=0.0, high=np.inf, shape=(1,), dtype=np.float32),
-#             'speed': spaces.Box(low=0.0, high=200.0, shape=(1,), dtype=np.float32),
-#             'position_x': spaces.Box(low=-np.inf, high=np.inf, shape=(1,), dtype=np.float32),
-#             'position_y': spaces.Box(low=-np.inf, high=np.inf, shape=(1,), dtype=np.float32),
-#             'simulation_time': spaces.Box(low=0.0, high=np.inf, shape=(1,), dtype=np.float32),
-#         })
-
-#         # Simulation state
-#         self.sim = None
-#         self.agent = None
-#         self.current_time = 0.0
-#         self.episode_reward = 0.0
-
-#     def _init_cffi(self):
-#         """Initialize CFFI and load the simulation library."""
-#         self.ffi = FFI()
-
-#         # Load header file
-#         try:
-#             with open(os.path.join("python", "libawesim.h")) as f:
-#                 self.ffi.cdef(f.read(), override=True)
-#         except FileNotFoundError:
-#             raise FileNotFoundError("libawesim.h not found in python/ directory")
-
-#         # Load dynamic library
-#         lib_extension = "dll" if os.name == "nt" else "so"
-#         lib_name = f"libawesim.{lib_extension}"
-#         lib_path = os.path.abspath(os.path.join("bin", lib_name))
-
-#         try:
-#             self.libsim = self.ffi.dlopen(lib_path)
-#         except OSError as e:
-#             raise OSError(f"Error loading library {lib_path}: {e}")
-
-#     def _get_indicator_constant(self, indicator_type: str, value: int) -> int:
-#         """Convert discrete action to simulator constant."""
-#         if indicator_type == "lane":
-#             if value == 0:
-#                 return self.libsim.INDICATOR_NONE
-#             elif value == 1:
-#                 return self.libsim.INDICATOR_LEFT
-#             elif value == 2:
-#                 return self.libsim.INDICATOR_RIGHT
-#         elif indicator_type == "turn":
-#             if value == 0:
-#                 return self.libsim.INDICATOR_NONE
-#             elif value == 1:
-#                 return self.libsim.INDICATOR_LEFT
-#             elif value == 2:
-#                 return self.libsim.INDICATOR_RIGHT
-
-#         return self.libsim.INDICATOR_NONE
-
-#     def _extract_observation(self, situation) -> Dict[str, np.ndarray]:
-#         """Extract observation from situational awareness structure."""
-#         # This is a basic extraction - you may need to modify based on
-#         # the actual fields available in your situational_awareness structure
-#         obs = {
-#             'distance_to_lead_vehicle': np.array([situation.distance_to_lead_vehicle], dtype=np.float32),
-#             'simulation_time': np.array([self.libsim.sim_get_time(self.sim)], dtype=np.float32),
-#         }
-
-#         # Add more fields as available in your situation structure
-#         # For example:
-#         # obs['speed'] = np.array([situation.speed], dtype=np.float32)
-#         # obs['position_x'] = np.array([situation.position_x], dtype=np.float32)
-#         # obs['position_y'] = np.array([situation.position_y], dtype=np.float32)
-
-#         return obs
-
-#     def _calculate_reward(self, situation, action: Dict[str, Any]) -> float:
-#         """Calculate reward based on current situation and action taken."""
-#         reward = 0.0
-
-#         # Example reward function - customize based on your objectives
-
-#         # Penalty for being too close to lead vehicle
-#         if situation.distance_to_lead_vehicle < 10.0:  # Less than 10 meters
-#             reward -= 10.0
-#         elif situation.distance_to_lead_vehicle < 30.0:  # Less than 30 meters
-#             reward -= 1.0
-
-#         # Small positive reward for maintaining safe distance
-#         if 30.0 <= situation.distance_to_lead_vehicle <= 100.0:
-#             reward += 0.1
-
-#         # Penalty for excessive acceleration/deceleration
-#         abs_acceleration = abs(action['acceleration'][0])
-#         if abs_acceleration > 5.0:
-#             reward -= abs_acceleration * 0.1
-
-#         # Small positive reward for progressing through time (staying alive)
-#         reward += 0.01
-
-#         return reward
-
-#     def _is_terminated(self, situation) -> bool:
-#         """Check if episode should terminate."""
-#         # Terminate if collision or other terminal condition
-#         # You'll need to check what fields are available in situation
-
-#         # Example termination conditions:
-#         # if hasattr(situation, 'collision') and situation.collision:
-#         #     return True
-
-#         # Terminate if too close to lead vehicle (potential collision)
-#         if situation.distance_to_lead_vehicle < 2.0:
-#             return True
-
-#         return False
-
-#     def _is_truncated(self) -> bool:
-#         """Check if episode should be truncated (time limit)."""
-#         return self.current_time >= self.max_episode_time
-
-#     def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None) -> Tuple[Dict, Dict]:
-#         """Reset the environment to initial state."""
-#         super().reset(seed=seed)
-
-#         # Clean up previous simulation if exists
-#         if self.sim is not None:
-#             if self.render_mode == "human":
-#                 self.libsim.sim_disconnect_from_render_server(self.sim)
-#             self.libsim.sim_free(self.sim)
-
-#         # Create new simulation
-#         self.sim = self.libsim.sim_malloc()
-
-#         # Setup simulation parameters
-#         init_clock = self.libsim.clock_reading(0, 8, 0, 0)  # Monday 8:00 AM
-#         init_weather = self.libsim.WEATHER_SUNNY
-
-#         self.libsim.awesim_setup(self.sim, self.city_width, self.num_cars, 0.02,
-#                                 init_clock, init_weather)
-
-#         # Enable agent
-#         self.libsim.sim_set_agent_enabled(self.sim, True)
-#         self.agent = self.libsim.sim_get_agent_car(self.sim)
-
-#         # Setup synchronization
-#         self.libsim.sim_set_synchronized(self.sim, True, 1.0)
-
-#         # Connect to render server if in human mode
-#         if self.render_mode == "human":
-#             self.libsim.sim_connect_to_render_server(
-#                 self.sim,
-#                 self.render_server_ip.encode('utf-8'),
-#                 self.render_server_port
-#             )
-
-#         # Reset episode state
-#         self.current_time = 0.0
-#         self.episode_reward = 0.0
-
-#         # Get initial observation
-#         self.libsim.situational_awareness_build(self.sim, self.agent.id)
-#         situation = self.libsim.sim_get_situational_awareness(self.sim, self.agent.id)
-#         observation = self._extract_observation(situation)
-
-#         info = {
-#             'episode_time': self.current_time,
-#             'episode_reward': self.episode_reward
-#         }
-
-#         return observation, info
-
-#     def step(self, action: Dict[str, Any]) -> Tuple[Dict, float, bool, bool, Dict]:
-#         """Execute one environment step."""
-#         if self.sim is None:
-#             raise RuntimeError("Environment not initialized. Call reset() first.")
-
-#         # Apply actions to agent
-#         acceleration = float(action['acceleration'][0])
-#         lane_indicator = self._get_indicator_constant("lane", action['lane_indicator'])
-#         turn_indicator = self._get_indicator_constant("turn", action['turn_indicator'])
-
-#         self.libsim.car_set_acceleration(self.agent, acceleration)
-#         self.libsim.car_set_indicator_lane(self.agent, lane_indicator)
-#         self.libsim.car_set_indicator_turn(self.agent, turn_indicator)
-
-#         # Simulate one step
-#         self.libsim.simulate(self.sim, self.decision_interval)
-#         self.current_time = self.libsim.sim_get_time(self.sim)
-
-#         # Get new observation
-#         self.libsim.situational_awareness_build(self.sim, self.agent.id)
-#         situation = self.libsim.sim_get_situational_awareness(self.sim, self.agent.id)
-#         observation = self._extract_observation(situation)
-
-#         # Calculate reward
-#         reward = self._calculate_reward(situation, action)
-#         self.episode_reward += reward
-
-#         # Check termination conditions
-#         terminated = self._is_terminated(situation)
-#         truncated = self._is_truncated()
-
-#         info = {
-#             'episode_time': self.current_time,
-#             'episode_reward': self.episode_reward,
-#             'distance_to_lead_vehicle': situation.distance_to_lead_vehicle
-#         }
-
-#         return observation, reward, terminated, truncated, info
-
-#     def render(self):
-#         """Render the environment."""
-#         # Rendering is handled by the simulation's render server
-#         # when render_mode="human" and connected in reset()
-#         pass
-
-#     def close(self):
-#         """Clean up environment resources."""
-#         if self.sim is not None:
-#             if self.render_mode == "human":
-#                 self.libsim.sim_disconnect_from_render_server(self.sim)
-#             self.libsim.sim_free(self.sim)
-#             self.sim = None
-
-
-# # Example usage
-# if __name__ == "__main__":
-#     # Create environment
-#     env = AwesimEnv(
-#         city_width=1000,
-#         num_cars=256,
-#         decision_interval=0.1,
-#         max_episode_time=30.0,  # Shorter for testing
-#         render_mode="human"  # Enable visualization
-#     )
-
-#     print("Created Awesim Gymnasium environment")
-#     print(f"Action space: {env.action_space}")
-#     print(f"Observation space: {env.observation_space}")
-
-#     # Run a simple episode
-#     observation, info = env.reset()
-#     print(f"Initial observation: {observation}")
-
-#     total_reward = 0
-#     step_count = 0
-
-#     try:
-#         while True:
-#             # Random action for demonstration
-#             action = env.action_space.sample()
-
-#             # Take step
-#             observation, reward, terminated, truncated, info = env.step(action)
-#             total_reward += reward
-#             step_count += 1
-
-#             print(f"Step {step_count}: reward={reward:.3f}, total_reward={total_reward:.3f}")
-#             print(f"  Distance to lead vehicle: {info['distance_to_lead_vehicle']:.2f}m")
-
-#             if terminated or truncated:
-#                 print(f"Episode finished after {step_count} steps")
-#                 print(f"Reason: {'Terminated' if terminated else 'Truncated'}")
-#                 break
-
-#     except KeyboardInterrupt:
-#         print("Interrupted by user")
-
-#     finally:
-#         env.close()
-#         print("Environment closed")
+    def __init__(self, city_width: int = 1000, num_cars: int = 256, decision_interval: float = 0.1, sim_duration: float = 60 * 60) -> None:
+        super().__init__()
+        self.city_width = city_width
+        self.num_cars = num_cars
+        self.decision_interval = decision_interval
+        self.sim_duration = sim_duration
+
+        self.action_space = spaces.Discrete(6) # speed inc 5, speed dec 5, merge left, merge right, cruise, cruise_adaptive
+        self.observation_space = spaces.Box(low=-1, high=1, shape=(7,), dtype=np.float32)  # position, speed (div 100 mph), lane_left_exists, lane_right_exists, next_car_exists, next_car_distance (normalized by current lane length), next_car_speed_div_100mph
+        self.sim = sim_malloc()
+        # sim_init(self.sim)
+        # sim_connect_to_render_server(self.sim, "127.0.0.1", 4242)
+        sim_set_agent_enabled(self.sim, True)
+        self.agent: Car = sim_get_agent_car(self.sim)
+
+    def _get_observation(self):
+        situation = sim_get_situational_awareness(self.sim, 0)
+        progress = car_get_lane_progress(self.agent)
+        speed_div_100 = to_mph(car_get_speed(self.agent)) / 100
+        lane_left_exists = situation.lane_left is not None
+        lane_right_exists = situation.lane_right is not None
+        next_car_exists = situation.is_vehicle_ahead
+        lane_length = lane_get_length(situation.lane)
+        next_car_distance = situation.distance_to_lead_vehicle / lane_length if next_car_exists else 0.0
+        next_car_speed_div_100 = to_mph(car_get_speed(situation.lead_vehicle)) / 100 if next_car_exists else 0.0
+        return np.asarray([progress, speed_div_100, lane_left_exists, lane_right_exists, next_car_exists, next_car_distance, next_car_speed_div_100], dtype=np.float32)
+    
+
+    def _get_reward(self):
+        # if there is no lead vehicle, we want to encourage the agent to drive faster. If there is, we want the agent to maintain 3 seconds distance to the lead vehicle
+        situation = sim_get_situational_awareness(self.sim, 0)
+        my_speed = car_get_speed(self.agent)
+        if not situation.is_vehicle_ahead:
+            return to_mph(my_speed) / 100.0  # Encourage driving faster when no lead vehicle is present
+        else:
+            # Maintain 3 seconds distance to the lead vehicle
+            desired_distance = my_speed * 3.0  # 3 seconds distance
+            actual_distance = situation.distance_to_lead_vehicle
+            return -abs(desired_distance - actual_distance)  # Penalize for not maintaining distance
+        
+    def _should_terminate(self):
+        # detect crash with lead vehicle``
+        situation = sim_get_situational_awareness(self.sim, 0)
+        if situation.is_vehicle_ahead:
+            distance_center_to_center = situation.distance_to_lead_vehicle
+            distance_bumper_to_tail = distance_center_to_center - (car_get_length(self.agent) / 2 + car_get_length(situation.lead_vehicle) / 2)
+            if distance_bumper_to_tail <= 0:
+                print(f"Agent {self.agent.id} crashed into lead vehicle #{situation.lead_vehicle.id} at distance {distance_bumper_to_tail}.")
+                return True
+        return False
+
+    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
+        super().reset(seed=seed, options=options)
+        awesim_setup(self.sim, self.city_width, self.num_cars, 0.02, clock_reading(0, 8, 0, 0), WEATHER_SUNNY)
+        sim_set_synchronized(self.sim, True, 1.0)
+        sim_connect_to_render_server(self.sim, "127.0.0.1", 4242)
+
+        sim_set_agent_enabled(self.sim, True)
+        self.agent = sim_get_agent_car(self.sim)
+        
+        situational_awareness_build(self.sim, self.agent.id)
+        obs = self._get_observation()
+        info = {}
+        return obs, info
+    
+    def step(self, action: Any) -> tuple[Any, float, bool, bool, dict[str, Any]]:
+        t0 = sim_get_time(self.sim)
+        situational_awareness_build(self.sim, self.agent.id)
+        ongoing_procedure = sim_get_ongoing_procedure(self.sim, self.agent.id)
+        status = PROCEDURE_STATUS_INIT_FAILED_REASON_NOT_IMPLEMENTED
+        if action == 0 or action == 1:
+            speed_delta_mag = from_mph(5)
+            speed_delta_direction = 1 if action == 0 else -1
+            speed_delta = speed_delta_direction * speed_delta_mag
+            print(f"Initializing ADJUST_SPEED procedure with speed delta {speed_delta} mph...")
+            status = procedure_init(self.sim, self.agent, ongoing_procedure, PROCEDURE_ADJUST_SPEED, [car_get_speed(self.agent) + speed_delta, from_mph(0.5), 5.0, 1.0])  # Arguments: desired speed, tolerance, timeout duration, whether to use preferred acceleration profile (0 or 1)
+        elif action == 2 or action == 3:
+            merge_dir = INDICATOR_LEFT if action == 2 else INDICATOR_RIGHT
+            speed = car_get_speed(self.agent)
+            print(f"Initializing MERGE procedure with direction {merge_dir}...")
+            status = procedure_init(self.sim, self.agent, ongoing_procedure, PROCEDURE_MERGE, [float(merge_dir), 5.0, speed, 0.0, 2.0, 1.0])  # Arguments: CarIndicator direction (left/right), timeout_duration, desired cruise speed, whether cruise is adaptive, follow distance in seconds (if adaptive), whether to use preferred acceleration profile (0 or 1)
+        elif action == 4 or action == 5:
+            speed = car_get_speed(self.agent)
+            adaptive = 1.0 if action == 5 else 0.0
+            print(f"Initializing CRUISE procedure with adaptive={adaptive} and speed={speed} mph...")
+            status = procedure_init(self.sim, self.agent, ongoing_procedure, PROCEDURE_CRUISE, [5.0, speed, adaptive, 3.0, 1.0])  # Arguments: duration, desired cruise speed, whether adaptive, follow duration in seconds (if adaptive), whether to use preferred acceleration profile (0 or 1)
+
+        if status == PROCEDURE_STATUS_INITIALIZED:
+            while (status in [PROCEDURE_STATUS_INITIALIZED, PROCEDURE_STATUS_IN_PROGRESS]):
+                status = procedure_step(self.sim, self.agent, ongoing_procedure)
+                if status not in [PROCEDURE_STATUS_IN_PROGRESS, PROCEDURE_STATUS_COMPLETED]:
+                    print(f"Agent {self.agent.id} failed to execute procedure. Status: {status}")
+                    break   # Note: Even though procedure_step will recommend some controls even when the procedure already succeeded, we do not apply it since we want the agent to be able to apply new procedures right away.
+                simulate(self.sim, self.decision_interval)
+                situational_awareness_build(self.sim, self.agent.id)
+        else:
+            print(f"Agent {self.agent.id} failed to initialize procedure. Status: {status}")
+            car_reset_all_control_variables(self.agent)
+            simulate(self.sim, self.decision_interval)  # simulate the step even if procedure initialization failed
+            situational_awareness_build(self.sim, self.agent.id)
+
+        t1 = sim_get_time(self.sim)
+
+        obs = self._get_observation()
+        reward = self._get_reward() * (t1 - t0)  # Normalize reward by the time taken for the step, to avoid bias towards shorter steps
+        terminated = self._should_terminate()
+        truncated = sim_get_time(self.sim) >= self.sim_duration
+        info = {"status": status, "time": sim_get_time(self.sim)}
+        return obs, reward, terminated, truncated, info
+    
+    def close(self) -> None:
+        sim_disconnect_from_render_server(self.sim)
+        sim_free(self.sim)
+        super().close()
+
+        
+
+
+# Example usage
+if __name__ == "__main__":
+    # Create environment
+    env = AwesimEnv(
+        city_width=1000,
+        num_cars=256,
+        decision_interval=0.1,
+        sim_duration=60.0
+    )
+
+    print("Created Awesim Gymnasium environment")
+    print(f"Action space: {env.action_space}")
+    print(f"Observation space: {env.observation_space}")
+
+    # Run a simple episode
+    observation, info = env.reset()
+    print(f"Initial observation: {observation}")
+
+    total_reward = 0
+    step_count = 0
+
+    try:
+        while True:
+            # Random action for demonstration
+            action = env.action_space.sample()
+
+            # Take step
+            observation, reward, terminated, truncated, info = env.step(action)
+            total_reward += reward
+            step_count += 1
+            # break
+
+            print(f"Step {step_count}: reward={reward:.3f}, total_reward={total_reward:.3f}")
+            # print(f"  Distance to lead vehicle: {info['distance_to_lead_vehicle']:.2f}m")
+
+            if terminated or truncated:
+                print(f"Episode finished after {step_count} steps")
+                print(f"Reason: {'Terminated' if terminated else 'Truncated'}")
+                break
+
+    except KeyboardInterrupt:
+        print("Interrupted by user")
+
+    finally:
+        env.close()
+        print("Environment closed")

@@ -31,6 +31,7 @@ while sim_get_time(sim) < total_play_time:
             status = procedure_init(sim, agent, procedure, PROCEDURE_CRUISE, [5.0, 13.0, 1.0, 2.0, 1.0])
         elif current_procedure == PROCEDURE_MERGE:
             merge_direction = INDICATOR_RIGHT if rand_0_to_1() < 0.75 else INDICATOR_LEFT
+            print(f"Initializing MERGE procedure with direction {merge_direction}...")
             status = procedure_init(sim, agent, procedure, PROCEDURE_MERGE, [float(merge_direction), 5.0, 13.0, 1.0, 2.0, 1.0])
         if status != PROCEDURE_STATUS_INITIALIZED:
             print(f"Agent {agent.id} failed to initialize procedure {current_procedure}. Status: {status}. Switching to default control for this step.\n")
