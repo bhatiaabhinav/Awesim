@@ -31,13 +31,12 @@ typedef enum {
     PROCEDURE_STATUS_FAILED_REASON_UNINITIALIZED,       // Returned by procedure_step if the procedure was not initialized properly.
 } ProcedureStatusCode;
 
-#define MAX_PROCEDURE_STATE_VARS 16              // Maximum number of state variables for a procedure
+#define MAX_PROCEDURE_STATE_VARS 18              // Maximum number of state variables for a procedure
 
 typedef struct {
     ProcedureType type;                         // Type of the procedure
     ProcedureStatusCode status;                 // Status of the procedure, if initialized, in progress, completed, or failed.
     double state[MAX_PROCEDURE_STATE_VARS];     // State variables for the procedure, e.g., progress, start time, etc.
-    void *opaque;          /* user‑defined scratch pointer */
 } Procedure;
 
 // Initializes a procedure with the specified type and arguments. Will invoke the appropriate initialization function (turn_init, merge_init etc.) based on the procedure type.
@@ -87,7 +86,7 @@ void procedure_merge_cancel(Simulation* sim, Car* car, Procedure* procedure);
 
 // ---- PASS procedure ----
 
-// Initializes a PASS procedure. Arguments: timeout duration, desired pass speed, whether the car should merge back into original lane, distance buffer to determine if passed, whether to use preferred acceleration profile (0 or 1)
+// Initializes a PASS procedure. Arguments: target_car_id, timeout duration, desired pass speed, whether the car should merge back into original lane, distance buffer to determine if passed, whether to use preferred acceleration profile (0 or 1)
 ProcedureStatusCode procedure_pass_init(Simulation* sim, Car* car, Procedure* procedure, const double* args);
 
 // Advances a PASS procedure.
