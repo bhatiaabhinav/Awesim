@@ -6,7 +6,7 @@ static double render_fps = 0.0;     // Render FPS
 
 void render(Simulation *sim) {
     render_sim(renderer, sim, DRAW_LANES, DRAW_CARS, DRAW_TRACK_LINES, DRAW_TRAFFIC_LIGHTS,
-                DRAW_CAR_IDS, DRAW_LANE_IDS, DRAW_ROAD_NAMES, HUD_FONT_SIZE, false);
+                DRAW_CAR_IDS, DRAW_CAR_SPEEDS, DRAW_LANE_IDS, DRAW_ROAD_NAMES, HUD_FONT_SIZE, false);
 
     // Render FPS stats
     char fps_stats[24];

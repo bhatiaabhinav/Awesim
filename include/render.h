@@ -15,6 +15,7 @@ extern bool DRAW_CARS;
 extern bool DRAW_TRACK_LINES;
 extern bool DRAW_TRAFFIC_LIGHTS;
 extern bool DRAW_CAR_IDS;
+extern bool DRAW_CAR_SPEEDS;
 extern bool DRAW_LANE_IDS;
 extern bool DRAW_ROAD_NAMES;
 extern int HUD_FONT_SIZE;
@@ -90,10 +91,10 @@ void drawFilledInwardRoundedRect(SDL_Renderer *renderer, const int x, const int 
 void drawQuarterCircleOutline(SDL_Renderer *renderer, const int center_x, const int center_y, const int radius, const int quadrant, const int thickness);
 
 // Renders a car based on its current lane and position.
-void render_car(SDL_Renderer* renderer, const Car* car, Map* map, const bool paint_id);
+void render_car(SDL_Renderer* renderer, const Car* car, Map* map, const bool paint_id, const bool paint_speed);
 
 // Renders the entire simulation state: roads, cars, lanes, traffic.
-void render_sim(SDL_Renderer* renderer, Simulation* sim, const bool draw_lanes, const bool draw_cars, const bool draw_track_lines, const bool draw_traffic_lights, const bool draw_car_ids, const bool draw_lane_ids, const bool draw_road_names, int hud_font_size, const bool benchmark);
+void render_sim(SDL_Renderer* renderer, Simulation* sim, const bool draw_lanes, const bool draw_cars, const bool draw_track_lines, const bool draw_traffic_lights, const bool draw_car_ids, const bool draw_car_speeds, const bool draw_lane_ids, const bool draw_road_names, int hud_font_size, const bool benchmark);
 
 // thickLineRGBA(renderer, p1.x, p1.y, p2.x, p2.y, thickness, color.r, color.g, color.b, color.a);
 

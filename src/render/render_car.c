@@ -159,7 +159,7 @@ static void render_indicator(SDL_Renderer* renderer, const Car* car, CarIndictor
 }
 
 
-void render_car(SDL_Renderer* renderer, const Car* car, Map* map, const bool paint_id) {
+void render_car(SDL_Renderer* renderer, const Car* car, Map* map, const bool paint_id, const bool paint_speed) {
     CarPose pose = get_car_pose(car, map);
 
     if (CAMERA_CENTERED_ON_CAR_ENABLED && car->id == CAMERA_CENTERED_ON_CAR_ID) {
@@ -333,5 +333,22 @@ void render_car(SDL_Renderer* renderer, const Car* car, Map* map, const bool pai
         int text_x = car_center_screen.x;
         int text_y = car_center_screen.y;
         render_text(renderer, id_str, text_x, text_y, 255, 255, 255, 255, font_size, ALIGN_CENTER, false, car_id_texture_cache[car->id]);
+    }
+
+    // Render car speed
+    if (paint_speed) {
+        char speed_str[10];
+        snprintf(speed_str, sizeof(speed_str), "%.1f", to_mph(car->speed));
+        int font_size = (int)(meters(0.75) * SCALE);     // font size = 0.75 meter
+
+        // offset in direction of the back of the car
+        Vec2D speed_position = pose.position;
+        speed_position.x -= (length / 2 - 0.75) * cos_a; // 0.75 meters from the back of the car
+        speed_position.y -= (length / 2 - 0.75) * sin_a; // 0.75 meters from the back of the car
+
+        SDL_Point speed_position_screen = to_screen_coords(speed_position,  screen_width, screen_height);
+        int text_x = speed_position_screen.x;
+        int text_y = speed_position_screen.y;
+        render_text(renderer, speed_str, text_x, text_y, 255, 255, 255, 255, font_size, ALIGN_CENTER, false, NULL);
     }
 }
