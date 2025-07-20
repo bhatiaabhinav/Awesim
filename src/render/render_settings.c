@@ -10,6 +10,7 @@ bool DRAW_TRACK_LINES = false;         // Draw track lines (center lines on lane
 bool DRAW_TRAFFIC_LIGHTS = true;       // Draw traffic lights
 bool DRAW_CAR_IDS = true;              // Draw car IDs
 bool DRAW_LANE_IDS = true;             // Draw lane IDs
+bool DRAW_CAR_SPEEDS = false;          // Draw car speeds
 bool DRAW_ROAD_NAMES = true;           // Draw road names
 int HUD_FONT_SIZE = 24;                // Font size for HUD text
 

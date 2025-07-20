@@ -6,7 +6,7 @@
 #include <stdint.h>
 
 void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, const bool draw_cars,
-                const bool draw_track_lines, const bool draw_traffic_lights, const bool draw_car_ids, const bool draw_lane_ids, const bool draw_road_names, int hud_font_size, const bool benchmark)
+                const bool draw_track_lines, const bool draw_traffic_lights, const bool draw_car_ids, const bool draw_car_speeds, const bool draw_lane_ids, const bool draw_road_names, int hud_font_size, const bool benchmark)
 {
     Map *map = sim_get_map(sim);
 
@@ -182,7 +182,7 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
 
         for (int i = 0; i < sim->num_cars; i++) {
             Car* car = sim_get_car(sim, i);
-            render_car(renderer, car, map, draw_car_ids);
+            render_car(renderer, car, map, draw_car_ids, draw_car_speeds);
         }
 
         end = SDL_GetPerformanceCounter();
