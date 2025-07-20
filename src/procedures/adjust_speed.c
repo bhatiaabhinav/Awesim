@@ -61,8 +61,6 @@ ProcedureStatusCode procedure_adjust_speed_step(Simulation* sim, Car* car, Proce
     Seconds timeout_duration = procedure->state[3];
     bool use_preferred_accel_profile = procedure->state[4] > 0;
 
-    SituationalAwareness* situation = sim_get_situational_awareness(sim, car->id);
-
     // check success
     if (fabs(car->speed - target_speed) < tolerance) {
         LOG_DEBUG("Car %d: Adjust speed procedure completed successfully. Current speed: %.2f mph, Target speed: %.2f mph.",
