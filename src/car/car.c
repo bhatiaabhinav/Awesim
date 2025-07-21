@@ -5,10 +5,7 @@
 #include <stdio.h>
 
 
-int car_id_counter = 0; // Global ID counter for cars
-
 void car_init(Car* car, Dimensions dimensions, CarCapabilities capabilities, CarPersonality preferences) {
-    car->id = car_id_counter++;
     car->dimensions = dimensions;
     car->capabilities = capabilities;
     car->preferences = preferences;
