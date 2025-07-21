@@ -20,8 +20,8 @@ swig_source = ['bindings_wrap.c']
 
 # Platform-specific settings
 define_macros = []
-libraries = ['m']
-extra_compile_args = ['-Wall', '-Wunused-variable']
+libraries = []
+extra_compile_args = ['-Wall']
 if sys.platform == 'win32':
     define_macros = [('_WIN32_WINNT', '0x0A00')]
     libraries.append('ws2_32')

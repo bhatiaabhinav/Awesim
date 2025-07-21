@@ -3,7 +3,16 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h> // For isatty
+
+#ifdef _WIN32
+#include <io.h>
+#define FILENO _fileno
+#define ISATTY _isatty
+#else
+#include <unistd.h>
+#define FILENO fileno
+#define ISATTY isatty
+#endif
 
 static LogLevel current_log_level = LOG_DEBUG;
 static const char *trace_files = NULL;
@@ -12,6 +21,7 @@ static bool use_color = false;
 
 static const char *get_basename(const char *path) {
     const char *slash = strrchr(path, '/');
+    if (!slash) slash = strrchr(path, '\\');
     return slash ? slash + 1 : path;
 }
 
@@ -33,10 +43,10 @@ static void initialize_logging(void) {
         } else if (strcmp(color_str, "never") == 0) {
             use_color = false;
         } else if (strcmp(color_str, "auto") == 0) {
-            use_color = isatty(STDERR_FILENO);
+            use_color = ISATTY(FILENO(stderr));
         }
     } else {
-        use_color = isatty(STDERR_FILENO); // Default to auto
+        use_color = ISATTY(FILENO(stderr)); // Default to auto
     }
 
     is_initialized = true;
