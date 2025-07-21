@@ -1,2 +1,2 @@
 from .bindings import *
-# from .env import AwesimEnv
+from .gymenv import AwesimEnv
