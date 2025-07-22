@@ -14,6 +14,12 @@ ProcedureStatusCode procedure_init(Simulation* sim, Car* car, Procedure* procedu
         procedure->state[i] = 0.0; // Initialize state variables to zero
     }
     switch (procedure_type) {
+        case PROCEDURE_NO_OP:
+            status = procedure_no_op_init(sim, car, procedure, args);
+            break;
+        case PROCEDURE_STOP:
+            status = procedure_stop_init(sim, car, procedure, args);
+            break;
         case PROCEDURE_TURN:
             status = procedure_turn_init(sim, car, procedure, args);
             break;
@@ -70,6 +76,12 @@ ProcedureStatusCode procedure_step(Simulation* sim, Car* car, Procedure* procedu
     }
     ProcedureStatusCode status;
     switch (procedure->type) {
+        case PROCEDURE_NO_OP:
+            status = procedure_no_op_step(sim, car, procedure);
+            break;
+        case PROCEDURE_STOP:
+            status = procedure_stop_step(sim, car, procedure);
+            break;
         case PROCEDURE_TURN:
             status = procedure_turn_step(sim, car, procedure);
             break;
@@ -116,6 +128,12 @@ void procedure_cancel(Simulation* sim, Car* car, Procedure* procedure) {
     if (procedure->status == PROCEDURE_STATUS_INITIALIZED || procedure->status == PROCEDURE_STATUS_IN_PROGRESS) {
         LOG_INFO("Cancelling procedure %d for car %d.", procedure->type, car->id);
         switch (procedure->type) {
+            case PROCEDURE_NO_OP:
+                procedure_no_op_cancel(sim, car, procedure);
+                break;
+            case PROCEDURE_STOP:
+                procedure_stop_cancel(sim, car, procedure);
+                break;
             case PROCEDURE_TURN:
                 procedure_turn_cancel(sim, car, procedure);
                 break;
