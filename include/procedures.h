@@ -8,7 +8,7 @@
 
 typedef enum {
     PROCEDURE_NONE,         // No procedure going on. The car may be setting its control variables directly instead of through a high-level procedure.
-    PROCEDURE_TURN,
+    PROCEDURE_TURN,         // Turn at an intersection. The car may turn onto a right or left lane. It may use an optional break inidicator to decide to break during the turn. It does not use any yielding logic as seen in the NPC code.
     PROCEDURE_MERGE,        // Merge into a lane (which maybe an adjacent lane, highway merge, or highway exit). The car will try to merge into the indicated direction while maintaining a safe distance from the lead vehicle. Assumes no turns and lane changes other than the requested merge.
     PROCEDURE_PASS,         // Overtake another vehicle. The car will try to pass the target by first attempting to merge on the left lane, then accelerating to the desired speed. If allowed, the ego car will merge into the target lane.
     PROCEDURE_ADJUST_SPEED, // Adjust speed to a target speed. Procedure ends successfully when the speed is within a small epsilon of the target speed. Assumes no lane changes and turns and ignores traffic.
@@ -62,7 +62,7 @@ void procedure_cancel(Simulation* sim, Car* car, Procedure* procedure);
 
 // ---- TURN procedure ----
 
-// Initializes a TURN procedure.
+// Initializes a TURN procedure. Arguments: turn_indicator, timeout_duration, should_break, use_preferred_accel_profile
 ProcedureStatusCode procedure_turn_init(Simulation* sim, Car* car, Procedure* procedure, const double* args);
 
 // Advances a TURN procedure.
