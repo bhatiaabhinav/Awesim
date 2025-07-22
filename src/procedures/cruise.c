@@ -43,8 +43,8 @@ ProcedureStatusCode procedure_cruise_init(Simulation* sim, Car* car, Procedure* 
     procedure->state[4] = follow_distance_in_seconds;
     procedure->state[5] = use_preferred_accel_profile;
 
-    // Clear car's control variables
-    car_reset_all_control_variables(car);
+    // Clear car's acceleration, leave indicators and requests unchanged
+    car_set_acceleration(car, 0.0);
 
     LOG_DEBUG("Car %d: Cruise procedure initialized. Duration: %.2f seconds, Desired Speed: %.2f mph, Adaptive: %s, Follow Distance: %.2f seconds, Use Preferred Accel Profile: %d",
               car->id, duration, to_mph(cruise_speed_desired), is_cruise_adaptive ? "Yes" : "No", follow_distance_in_seconds, use_preferred_accel_profile);
