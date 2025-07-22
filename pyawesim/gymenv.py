@@ -15,25 +15,56 @@ class AwesimEnv(gym.Env):
         self.synchronized_sim_speedup = synchronized_sim_speedup
         self.should_render = should_render
 
-        self.action_space = spaces.Discrete(6) # speed inc 5, speed dec 5, merge left, merge right, cruise, cruise_adaptive
-        self.observation_space = spaces.Box(low=-1, high=1, shape=(7,), dtype=np.float32)  # position, speed (div 100 mph), lane_left_exists, lane_right_exists, next_car_exists, next_car_distance (normalized by current lane length), next_car_speed_div_100mph
         self.sim = sim_malloc()
-        # sim_init(self.sim)
-        # sim_connect_to_render_server(self.sim, "127.0.0.1", 4242)
+        sim_init(self.sim)
         sim_set_agent_enabled(self.sim, True)
-        self.agent: Car = sim_get_agent_car(self.sim)
+        self.agent: Car = sim_get_new_car(self.sim)
+        print(f"Agent car ID: {self.agent.id}")
+
+        self.action_space = spaces.Discrete(5) # speed inc 10, speed dec 5, merge left, merge right, cruise, cruise_adaptive  # TODO: removing adaptive for a while
+
+
+        # continuous action space to set desired speed, timeouts, merge direction, follow distance in seconds, whether to use adaptive cruise.
+        # desired speed ranges from [-10, 120] mph
+        # timeouts from [0.1, 10] seconds
+        # merge direction is either left (-1) or right (1)
+        # follow distance in seconds ranges from [0.5, 5]
+        # whether to use adaptive cruise is either 0 or 1
+        self.action_space_unnormalized = spaces.Box(
+            low=np.array([-10.0, 0.1, -1.0, 0.5, 0.0], dtype=np.float32),
+            high=np.array([120.0, 10.0, 1.0, 5.0, 1.0], dtype=np.float32),
+            dtype=np.float32
+        )
+        # Normalize the action space to [-1, 1] for each dimension. During step, we will unnormalize the action.
+        # This is useful for algorithms that expect actions in the range [-1, 1].
+        # self.action_space = spaces.Box(
+        #     low=-1.0,
+        #     high=1.0,
+        #     shape=self.action_space_unnormalized.shape,
+        #     dtype=np.float32
+        # )
+
+        n_state_factors = len(self._get_observation())
+        self.observation_space = spaces.Box(low=-10, high=10, shape=(n_state_factors,), dtype=np.float32)
 
     def _get_observation(self):
         situation = sim_get_situational_awareness(self.sim, 0)
         progress = car_get_lane_progress(self.agent)
-        speed_div_100 = to_mph(car_get_speed(self.agent)) / 100
+        speed = car_get_speed(self.agent)
+        speed_div_100mph = speed / from_mph(60)
         lane_left_exists = situation.lane_left is not None
         lane_right_exists = situation.lane_right is not None
         next_car_exists = situation.is_vehicle_ahead
-        lane_length = lane_get_length(situation.lane)
-        next_car_distance = situation.distance_to_lead_vehicle / lane_length if next_car_exists else 0.0
-        next_car_speed_div_100 = to_mph(car_get_speed(situation.lead_vehicle)) / 100 if next_car_exists else 0.0
-        return np.asarray([progress, speed_div_100, lane_left_exists, lane_right_exists, next_car_exists, next_car_distance, next_car_speed_div_100], dtype=np.float32)
+        next_car_distance_div_100m = situation.distance_to_lead_vehicle / 100 if next_car_exists else 0.0
+        speed_plus_eps = speed + 1e-6  if speed == 0 else speed
+        relative_speed = speed - car_get_speed(situation.lead_vehicle) if next_car_exists else 0.0
+        relative_speed_plus_eps = relative_speed + 1e-6 if relative_speed == 0 else relative_speed
+        next_car_distance_ttc_abs_div_10 = np.clip(situation.distance_to_lead_vehicle / (10 * speed_plus_eps), -10, 10) if next_car_exists else 0.0
+        next_car_distance_ttc_rel_div_10 = np.clip(situation.distance_to_lead_vehicle / (10 * relative_speed_plus_eps), -10, 10) if next_car_exists else 0.0
+        next_car_speed_div_100mph = car_get_speed(situation.lead_vehicle) / from_mph(60) if next_car_exists else 0.0
+
+
+        return np.asarray([speed_div_100mph, lane_left_exists, lane_right_exists, next_car_exists, next_car_distance_div_100m, next_car_distance_ttc_abs_div_10, next_car_distance_ttc_rel_div_10, next_car_speed_div_100mph], dtype=np.float32)
     
 
     def _get_reward(self):
@@ -88,8 +119,49 @@ class AwesimEnv(gym.Env):
         info = {}
         return obs, info
     
+
+    # def step_cont(self, action: Any) -> tuple[Any, float, bool, bool, dict[str, Any]]:
+    #     # Unnormalize the action
+    #     action = self._unnormalize_action(action)
+    #     situational_awareness_build(self.sim, self.agent.id)
+    #     situation = sim_get_situational_awareness(self.sim, self.agent.id)
+    #     ongoing_procedure = sim_get_ongoing_procedure(self.sim, self.agent.id)
+    #     status = PROCEDURE_STATUS_INIT_FAILED_REASON_NOT_IMPLEMENTED
+    #     speed_desired = from_mph(action[0])  # Desired speed in mph
+    #     timeout = action[1]  # Timeout in seconds
+
+    #     reward = 0
+    #     terminated = False
+    #     truncated = False
+
+    #     if status == PROCEDURE_STATUS_INITIALIZED:
+    #         while (status in [PROCEDURE_STATUS_INITIALIZED, PROCEDURE_STATUS_IN_PROGRESS] and not terminated and not truncated):
+    #             status = procedure_step(self.sim, self.agent, ongoing_procedure)
+    #             if status not in [PROCEDURE_STATUS_IN_PROGRESS, PROCEDURE_STATUS_COMPLETED]:
+    #                 # print(f"Agent {self.agent.id} failed to execute procedure. Status: {status}")
+    #                 break   # Note: Even though procedure_step will recommend some controls even when the procedure already succeeded, we do not apply it since we want the agent to be able to apply new procedures right away.
+    #             simulate(self.sim, self.decision_interval)
+    #             situational_awareness_build(self.sim, self.agent.id)
+    #             reward += self._get_reward() * self.decision_interval  # Accumulate reward over the decision interval
+    #             terminated = self._should_terminate()
+    #             truncated = self._should_truncate()
+
+    #     else:
+    #         # print(f"Agent {self.agent.id} failed to initialize procedure. Status: {status}")
+    #         car_reset_all_control_variables(self.agent)
+    #         simulate(self.sim, self.decision_interval)  # simulate the step even if procedure initialization failed
+    #         situational_awareness_build(self.sim, self.agent.id)
+    #         reward += self._get_reward() * self.decision_interval  # Accumulate reward over the decision interval
+    #         terminated = self._should_terminate()
+    #         truncated = self._should_truncate()
+
+    #     obs = self._get_observation()
+    #     info = {"status": status, "time": sim_get_time(self.sim)}
+        # return obs, reward, terminated, truncated, info
+
     def step(self, action: Any) -> tuple[Any, float, bool, bool, dict[str, Any]]:
         situational_awareness_build(self.sim, self.agent.id)
+        situation = sim_get_situational_awareness(self.sim, self.agent.id)
         ongoing_procedure = sim_get_ongoing_procedure(self.sim, self.agent.id)
         status = PROCEDURE_STATUS_INIT_FAILED_REASON_NOT_IMPLEMENTED
         if action == 0 or action == 1:
@@ -97,17 +169,28 @@ class AwesimEnv(gym.Env):
             speed_delta_direction = 1 if action == 0 else -1
             speed_delta = speed_delta_direction * speed_delta_mag
             # print(f"Initializing ADJUST_SPEED procedure with speed delta {to_mph(speed_delta)} mph...")
-            status = procedure_init(self.sim, self.agent, ongoing_procedure, PROCEDURE_ADJUST_SPEED, [car_get_speed(self.agent) + speed_delta, from_mph(0.5), 5.0, 1.0])  # Arguments: desired speed, tolerance, timeout duration, whether to use preferred acceleration profile (0 or 1)
+            status = procedure_init(self.sim, self.agent, ongoing_procedure, PROCEDURE_ADJUST_SPEED, [car_get_speed(self.agent) + speed_delta, from_mph(0.5), 5.0, 0.0])  # Arguments: desired speed, tolerance, timeout duration, whether to use preferred acceleration profile (0 or 1)
         elif action == 2 or action == 3:
             merge_dir = INDICATOR_LEFT if action == 2 else INDICATOR_RIGHT
-            speed = car_get_speed(self.agent)
-            # print(f"Initializing MERGE procedure with direction {merge_dir}...")
-            status = procedure_init(self.sim, self.agent, ongoing_procedure, PROCEDURE_MERGE, [float(merge_dir), 5.0, speed, 0.0, 2.0, 1.0])  # Arguments: CarIndicator direction (left/right), timeout_duration, desired cruise speed, whether cruise is adaptive, follow distance in seconds (if adaptive), whether to use preferred acceleration profile (0 or 1)
+            if merge_dir == INDICATOR_LEFT and not situation.lane_left:
+                # print(f"Car {self.agent.id} cannot merge left, lane does not exist.")
+                status = PROCEDURE_STATUS_INIT_FAILED_REASON_IMPOSSIBLE
+            elif merge_dir == INDICATOR_RIGHT and not situation.lane_right:
+                # print(f"Car {self.agent.id} cannot merge right, lane does not exist.")
+                status = PROCEDURE_STATUS_INIT_FAILED_REASON_IMPOSSIBLE
+            else:
+                speed = car_get_speed(self.agent)
+                if speed < 0:
+                    # print(f"Car {self.agent.id} cannot merge, speed is negative.")
+                    status = PROCEDURE_STATUS_INIT_FAILED_REASON_IMPOSSIBLE
+                else:
+                # print(f"Initializing MERGE procedure with direction {merge_dir}...")
+                    status = procedure_init(self.sim, self.agent, ongoing_procedure, PROCEDURE_MERGE, [float(merge_dir), 5.0, max(speed, from_mph(1)), 0.0, 2.0, 0.0])  # Arguments: CarIndicator direction (left/right), timeout_duration, desired cruise speed, whether cruise is adaptive, follow distance in seconds (if adaptive), whether to use preferred acceleration profile (0 or 1)
         elif action == 4 or action == 5:
             speed = car_get_speed(self.agent)
             adaptive = 1.0 if action == 5 else 0.0
             # print(f"Initializing CRUISE procedure with adaptive={adaptive} and speed={to_mph(speed)} mph...")
-            status = procedure_init(self.sim, self.agent, ongoing_procedure, PROCEDURE_CRUISE, [5.0, speed, adaptive, 3.0, 1.0])  # Arguments: duration, desired cruise speed, whether adaptive, follow duration in seconds (if adaptive), whether to use preferred acceleration profile (0 or 1)
+            status = procedure_init(self.sim, self.agent, ongoing_procedure, PROCEDURE_CRUISE, [5.0, max(speed, from_mph(0)), adaptive, 2.0, 0.0])  # Arguments: duration, desired cruise speed, whether adaptive, follow duration in seconds (if adaptive), whether to use preferred acceleration profile (0 or 1)
 
         reward = 0
         terminated = False
