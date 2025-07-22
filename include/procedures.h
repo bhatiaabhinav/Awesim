@@ -8,7 +8,9 @@
 
 typedef enum {
     PROCEDURE_NONE,         // No procedure going on. The car may be setting its control variables directly instead of through a high-level procedure.
-    PROCEDURE_TURN,
+    PROCEDURE_NO_OP,        // Apply zero acceleration and no indicators for some duration. Whether to leave indicators on or off can be specified.
+    PROCEDURE_STOP,         // Stop the car. Linear vs smooth braking can be specified.
+    PROCEDURE_TURN,         // Turn at an intersection. The car may turn onto a right or left lane. It may use an optional break inidicator to decide to break during the turn. It does not use any yielding logic as seen in the NPC code.
     PROCEDURE_MERGE,        // Merge into a lane (which maybe an adjacent lane, highway merge, or highway exit). The car will try to merge into the indicated direction while maintaining a safe distance from the lead vehicle. Assumes no turns and lane changes other than the requested merge.
     PROCEDURE_PASS,         // Overtake another vehicle. The car will try to pass the target by first attempting to merge on the left lane, then accelerating to the desired speed. If allowed, the ego car will merge into the target lane.
     PROCEDURE_ADJUST_SPEED, // Adjust speed to a target speed. Procedure ends successfully when the speed is within a small epsilon of the target speed. Assumes no lane changes and turns and ignores traffic.
@@ -59,10 +61,33 @@ void procedure_cancel(Simulation* sim, Car* car, Procedure* procedure);
 // ! THE FOLLOWING FUNCTIONS MUST *NOT* CHANGE `type` or `status` of the procedure. They should only manage the `state` variables of the procedure and return the appropriate status code for the function outcome.
 
 
+// ---- NO_OP procedure ----
+
+// Initializes a NO_OP procedure. Arguments: duration, whether to leave indicators on (0 or 1)
+ProcedureStatusCode procedure_no_op_init(Simulation* sim, Car* car, Procedure* procedure, const double* args);
+
+// Advances a NO_OP procedure.
+ProcedureStatusCode procedure_no_op_step(Simulation* sim, Car* car, Procedure* procedure);
+
+// Cancels a NO_OP procedure.
+void procedure_no_op_cancel(Simulation* sim, Car* car, Procedure* procedure);
+
+
+// ---- STOP procedure ----
+
+// Initializes a STOP procedure. Arguments: whether to use linear braking (0 = smooth or 1 = linear), timeout duration, whether to use preferred acceleration profile (0 or 1)
+ProcedureStatusCode procedure_stop_init(Simulation* sim, Car* car, Procedure* procedure, const double* args);
+
+// Advances a STOP procedure.
+ProcedureStatusCode procedure_stop_step(Simulation* sim, Car* car, Procedure* procedure);
+
+// Cancels a STOP procedure.
+void procedure_stop_cancel(Simulation* sim, Car* car, Procedure* procedure);
+
 
 // ---- TURN procedure ----
 
-// Initializes a TURN procedure.
+// Initializes a TURN procedure. Arguments: turn_indicator, timeout_duration, should_break, use_preferred_accel_profile
 ProcedureStatusCode procedure_turn_init(Simulation* sim, Car* car, Procedure* procedure, const double* args);
 
 // Advances a TURN procedure.

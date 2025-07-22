@@ -43,8 +43,8 @@ ProcedureStatusCode procedure_adjust_speed_init(Simulation* sim, Car* car, Proce
     procedure->state[3] = timeout_duration; // timeout duration
     procedure->state[4] = use_preferred_accel_profile; // use preferred acceleration profile
 
-    // Clear car's control variables
-    car_reset_all_control_variables(car);
+    // Clear car's acceleration, leave indicators and requests unchanged
+    car_set_acceleration(car, 0.0);
 
     LOG_DEBUG("Car %d: Adjust speed procedure initialized. Target speed: %.2f mph, Timeout: %.2f seconds, Use Preferred Accel Profile: %d",
               car->id, to_mph(target_speed), timeout_duration, use_preferred_accel_profile);
