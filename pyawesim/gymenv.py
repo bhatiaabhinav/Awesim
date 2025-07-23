@@ -29,18 +29,19 @@ class AwesimEnv(gym.Env):
         # Index 2: Whether to execute ADJUST_SPEED procedure (> 0 means yes)
         # Index 3: Whether to execute STOP procedure (> 0 means yes)
         # Index 4: Whether to execute CRUISE procedure (> 0 means yes). Ultimately, the selected procedure will be the one with the highest value.
-        # Index 5: Speed delta. -1 means -60mph, 0 means no change, 1 means +60mph. Final desired speed will be clamped between [-10mph, top_speed_mph].
-        # Index 6: Procedure duration: -1: 0.1, 0: 5 second, 1: 10 seconds.
-        # Index 7: Merge direction: <0 means left, >0 means right
-        # Index 8: Adaptive cruise: >0 means yes.
-        # Index 9: Follow distance in seconds (if adaptive cruise is enabled): -1: 0.1, 0: 3, 1: 6.0
-        # Index 10: Whether to use preferred acceleration profile, >0 means yes.
-        # Index 11: Whether to leave indicators on during NO_OP procedure, >0 means yes.
-        # Index 12: Whether to use linear braking for STOP procedure, >0 means yes, else smooth braking is used.
+        # Index 5: Whether to execute PASS procedure (> 0 means yes)
+        # Index 6: Speed delta. -1 means -60mph, 0 means no change, 1 means +60mph. Final desired speed will be clamped between [-10mph, top_speed_mph].
+        # Index 7: Procedure duration: -1: 0.1, 0: 5 second, 1: 10 seconds.
+        # Index 8: Merge direction: <0 means left, >0 means right
+        # Index 9: Adaptive cruise: >0 means yes.
+        # Index 10: Follow distance in seconds (if adaptive cruise is enabled): -1: 0.1, 0: 3, 1: 6.0
+        # Index 11: Whether to use preferred acceleration profile, >0 means yes.
+        # Index 12: Whether to leave indicators on during NO_OP procedure, >0 means yes.
+        # Index 13: Whether to use linear braking for STOP procedure, >0 means yes, else smooth braking is used.
         self.action_space = spaces.Box(
             low=-1.0,
             high=1.0,
-            shape=(13,),
+            shape=(14,),
             dtype=np.float32
         )
 
@@ -91,7 +92,7 @@ class AwesimEnv(gym.Env):
             distance_center_to_center = situation.distance_to_lead_vehicle
             distance_bumper_to_tail = distance_center_to_center - (car_get_length(self.agent) / 2 + car_get_length(situation.lead_vehicle) / 2)
             if distance_bumper_to_tail <= 0:
-                print(f"Agent {self.agent.id} crashed into lead vehicle #{situation.lead_vehicle.id} at distance {distance_bumper_to_tail}.")
+                # print(f"Agent {self.agent.id} crashed into lead vehicle #{situation.lead_vehicle.id} at distance {distance_bumper_to_tail}.")
                 return True
         return False
 
@@ -135,20 +136,21 @@ class AwesimEnv(gym.Env):
         adjust_speed_proc_logit = action[2]
         stop_proc_logit = action[3]
         cruise_proc_logit = action[4]
-        procedure_to_follow = np.argmax([no_op_proc_logit, merge_proc_logit, adjust_speed_proc_logit, stop_proc_logit, cruise_proc_logit])
+        pass_proc_logit = action[5]
+        procedure_to_follow = np.argmax([no_op_proc_logit, merge_proc_logit, adjust_speed_proc_logit, stop_proc_logit, cruise_proc_logit, pass_proc_logit])
         current_speed = car_get_speed(self.agent)
-        desired_speed = current_speed + (action[5] * from_mph(60))  # Scale action[5] to mph
+        desired_speed = current_speed + (action[6] * from_mph(60))  # Scale action[6] to mph
         top_speed = self.agent.capabilities.top_speed
         desired_speed = np.clip(desired_speed, -from_mph(10), top_speed)  # Clamp desired speed between [-10mph, top_speed_mph]
-        duration = (action[6] + 1) * 5.0  # Scale action[6] to [0, 10] seconds
+        duration = (action[7] + 1) * 5.0  # Scale action[7] to [0, 10] seconds
         duration = np.clip(duration, 0.1, 10.0)  # Clamp duration between [0.1s, 10s]
-        merge_dir = INDICATOR_LEFT if action[7] < 0 else INDICATOR_RIGHT
-        adaptive_cruise = 1.0 if action[8] > 0 else 0.0
-        follow_distance_seconds = (action[9] + 1) * 3.0  # Scale action[9] to [0, 6] seconds
+        merge_dir = INDICATOR_LEFT if action[8] < 0 else INDICATOR_RIGHT
+        adaptive_cruise = 1.0 if action[9] > 0 else 0.0
+        follow_distance_seconds = (action[10] + 1) * 3.0  # Scale action[10] to [0, 6] seconds
         follow_distance_seconds = np.clip(follow_distance_seconds, 0.1, 6.0)  # Clamp follow distance between [0.1s, 6s]
-        use_preferred_acceleration_profile = 1.0 if action[10] > 0 else 0.0
-        leave_indicators_on = 1.0 if action[11] > 0 else 0.0
-        use_linear_braking = 1.0 if action[12] > 0 else 0.0
+        use_preferred_acceleration_profile = 1.0 if action[11] > 0 else 0.0
+        leave_indicators_on = 1.0 if action[12] > 0 else 0.0
+        use_linear_braking = 1.0 if action[13] > 0 else 0.0
 
 
         if procedure_to_follow == 0:  # NO_OP
@@ -177,6 +179,17 @@ class AwesimEnv(gym.Env):
         elif procedure_to_follow == 4:  # CRUISE
             # print(f"Initializing CRUISE procedure with adaptive={adaptive_cruise} and speed={to_mph(desired_speed)} mph...")
             status = procedure_init(self.sim, self.agent, ongoing_procedure, PROCEDURE_CRUISE, [duration, max(desired_speed, from_mph(0)), adaptive_cruise, follow_distance_seconds, 0.0])
+        elif procedure_to_follow == 5:  # PASS
+            # print(f"Initializing PASS procedure with duration={duration} seconds...")
+            # check if there is a car ahead to pass
+            if not situation.is_vehicle_ahead or not situation.lane_left or current_speed < 0:
+                # print(f"Car {self.agent.id} cannot pass, no lead vehicle or no left lane or car is reversing.")
+                status = PROCEDURE_STATUS_INIT_FAILED_REASON_IMPOSSIBLE
+            else:
+                next_vehicle_speed = car_get_speed(situation.lead_vehicle)
+                # make our desired speed higher than the lead vehicle's speed
+                desired_speed = max(next_vehicle_speed + from_mph(5), desired_speed)  # Ensure we want to pass at least 5 mph faster than the lead vehicle
+                status = procedure_init(self.sim, self.agent, ongoing_procedure, PROCEDURE_PASS, [situation.lead_vehicle.id, duration, desired_speed, True, meters(10), use_preferred_acceleration_profile])  # Arguments: lead vehicle ID, duration, desired speed, whether to merge back after passing, merge distance buffer, whether to use preferred acceleration profile (0 or 1)
         else:
             # print(f"Invalid procedure_to_follow: {procedure_to_follow}")
             status = PROCEDURE_STATUS_INIT_FAILED_REASON_NOT_IMPLEMENTED
