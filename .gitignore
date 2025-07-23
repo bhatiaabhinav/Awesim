@@ -71,3 +71,5 @@ bin/
 env/
 
 *.log
+
+models/

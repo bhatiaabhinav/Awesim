@@ -70,7 +70,7 @@ else:
     assert len(action_noise_std) == n_actions, f"Action noise std should match number of actions: {len(action_noise_std)} vs {n_actions}"
 
     action_noise = NormalActionNoise(mean=np.zeros(n_actions), sigma=action_noise_std)
-    model = TD3("MlpPolicy", env, policy_kwargs=dict(net_arch=[128, 128], n_critics=2), learning_starts=1000, batch_size=128, learning_rate=0.0001, train_freq=1, action_noise=action_noise, verbose=1)
+    model = TD3("MlpPolicy", env, policy_kwargs=dict(net_arch=[128, 128], n_critics=2), learning_starts=1000, batch_size=128, learning_rate=0.0001, train_freq=1, action_noise=action_noise, verbose=1, device="cpu")
     
     # Save a checkpoint every 10000 steps
     checkpoint_callback = CheckpointCallback(
