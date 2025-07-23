@@ -40,43 +40,78 @@ CarIndictor lane_change_sample_possible(const SituationalAwareness* situation) {
     return possibles[chosen];
 }
 
-bool car_is_lane_change_dangerous(const Car* car, Simulation* sim, const SituationalAwareness* situation, CarIndictor lane_change_indicator) {
+Meters calculate_hypothetical_position_on_lane_change(const Car* car, const Lane* lane, const Lane* lane_target, Map* map) {
+    if (!car || !lane_target) return 0;
+
+    Lane* merges_into = lane_get_merge_into(lane, map);
+    Lane* exit_lane = lane_get_exit_lane(lane, map);
+    double my_progress = car_get_lane_progress(car);
+    Meters my_progress_m = car_get_lane_progress_meters(car);
+    double my_hypothetical_target_progress_m;
+    if (lane_target == merges_into) {
+        my_hypothetical_target_progress_m = my_progress_m + lane->merges_into_start * merges_into->length;
+    } else if (lane_target == exit_lane) {
+        my_hypothetical_target_progress_m = (my_progress - lane->exit_lane_start) * lane->length;
+    } else {
+        my_hypothetical_target_progress_m = my_progress * lane_target->length; // since this is just an adjacent lane on the same road, progress is the same
+    }
+    return my_hypothetical_target_progress_m;
+}
+
+bool car_is_lane_change_dangerous(Car* car, Simulation* sim, const SituationalAwareness* situation, CarIndictor lane_change_indicator) {
     const Lane* lane = situation->lane;
     const Lane* lane_target = situation->lane_target_for_indicator[lane_change_indicator];
     if (lane_target == lane) return false;      // no lane change
     if (lane_target == NULL) return true;       // Will fly off the road!
-    double my_progress = car_get_lane_progress(car);
-    double my_hypothetical_target_progress;
-    if (lane_target == situation->merges_into_lane) {
-        my_hypothetical_target_progress =  (lane->merges_into_start + my_progress);
-    } else if (lane_target == situation->exit_lane) {
-        my_hypothetical_target_progress = my_progress - lane->exit_lane_start;
-    } else {
-        my_hypothetical_target_progress = my_progress; // since this is just an adjant lane on the same road
-    }
-    Meters my_hypothetical_target_progress_m = lane_target->length * my_hypothetical_target_progress;
+
+    // TODO: Change this logic to use NearbyVehicles struct instead of finding cars on the lane.
+
     Meters car_half_length = car_get_length(car) / 2;
-    for (int i = 0; i < lane_target->num_cars; i++) {
-        const Car* other_car = lane_get_car(lane_target, sim, i);   // TODO: consider cars from the prev and next lanes of the target lane as well
-        if (other_car == car) continue; // skip self
-        Meters other_car_progress_m = car_get_lane_progress_meters(other_car);
+    // for (int i = 0; i < lane_target->num_cars; i++) {
+    //     const Car* other_car = lane_get_car(lane_target, sim, i);   // TODO: consider cars from the prev and next lanes of the target lane as well
+    //     if (other_car == car) continue; // skip self
+    //     Meters other_car_progress_m = car_get_lane_progress_meters(other_car);
         
-        if (other_car_progress_m > my_hypothetical_target_progress_m) {
-            // We are behind the other car
-            Meters target_gap = car_get_speed(car) * 3 + from_feet(2);       // 3 second rule + 2 feet buffer
-            target_gap += car_half_length + car_get_length(other_car) / 2;   // account for the lengths of both cars
-            if (other_car_progress_m - my_hypothetical_target_progress_m < target_gap) {
-                // We are too close to the other car
-                return true;
-            }
-        } else {
-            // We are ahead of the other car
-            Meters target_gap = car_get_speed(other_car) * 3 + from_feet(2);       // 3 second rule + 2 feet buffer
-            target_gap += car_half_length + car_get_length(other_car) / 2;   // account for the lengths of both cars
-            if (my_hypothetical_target_progress_m - other_car_progress_m < target_gap) {
-                // We are too close to the other car
-                return true;
-            }
+    //     if (other_car_progress_m > my_hypothetical_target_progress_m) {
+    //         // We are behind the other car
+    //         Meters target_gap = car_get_speed(car) * 3 + from_feet(2);       // 3 second rule + 2 feet buffer
+    //         target_gap += car_half_length + car_get_length(other_car) / 2;   // account for the lengths of both cars
+    //         if (other_car_progress_m - my_hypothetical_target_progress_m < target_gap) {
+    //             // We are too close to the other car
+    //             return true;
+    //         }
+    //     } else {
+    //         // We are ahead of the other car
+    //         Meters target_gap = car_get_speed(other_car) * 3 + from_feet(2);       // 3 second rule + 2 feet buffer
+    //         target_gap += car_half_length + car_get_length(other_car) / 2;   // account for the lengths of both cars
+    //         if (my_hypothetical_target_progress_m - other_car_progress_m < target_gap) {
+    //             // We are too close to the other car
+    //             return true;
+    //         }
+    //     }
+    // }
+
+    NearbyVehicle car_ahead = situation->nearby_vehicles.lane_change_front[lane_change_indicator];
+    NearbyVehicle car_behind = situation->nearby_vehicles.lane_change_rear[lane_change_indicator];
+    NearbyVehicle car_colliding = situation->nearby_vehicles.lane_change_colliding[lane_change_indicator];
+
+    if (car_colliding.car) {
+        return true; // there is a car in the target lane that is colliding with us
+    }
+    if (car_ahead.car) {
+        Meters target_gap = car_get_speed(car) * 3 + from_feet(2);       // 3 second rule + 2 feet buffer
+        target_gap += car_half_length + car_get_length(car_ahead.car) / 2;   // account for the lengths of both cars
+        if (car_ahead.distance < target_gap) {
+            // We are too close to the car ahead
+            return true;
+        }
+    }
+    if (car_behind.car) {
+        Meters target_gap = car_get_speed(car_behind.car) * 3 + from_feet(2);       // 3 second rule + 2 feet buffer
+        target_gap += car_half_length + car_get_length(car_behind.car) / 2;   // account for the lengths of both cars
+        if (car_behind.distance < target_gap) {
+            // We are too close to the car behind
+            return true;
         }
     }
     return false;
@@ -254,4 +289,79 @@ bool car_should_yield_at_intersection(const Car* self, Simulation* sim, const Si
         }
     }
     return false;
+}
+
+void nearby_vehicles_flatten(NearbyVehicles* nearby_vehicles, NearbyVehiclesFlattened* flattened, bool include_outgoing_and_incoming_lanes) {
+    int count = 0;
+
+    // Add vehicles from the front lane
+    for (int i = 0; i < 3; i++) {
+        NearbyVehicle v = nearby_vehicles->lane_change_front[i];
+        const Car* c = v.car;
+        CarId id = c ? c->id : ID_NULL;
+        flattened->car_ids[count] = id;
+        flattened->distances[count] = v.distance;
+        flattened->time_to_collisions[count] = v.time_to_collision;
+        flattened->time_headways[count] = v.time_headway;
+        count++;
+    }
+
+    // Add vehicles from the colliding lane
+    for (int i = 0; i < 3; i++) {
+        NearbyVehicle v = nearby_vehicles->lane_change_colliding[i];
+        const Car* c = v.car;
+        CarId id = c ? c->id : ID_NULL;
+        flattened->car_ids[count] = id;
+        flattened->distances[count] = v.distance;
+        flattened->time_to_collisions[count] = v.time_to_collision;
+        flattened->time_headways[count] = v.time_headway;
+        count++;
+    }
+
+    // Add vehicles from the rear lane
+    for (int i = 0; i < 3; i++) {
+        NearbyVehicle v = nearby_vehicles->lane_change_rear[i];
+        const Car* c = v.car;
+        CarId id = c ? c->id : ID_NULL;
+        flattened->car_ids[count] = id;
+        flattened->distances[count] = v.distance;
+        flattened->time_to_collisions[count] = v.time_to_collision;
+        flattened->time_headways[count] = v.time_headway;
+        count++;
+    }
+
+    if (include_outgoing_and_incoming_lanes) {
+
+        // Add vehicles from the outgoing lane
+        for (int i = 0; i < 3; i++) {
+            NearbyVehicle v = nearby_vehicles->turn_front[i];
+            const Car* c = v.car;
+            CarId id = c ? c->id : ID_NULL;
+            flattened->car_ids[count] = id;
+            flattened->distances[count] = v.distance;
+            flattened->time_to_collisions[count] = v.time_to_collision;
+            flattened->time_headways[count] = v.time_headway;
+            count++;
+        }
+
+        // Add vehicles from the incoming lanes
+        for (int i = 0; i < 3; i++) {
+            NearbyVehicle v = nearby_vehicles->merge_approaching[i];
+            const Car* c = v.car;
+            CarId id = c ? c->id : ID_NULL;
+            flattened->car_ids[count] = id;
+            flattened->distances[count] = v.distance;
+            flattened->time_to_collisions[count] = v.time_to_collision;
+            flattened->time_headways[count] = v.time_headway;
+            count++;
+        }
+    }
+
+    // Fill the rest with ID_NULL if we have less than 15 cars
+    for (; count < 15; count++) {
+        flattened->car_ids[count] = ID_NULL;
+        flattened->distances[count] = INFINITY;
+        flattened->time_to_collisions[count] = INFINITY;
+        flattened->time_headways[count] = INFINITY;
+    }
 }
