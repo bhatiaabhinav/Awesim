@@ -2,6 +2,7 @@
 
 #include "utils.h"
 #include "car.h"
+#include <math.h>
 
 // forward declarations
 typedef struct Simulation Simulation;
@@ -28,6 +29,68 @@ struct BrakingDistance {
     Meters preferred_smooth;   // Braking distance with preferred max braking using PD controller
 };
 typedef struct BrakingDistance BrakingDistance;
+
+
+// A vehicle near the ego vehicle, along with its distance, time to collision, and time headway.
+struct NearbyVehicle {
+    const Car* car;                 // Pointer to the nearby vehicle (NULL if none).
+    Meters distance;                // Center-to-center distance to the vehicle in meters.
+                                    // Positive value; for absent vehicles (car == NULL), set to INFINITY.
+    
+    Seconds time_to_collision;      // Time to collision (TTC) in seconds, considering relative speed and acceleration.
+                                    // Computed with bumper-to-bumper adjustment: subtract (ego_half_length + other_half_length) from distance.
+                                    // Formula (constant accel assumption):
+                                    //   Let rel_speed = other_speed - ego_speed (positive if closing).
+                                    //   Let rel_accel = other_accel - ego_accel (positive if closing faster).
+                                    //   If rel_accel != 0: Solve quadratic t = [-rel_speed + sqrt(rel_speed² + 2 * rel_accel * adj_distance)] / rel_accel
+                                    //     (take smallest positive root; use -root if discriminant positive but no +root).
+                                    //   If rel_accel == 0: t = adj_distance / rel_speed (if rel_speed > 0).
+                                    // Special cases:
+                                    //   - If no collision path (rel_speed <= 0 and rel_accel <= 0, or no positive real roots): INFINITY (safe, no threat).
+                                    //   - If already colliding/overlapping (adj_distance <= 0): 0 (imminent/ongoing).
+                                    //   - Negative values not used; clamp to 0 for passed/recoding cases.
+                                    // Informs reactive decisions: e.g., brake if TTC < 2s.
+    
+    Seconds time_headway;           // Time-based safe spacing metric in seconds (proactive headway).
+                                    // Direction-specific:
+                                    //   - For front/turn_front/colliding (ahead): bumper_distance / ego_speed (if ego_speed > 0; else INFINITY).
+                                    //     Models "3-second rule" for following; low value (<3s) means too close—slow down.
+                                    //   - For rear/lane_change_rear (behind): bumper_distance / other_speed (if other_speed > 0; else INFINITY).
+                                    //     Models tailgating risk; low value (<2s) means rear vehicle closing fast—accelerate or yield.
+                                    //   - For merge_approaching: Use relative speed if angled paths; simplify to bumper_distance / rel_closing_speed.
+                                    // Special cases: INFINITY if no vehicle or speed <= 0 (no risk).
+                                    // Assumes constant speeds for simplicity;
+};
+typedef struct NearbyVehicle NearbyVehicle;
+
+// Struct for vehicles near the ego, aiding lane/turn/merge decisions.
+// Arrays indexed by CarIndicator: [0] left, [1] straight, [2] right.
+// Fields are NULL/invalid if no vehicle (car == NULL; distances/TTC/headway = INFINITY).
+// "Front/rear" are closest non-colliding; "colliding" overlaps (TTC=0).
+// Populate in sim update loop; use for AI (e.g., RL inputs) and NPC behaviors.
+struct NearbyVehicles {
+    NearbyVehicle lane_change_front[3];      // Front vehicle in target lane for change/merge.
+    NearbyVehicle lane_change_colliding[3];  // Colliding vehicle during lane change (or current for straight).
+    NearbyVehicle lane_change_rear[3];       // Rear vehicle in target lane for change/merge.
+    NearbyVehicle turn_front[3];             // Front vehicle on outgoing path after turn.
+    NearbyVehicle merge_approaching[3];      // Approaching vehicle from incoming/merging lane.
+};
+typedef struct NearbyVehicles NearbyVehicles;
+
+
+// Useful for deep learning, where we want to flatten the NearbyVehicles struct
+struct NearbyVehiclesFlattened {
+    CarId car_ids[15];  // Array to hold extracted car IDs
+    Meters distances[15]; // Corresponding distances to the cars
+    Seconds time_to_collisions[15]; // Corresponding time to collisions
+    Seconds time_headways[15]; // Corresponding time headways
+    int count; // Number of cars extracted
+};
+
+typedef struct NearbyVehiclesFlattened NearbyVehiclesFlattened;
+
+void nearby_vehicles_flatten(NearbyVehicles* nearby_vehicles, NearbyVehiclesFlattened* flattened, bool include_outgoing_and_incoming_lanes);
+
 
 struct SituationalAwareness {
     bool is_valid;                          // Is this situational awareness valid? If false, all other fields should be ignored.
@@ -70,16 +133,13 @@ struct SituationalAwareness {
     
 
     // Surrounding Vehicles
-    bool is_vehicle_ahead;                 // Is there a vehicle ahead of us (on the same lane)
-    bool is_vehicle_behind;                // Is there a vehicle behind us (on the same lane)
-    const Car* lead_vehicle;               // Vehicle ahead in the same lane
-    const Car* following_vehicle;          // Vehicle behind in the same lane
+    bool is_vehicle_ahead;                 // Is there a vehicle ahead of us (see lead_vehicle)?
+    bool is_vehicle_behind;                // Is there a vehicle behind us (see following_vehicle)?
+    const Car* lead_vehicle;               // Vehicle ahead in the same lane. If none in the same lane, then the closest vehicle ahead in the next lane (straight outgoing).
+    const Car* following_vehicle;          // Vehicle behind in the same lane. If none in the same lane, then the closest vehicle behind in the prev lane (straight incoming).
     Meters distance_to_lead_vehicle;       // Distance to the lead vehicle
     Meters distance_to_following_vehicle;  // Distance to the following vehicle
-    // const Car* vehicle_left;               // Closest vehicle in the left lane   // TODO
-    // const Car* vehicle_right;              // Closest vehicle in the right lane  // TODO
-    // Meters distance_to_vehicle_left;       // Distance to the left vehicle       // TODO
-    // Meters distance_to_vehicle_right;      // Distance to the right vehicle      // TODO
+    NearbyVehicles nearby_vehicles;
     BrakingDistance braking_distance;
 
     // Some historical summarization
@@ -104,7 +164,12 @@ CarIndictor turn_sample_possible(const SituationalAwareness* situation);
 // sample a lane change intent that is feasible in terms of existence of such lanes
 CarIndictor lane_change_sample_possible(const SituationalAwareness* situation);
 
-bool car_is_lane_change_dangerous(const Car* car, Simulation* sim, const SituationalAwareness* situation, CarIndictor lane_change_indicator);
+// If you were to change lanes (or merge or exit), what would be the hypothetical position on the target lane? Assuming the target_lane is either an adjacent lane or a merge/exit lane adjacent to the current lane.
+Meters calculate_hypothetical_position_on_lane_change(const Car* car, const Lane* lane, const Lane* lane_target, Map* map);
+
+bool car_is_lane_change_dangerous(Car* car, Simulation* sim, const SituationalAwareness* situation, CarIndictor lane_change_indicator);
+
+
 
 // Compute the acceleration required to chase an *external* target position and speed. The function automatically accounts for the car's acceleration capabilities and preferences (is use_preferred_accel_profile is true). The overshoot buffer specifies the position error that the car will try its best to avoid by applying max capable braking. Use cases of this function include following a lead vehicle and coming to a stop at a target position.
 MetersPerSecondSquared car_compute_acceleration_chase_target(const Car* car, Meters position_target, MetersPerSecond speed_target, Meters position_target_overshoot_buffer, MetersPerSecond speed_limit, bool use_preferred_accel_profile);
