@@ -20,7 +20,7 @@ if load_path is not None:
     print(f"Loading model from {load_path}")
     model = SAC.load(load_path, env=env)
 else:
-    model = SAC("MlpPolicy", env, policy_kwargs=dict(net_arch=[128, 128]), learning_starts=1000, batch_size=256, learning_rate=0.0001, train_freq=1, verbose=1, device="cpu")
+    model = SAC("MlpPolicy", env, policy_kwargs=dict(net_arch=[128, 128]), learning_starts=1000, batch_size=256, learning_rate=0.0001, train_freq=1, verbose=1, device="cpu", tensorboard_log="./logs/sac_awesim_tensorboard/")
 
     # Save a checkpoint every 10000 steps
     checkpoint_callback = CheckpointCallback(
@@ -31,8 +31,8 @@ else:
         save_vecnormalize=False,
     )
 
-    model.learn(total_timesteps=1000_000, log_interval=4, callback=checkpoint_callback, progress_bar=True)
-    model.save("ddpg_awesim")
+    model.learn(total_timesteps=1000_000, log_interval=4, callback=checkpoint_callback, progress_bar=True, tb_log_name="demo_run", reset_num_timesteps=True)
+    model.save("sac_awesim")
 
 env.should_render = True
 env.synchronized = True
