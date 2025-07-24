@@ -50,23 +50,26 @@ class AwesimEnv(gym.Env):
 
     def _get_observation(self):
         situation = sim_get_situational_awareness(self.sim, 0)
-        progress = car_get_lane_progress(self.agent)
         speed = car_get_speed(self.agent)
-        speed_div_100mph = speed / from_mph(60)
-        lane_left_exists = situation.lane_left is not None
-        lane_right_exists = situation.lane_right is not None
-        next_car_exists = situation.is_vehicle_ahead
-        next_car_distance_div_100m = situation.distance_to_lead_vehicle / 100 if next_car_exists else 0.0
-        speed_plus_eps = speed + 1e-6  if speed == 0 else speed
-        relative_speed = speed - car_get_speed(situation.lead_vehicle) if next_car_exists else 0.0
-        relative_speed_plus_eps = relative_speed + 1e-6 if relative_speed == 0 else relative_speed
-        next_car_distance_ttc_abs_div_10 = np.clip(situation.distance_to_lead_vehicle / (10 * speed_plus_eps), -10, 10) if next_car_exists else 0.0
-        next_car_distance_ttc_rel_div_10 = np.clip(situation.distance_to_lead_vehicle / (10 * relative_speed_plus_eps), -10, 10) if next_car_exists else 0.0
-        next_car_speed_div_100mph = car_get_speed(situation.lead_vehicle) / from_mph(60) if next_car_exists else 0.0
+        left_possible = situation.is_lane_change_left_possible
+        right_possible = situation.is_lane_change_right_possible
+        flattened = NearbyVehiclesFlattened()
+        nearby_vehicles_flatten(situation.nearby_vehicles, flattened, False)
+        flattened_count = nearby_vehicles_flattened_get_count(flattened)
+        nearby_exists_flags = np.array([nearby_vehicles_flattened_get_car_id(flattened, i) != -1 for i in range(flattened_count)], dtype=np.float32)
+        nearby_distances = np.array([nearby_vehicles_flattened_get_distance(flattened, i) for i in range(flattened_count)], dtype=np.float32).clip(0, 1000.0)  # Clip distances to [0, 1000] meters
+        nearby_ttcs = np.array([nearby_vehicles_flattened_get_time_to_collision(flattened, i) for i in range(flattened_count)], dtype=np.float32).clip(0, 10.0)  # Clip TTC to [0, 10] seconds
+        nearby_thws = np.array([nearby_vehicles_flattened_get_time_headway(flattened, i) for i in range(flattened_count)], dtype=np.float32).clip(0, 10.0)  # Clip THW to [0, 10] seconds
 
-
-        return np.asarray([speed_div_100mph, lane_left_exists, lane_right_exists, next_car_exists, next_car_distance_div_100m, next_car_distance_ttc_abs_div_10, next_car_distance_ttc_rel_div_10, next_car_speed_div_100mph], dtype=np.float32)
-    
+        # concat all these:
+        obs = np.concatenate([
+            np.array([speed, left_possible, right_possible], dtype=np.float32),
+            nearby_distances / 100, # Normalize distances to [0, 10] by dividing by 100
+            nearby_exists_flags,    # Boolean flags indicating if a nearby vehicle exists
+            nearby_ttcs / 10,  # Normalize TTC to [0, 1] by dividing by 10
+            nearby_thws / 10   # Normalize THW to [0, 1] by dividing by 10
+        ])
+        return obs.astype(np.float32)
 
     def _get_reward(self):
         # if there is no lead vehicle, we want to encourage the agent to drive faster. If there is, we want the agent to maintain 3 seconds distance to the lead vehicle
