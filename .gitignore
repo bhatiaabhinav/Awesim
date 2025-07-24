@@ -71,3 +71,4 @@ bin/
 env/
 
 *.log
+map_info.txt

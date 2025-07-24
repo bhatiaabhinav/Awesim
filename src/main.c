@@ -35,6 +35,13 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
     awesim_setup(sim, city_width, num_cars, dt, initial_clock_reading, weather);
+    // Make a file to store map information
+    FILE* map_file = fopen("map_info.txt", "w");
+    if (map_file) {
+        map_print(sim_get_map(sim), map_file); // Print the map information to the file
+        fclose(map_file);
+        LOG_INFO("Map information saved to map_info.txt");
+    }
     sim_set_synchronized(sim, true, 1.0); // Enable synchronization with wall time at 1x speedup
 
     // Connect to render server

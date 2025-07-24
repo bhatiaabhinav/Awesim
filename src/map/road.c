@@ -270,6 +270,15 @@ Road* straight_road_split_at_and_update_connections(Road* road, Map* map, const 
         lane_set_merges_into(lane_second, lane_get_merge_into(lane, map), lane->merges_into_start, lane->merges_into_end);
         LOG_TRACE("Lane no. %d (id=%d) transferred merges (into %d from %.2f to %.2f)",
                   i, lane->id, lane_second->merges_into_id, lane_second->merges_into_start, lane_second->merges_into_end);
+        
+        // Update incoming connection of the lane connected to the original segment
+        Lane* lane_next_straight = lane_get_connection_straight(lane, map);
+        if (lane_next_straight) {
+            lane_set_connection_incoming_straight(lane_next_straight, lane_second);
+            LOG_TRACE("Incoming straight lane for lane id %d set to lane no. %d (id=%d)",
+                      lane_next_straight->id, i, lane->id);
+        }
+
         lane_set_connection_left(lane, NULL);
         lane_set_connection_right(lane, NULL);
         lane_set_connection_straight(lane, NULL);
