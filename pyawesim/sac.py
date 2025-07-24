@@ -9,7 +9,7 @@ from stable_baselines3.common.callbacks import CheckpointCallback
 from gymenv import AwesimEnv
 from bindings import *
 
-env = AwesimEnv(city_width=1000, num_cars=256, decision_interval=0.1)
+env = AwesimEnv(city_width=1000, num_cars=256, decision_interval=0.1, sim_duration=60 * 5)
 
 load_path = sys.argv[1] if len(sys.argv) > 1 else None
 if load_path is not None and not os.path.exists(load_path):
@@ -31,7 +31,7 @@ else:
         save_vecnormalize=False,
     )
 
-    model.learn(total_timesteps=2_000, log_interval=4, callback=checkpoint_callback, progress_bar=True, tb_log_name="nearby_vehicles_features", reset_num_timesteps=True)
+    model.learn(total_timesteps=1000_000, log_interval=4, callback=checkpoint_callback, progress_bar=True, tb_log_name="nearby_vehicles_rearcrash_nopass_fabsbugfix_5min", reset_num_timesteps=True)
     model.save("models/sac_awesim")
 
 env.should_render = True

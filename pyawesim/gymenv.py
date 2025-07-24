@@ -97,6 +97,13 @@ class AwesimEnv(gym.Env):
             if distance_bumper_to_tail <= 0:
                 # print(f"Agent {self.agent.id} crashed into lead vehicle #{situation.lead_vehicle.id} at distance {distance_bumper_to_tail}.")
                 return True
+        # detect crash with following vehicle
+        if situation.is_vehicle_behind:
+            distance_center_to_center = situation.distance_to_following_vehicle
+            distance_bumper_to_tail = distance_center_to_center - (car_get_length(self.agent) / 2 + car_get_length(situation.following_vehicle) / 2)
+            if distance_bumper_to_tail <= 0:
+                # print(f"Agent {self.agent.id} crashed into following vehicle #{situation.following_vehicle.id} at distance {distance_bumper_to_tail}.")
+                return True
         return False
 
     def _should_truncate(self):
@@ -140,7 +147,7 @@ class AwesimEnv(gym.Env):
         stop_proc_logit = action[3]
         cruise_proc_logit = action[4]
         pass_proc_logit = action[5]
-        procedure_to_follow = np.argmax([no_op_proc_logit, merge_proc_logit, adjust_speed_proc_logit, stop_proc_logit, cruise_proc_logit, pass_proc_logit])
+        procedure_to_follow = np.argmax([no_op_proc_logit, merge_proc_logit, adjust_speed_proc_logit, stop_proc_logit, cruise_proc_logit]) # TODO: temporarily removing pass_proc_logit
         current_speed = car_get_speed(self.agent)
         desired_speed = current_speed + (action[6] * from_mph(60))  # Scale action[6] to mph
         top_speed = self.agent.capabilities.top_speed
