@@ -71,4 +71,7 @@ bin/
 env/
 
 *.log
+
+models/
+logs/
 map_info.txt

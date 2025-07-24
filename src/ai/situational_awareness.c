@@ -34,7 +34,8 @@ static void _find_vehicle_behind_and_at_and_ahead_of_point(Simulation* sim, cons
             *car_ahead_out = car;   // this will keep getting overwritten until we find the first car ahead of the point.
             *car_ahead_distance_out = car_position - point;
         } else if (abs(car_position - point) <= car_half_length + at_buffer_half) {
-            *car_at_out = car;      // this will keep getting overwritten until we find the last car overlapping the at_buffer.
+            if (*car_at_out) { continue; } // We already have a car at, so we can skip this one.
+            *car_at_out = car;
             *car_at_distance_out = fabs(car_position - point);
         } else if (car_position + car_half_length < point - at_buffer_half) {
             *car_behind_out = car;
@@ -408,6 +409,11 @@ void situational_awareness_build(Simulation* sim, CarId car_id) {
     situation->nearby_vehicles.ahead[INDICATOR_NONE].distance = car_ahead_distance;
     situation->nearby_vehicles.behind[INDICATOR_NONE].car = car_behind;
     situation->nearby_vehicles.behind[INDICATOR_NONE].distance = car_behind_distance;
+    if (car_at == car) {
+        // If the car_at is the same as the current car, we should not consider it as colliding.
+        car_at = NULL;
+        car_at_distance = INFINITY;
+    }
     situation->nearby_vehicles.colliding[INDICATOR_NONE].car = car_at;
     situation->nearby_vehicles.colliding[INDICATOR_NONE].distance = car_at_distance;
     

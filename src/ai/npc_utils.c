@@ -333,3 +333,35 @@ void nearby_vehicles_flatten(NearbyVehicles* nearby_vehicles, NearbyVehiclesFlat
         flattened->time_headways[count] = INFINITY;
     }
 }
+
+CarId nearby_vehicles_flattened_get_car_id(const NearbyVehiclesFlattened* flattened, int index) {
+    if (index < 0 || index >= flattened->count) {
+        return ID_NULL; // Invalid index
+    }
+    return flattened->car_ids[index];
+}
+
+Meters nearby_vehicles_flattened_get_distance(const NearbyVehiclesFlattened* flattened, int index) {
+    if (index < 0 || index >= flattened->count) {
+        return INFINITY; // Invalid index
+    }
+    return flattened->distances[index];
+}
+
+Seconds nearby_vehicles_flattened_get_time_to_collision(const NearbyVehiclesFlattened* flattened, int index) {
+    if (index < 0 || index >= flattened->count) {
+        return INFINITY; // Invalid index
+    }
+    return flattened->time_to_collisions[index];
+}
+
+Seconds nearby_vehicles_flattened_get_time_headway(const NearbyVehiclesFlattened* flattened, int index) {
+    if (index < 0 || index >= flattened->count) {
+        return INFINITY; // Invalid index
+    }
+    return flattened->time_headways[index];
+}
+
+int nearby_vehicles_flattened_get_count(const NearbyVehiclesFlattened* flattened) {
+    return flattened->count;
+}
