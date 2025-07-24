@@ -61,6 +61,7 @@ struct CarPersonality {
     MetersPerSecond min_speed_offset;           // user is upset if car drives below speed limit + this offset. Exponential cost for driving slower than this.
     MetersPerSecond max_speed_offset;           // user is scared if car drives above speed limit + this offset. Exponential cost for driving faster than this.
     CarAccelProfile acceleration_profile;       // comfort, normal, eco, sport, aggressive.
+    Seconds time_headway;                // time headway preference. User is happy if the car maintains this time headway from the front vehicle. Cost = (time_headway - true_time_headway)^2.
 };
 typedef struct CarPersonality CarPersonality;
 

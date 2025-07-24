@@ -33,7 +33,7 @@ static void _find_vehicle_behind_and_at_and_ahead_of_point(Simulation* sim, cons
         if (point + at_buffer_half < car_position - car_half_length) {
             *car_ahead_out = car;   // this will keep getting overwritten until we find the first car ahead of the point.
             *car_ahead_distance_out = car_position - point;
-        } else if (abs(car_position - point) <= car_half_length + at_buffer_half) {
+        } else if (fabs(car_position - point) <= car_half_length + at_buffer_half) {
             if (*car_at_out) { continue; } // We already have a car at, so we can skip this one.
             *car_at_out = car;
             *car_at_distance_out = fabs(car_position - point);

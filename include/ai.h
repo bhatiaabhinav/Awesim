@@ -173,7 +173,7 @@ CarIndictor lane_change_sample_possible(const SituationalAwareness* situation);
 // If you were to change lanes (or merge or exit), what would be the hypothetical position on the target lane? Assuming the target_lane is either an adjacent lane or a merge/exit lane adjacent to the current lane.
 Meters calculate_hypothetical_position_on_lane_change(const Car* car, const Lane* lane, const Lane* lane_target, Map* map);
 
-bool car_is_lane_change_dangerous(Car* car, Simulation* sim, const SituationalAwareness* situation, CarIndictor lane_change_indicator);
+bool car_is_lane_change_dangerous(Car* car, Simulation* sim, const SituationalAwareness* situation, CarIndictor lane_change_indicator, Seconds time_headway_threshold);
 
 
 
