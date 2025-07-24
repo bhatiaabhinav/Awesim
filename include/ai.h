@@ -71,7 +71,7 @@ typedef struct NearbyVehicle NearbyVehicle;
 // Populate in sim update loop; use for RL inputs (state features) and NPC behaviors (rule-based or learned).
 struct NearbyVehicles {
     NearbyVehicle ahead[3];                 // Vehicle ahead in target lane for change/merge. If none, closest in next lane (straight outgoing).
-    NearbyVehicle colliding[3];             // Colliding vehicle during lane change (for indicator_none, it is the currently colliding vehicle).
+    NearbyVehicle colliding[3];             // Colliding vehicle during lane change (for indicator_none, it is the currently colliding vehicle). There may be multiple colliding vehicles, so the one furthest ahead is used. // TODO: is there a better way to handle this?
     NearbyVehicle behind[3];                // Vehicle behind in target lane for change/merge. If none, closest in prev lane (straight incoming).
     NearbyVehicle after_next_turn[3];              // First vehicle encountered on outgoing path after turn. Populated only if ego vehicle is the frontmost vehicle in the lane (and therefore, about to make a turn decision).
     NearbyVehicle incoming_from_previous_turn[3];  // Leading vehicle turning onto ego's lane. Populated only if ego vehicle is the last vehicle in ego's lane (and therefore, one of these vehicles will be the first to turn into ego's lane and tail the ego vehicle).
@@ -91,6 +91,11 @@ struct NearbyVehiclesFlattened {
 typedef struct NearbyVehiclesFlattened NearbyVehiclesFlattened;
 
 void nearby_vehicles_flatten(NearbyVehicles* nearby_vehicles, NearbyVehiclesFlattened* flattened, bool include_outgoing_and_incoming_lanes);
+CarId nearby_vehicles_flattened_get_car_id(const NearbyVehiclesFlattened* flattened, int index);
+Meters nearby_vehicles_flattened_get_distance(const NearbyVehiclesFlattened* flattened, int index);
+Seconds nearby_vehicles_flattened_get_time_to_collision(const NearbyVehiclesFlattened* flattened, int index);
+Seconds nearby_vehicles_flattened_get_time_headway(const NearbyVehiclesFlattened* flattened, int index);
+int nearby_vehicles_flattened_get_count(const NearbyVehiclesFlattened* flattened);
 
 
 struct SituationalAwareness {

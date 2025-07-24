@@ -187,9 +187,8 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
             if (highlighted_car) {
                 SituationalAwareness *situation = sim_get_situational_awareness(sim, highlighted_car->id);
                 if (situation) {
-                    if (!situation->is_valid) {
-                        situational_awareness_build(sim, highlighted_car->id);
-                    }
+                    situation->is_valid = false; // situational awareness has lots of pointers inside, which cannot be copied across processes (remember rendering happens in a separate process than the simulation and the sim state is communicated over tcp), so we need to rebuild it.
+                    situational_awareness_build(sim, highlighted_car->id);
                     nearby_vehicles_flatten(&situation->nearby_vehicles, &HIGHLIGHTED_NEARBY_VEHICLES, true);
                 }
             }
