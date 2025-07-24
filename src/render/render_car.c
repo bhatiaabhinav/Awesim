@@ -7,11 +7,22 @@
 #include <stdint.h>
 
 SDL_Texture* car_id_texture_cache[MAX_CARS_IN_SIMULATION][MAX_FONT_SIZE] = {{NULL}};
+NearbyVehiclesFlattened HIGHLIGHTED_NEARBY_VEHICLES;
 
 static bool should_highlight_car(const Car* car) {
     // Check if the car ID is in the highlighted cars array
     for (int i = 0; HIGHLIGHTED_CARS[i] != ID_NULL; i++) {
         if (HIGHLIGHTED_CARS[i] == car->id) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool should_highlight_as_a_nearby_vehicle(const Car* car) {
+    // Check if it in HIGHLIGHTED_NEARBY_VEHICLES.car_ids array
+    for (int i = 0; i < HIGHLIGHTED_NEARBY_VEHICLES.count; i++) {
+        if (HIGHLIGHTED_NEARBY_VEHICLES.car_ids[i] == car->id) {
             return true;
         }
     }
@@ -205,7 +216,12 @@ void render_car(SDL_Renderer* renderer, const Car* car, Map* map, const bool pai
         vx[i] = (Sint16)screen_corners[i].x;
         vy[i] = (Sint16)screen_corners[i].y;
     }
-    SDL_Color car_color = should_highlight_car(car) ? HIGHLIGHTED_CAR_COLOR : CAR_COLOR;
+    SDL_Color car_color = CAR_COLOR;
+    if (should_highlight_car(car)) {
+        car_color = HIGHLIGHTED_CAR_COLOR;
+    } else if (should_highlight_as_a_nearby_vehicle(car)) {
+        car_color = HIGHLIGHTED_NEARBY_VEHICLES_COLOR;
+    }
     filledPolygonRGBA_ignore_if_outside_screen(renderer, vx, vy, 4, car_color.r, car_color.g, car_color.b, car_color.a);
     polygonRGBA_ignore_if_outside_screen(renderer, vx, vy, 4, car_color.r, car_color.g, car_color.b, 255);
 

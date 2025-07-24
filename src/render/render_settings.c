@@ -10,7 +10,7 @@ bool DRAW_TRACK_LINES = false;         // Draw track lines (center lines on lane
 bool DRAW_TRAFFIC_LIGHTS = true;       // Draw traffic lights
 bool DRAW_CAR_IDS = true;              // Draw car IDs
 bool DRAW_LANE_IDS = true;             // Draw lane IDs
-bool DRAW_CAR_SPEEDS = false;          // Draw car speeds
+bool DRAW_CAR_SPEEDS = true;          // Draw car speeds
 bool DRAW_ROAD_NAMES = true;           // Draw road names
 int HUD_FONT_SIZE = 24;                // Font size for HUD text
 
@@ -28,6 +28,7 @@ const LaneId HIGHLIGHTED_LANES[] = {
 };
 
 SDL_Color HIGHLIGHTED_CAR_COLOR = {0, 0, 255, 255}; // Blue color for highlighted cars
+SDL_Color HIGHLIGHTED_NEARBY_VEHICLES_COLOR = {139, 0, 0, 255}; // Dark red
 SDL_Color HIGHLIGHTED_LANE_COLOR = {192, 192, 192, 255}; // Light gray color for highlighted lanes
 
 const char* FONT_PATH = "assets/fonts/FreeSans.ttf"; // Default font path

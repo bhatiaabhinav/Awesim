@@ -24,6 +24,7 @@ extern bool CAMERA_CENTERED_ON_CAR_ENABLED;
 extern const CarId HIGHLIGHTED_CARS[];
 extern const LaneId HIGHLIGHTED_LANES[];
 extern SDL_Color HIGHLIGHTED_CAR_COLOR; // Color for highlighted cars
+extern SDL_Color HIGHLIGHTED_NEARBY_VEHICLES_COLOR; // Color for nearby vehicles of the first highlighted car
 extern SDL_Color HIGHLIGHTED_LANE_COLOR; // Color for highlighted lanes
 extern const char* FONT_PATH;
 
@@ -57,6 +58,7 @@ extern SDL_Texture* road_name_texture_cache[MAX_NUM_ROADS][MAX_FONT_SIZE];
 extern SDL_Texture* intersection_name_texture_cache[MAX_NUM_INTERSECTIONS][MAX_FONT_SIZE];
 extern SDL_Texture* lane_id_texture_cache[MAX_NUM_LANES][MAX_FONT_SIZE];
 extern SDL_Texture* car_id_texture_cache[MAX_CARS_IN_SIMULATION][MAX_FONT_SIZE];
+extern NearbyVehiclesFlattened HIGHLIGHTED_NEARBY_VEHICLES;
 
 bool init_sdl();
 void cleanup_sdl();

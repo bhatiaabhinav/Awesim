@@ -180,6 +180,21 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
     if (draw_cars) {
         start = SDL_GetPerformanceCounter();
 
+        // for the first highlighted car, extract its nearby vehicles
+        HIGHLIGHTED_NEARBY_VEHICLES.count = 0; // by default, no nearby vehicles
+        if (HIGHLIGHTED_CARS[0] != -1) {
+            Car *highlighted_car = sim_get_car(sim, HIGHLIGHTED_CARS[0]);
+            if (highlighted_car) {
+                SituationalAwareness *situation = sim_get_situational_awareness(sim, highlighted_car->id);
+                if (situation) {
+                    if (!situation->is_valid) {
+                        situational_awareness_build(sim, highlighted_car->id);
+                    }
+                    nearby_vehicles_flatten(&situation->nearby_vehicles, &HIGHLIGHTED_NEARBY_VEHICLES, true);
+                }
+            }
+        }
+
         for (int i = 0; i < sim->num_cars; i++) {
             Car* car = sim_get_car(sim, i);
             render_car(renderer, car, map, draw_car_ids, draw_car_speeds);
