@@ -58,7 +58,7 @@ Meters calculate_hypothetical_position_on_lane_change(const Car* car, const Lane
     return my_hypothetical_target_progress_m;
 }
 
-bool car_is_lane_change_dangerous(Car* car, Simulation* sim, const SituationalAwareness* situation, CarIndictor lane_change_indicator) {
+bool car_is_lane_change_dangerous(Car* car, Simulation* sim, const SituationalAwareness* situation, CarIndictor lane_change_indicator, Seconds time_headway_threshold) {
     const Lane* lane = situation->lane;
     const Lane* lane_target = situation->lane_target_for_indicator[lane_change_indicator];
     if (lane_target == lane) return false;      // no lane change
@@ -67,16 +67,15 @@ bool car_is_lane_change_dangerous(Car* car, Simulation* sim, const SituationalAw
     NearbyVehicle car_ahead = situation->nearby_vehicles.ahead[lane_change_indicator];
     NearbyVehicle car_behind = situation->nearby_vehicles.behind[lane_change_indicator];
     NearbyVehicle car_colliding = situation->nearby_vehicles.colliding[lane_change_indicator];
-    Seconds desired_time_headway = 3.0; // 3 second rule  // TODO: make this a parameter to this function, based on preferences of a car.
 
     if (car_colliding.car) {
         return true; // there is a car in the target lane that is colliding with us
     }
-    if (car_ahead.car && car_ahead.time_headway < desired_time_headway) {
+    if (car_ahead.car && car_ahead.time_headway < time_headway_threshold) {
         // We will be too close to the car ahead
         return true;
     }
-    if (car_behind.car && car_behind.time_headway < desired_time_headway) {
+    if (car_behind.car && car_behind.time_headway < time_headway_threshold) {
         // We will be too close to the car behind
         return true;
     }

@@ -100,7 +100,7 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
     }
 
     // cancel lane change if it is dangerous
-    if (car_is_lane_change_dangerous(self, sim, situation, lane_change_indicator)) {
+    if (car_is_lane_change_dangerous(self, sim, situation, lane_change_indicator, self->preferences.time_headway)) {
         indicate_only = true; // we will just indicate the lane change, but not request it
         // keep the indicator as it is, but do not request the lane change
         // printf("Lane change is dangerous.\n");
@@ -111,10 +111,9 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
     
     if (situation->is_vehicle_ahead) {
         // printf("1. Lead vehicle detected\n");
-        // Decide how much distance to maintain. Let's make it "3-second rule" for now.
+        // Decide how much distance to maintain. Depends on preferred time headway.
         // TODO: For worse conditions, it should be higher.
-        // TODO: Incorporate preferences.
-        Meters target_distance_from_next_car = fmax(car_speed, 0) * 3 + from_feet(3);
+        Meters target_distance_from_next_car = fmax(car_speed, 0) * self->preferences.time_headway + from_feet(3);
         Meters car_lengths_offset = car_half_length + car_get_length(situation->lead_vehicle) / 2;
         target_distance_from_next_car += car_lengths_offset;
         position_target = car_position + situation->distance_to_lead_vehicle - target_distance_from_next_car;

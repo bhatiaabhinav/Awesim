@@ -29,6 +29,7 @@ CarPersonality preferences_sample_random(void) {
     p.min_speed_offset = rand_uniform(from_mph(-20), from_mph(-10));
     p.max_speed_offset = rand_uniform(from_mph(10), from_mph(20));
     p.acceleration_profile = car_accel_profile_get_random_preference_preset();
+    p.time_headway = rand_uniform(2.0, 4.0);
     return p;
 }
 
