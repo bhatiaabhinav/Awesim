@@ -64,55 +64,21 @@ bool car_is_lane_change_dangerous(Car* car, Simulation* sim, const SituationalAw
     if (lane_target == lane) return false;      // no lane change
     if (lane_target == NULL) return true;       // Will fly off the road!
 
-    // TODO: Change this logic to use NearbyVehicles struct instead of finding cars on the lane.
-
-    Meters car_half_length = car_get_length(car) / 2;
-    // for (int i = 0; i < lane_target->num_cars; i++) {
-    //     const Car* other_car = lane_get_car(lane_target, sim, i);   // TODO: consider cars from the prev and next lanes of the target lane as well
-    //     if (other_car == car) continue; // skip self
-    //     Meters other_car_progress_m = car_get_lane_progress_meters(other_car);
-        
-    //     if (other_car_progress_m > my_hypothetical_target_progress_m) {
-    //         // We are behind the other car
-    //         Meters target_gap = car_get_speed(car) * 3 + from_feet(2);       // 3 second rule + 2 feet buffer
-    //         target_gap += car_half_length + car_get_length(other_car) / 2;   // account for the lengths of both cars
-    //         if (other_car_progress_m - my_hypothetical_target_progress_m < target_gap) {
-    //             // We are too close to the other car
-    //             return true;
-    //         }
-    //     } else {
-    //         // We are ahead of the other car
-    //         Meters target_gap = car_get_speed(other_car) * 3 + from_feet(2);       // 3 second rule + 2 feet buffer
-    //         target_gap += car_half_length + car_get_length(other_car) / 2;   // account for the lengths of both cars
-    //         if (my_hypothetical_target_progress_m - other_car_progress_m < target_gap) {
-    //             // We are too close to the other car
-    //             return true;
-    //         }
-    //     }
-    // }
-
-    NearbyVehicle car_ahead = situation->nearby_vehicles.lane_change_front[lane_change_indicator];
-    NearbyVehicle car_behind = situation->nearby_vehicles.lane_change_rear[lane_change_indicator];
-    NearbyVehicle car_colliding = situation->nearby_vehicles.lane_change_colliding[lane_change_indicator];
+    NearbyVehicle car_ahead = situation->nearby_vehicles.ahead[lane_change_indicator];
+    NearbyVehicle car_behind = situation->nearby_vehicles.behind[lane_change_indicator];
+    NearbyVehicle car_colliding = situation->nearby_vehicles.colliding[lane_change_indicator];
+    Seconds desired_time_headway = 3.0; // 3 second rule  // TODO: make this a parameter to this function, based on preferences of a car.
 
     if (car_colliding.car) {
         return true; // there is a car in the target lane that is colliding with us
     }
-    if (car_ahead.car) {
-        Meters target_gap = car_get_speed(car) * 3 + from_feet(2);       // 3 second rule + 2 feet buffer
-        target_gap += car_half_length + car_get_length(car_ahead.car) / 2;   // account for the lengths of both cars
-        if (car_ahead.distance < target_gap) {
-            // We are too close to the car ahead
-            return true;
-        }
+    if (car_ahead.car && car_ahead.time_headway < desired_time_headway) {
+        // We will be too close to the car ahead
+        return true;
     }
-    if (car_behind.car) {
-        Meters target_gap = car_get_speed(car_behind.car) * 3 + from_feet(2);       // 3 second rule + 2 feet buffer
-        target_gap += car_half_length + car_get_length(car_behind.car) / 2;   // account for the lengths of both cars
-        if (car_behind.distance < target_gap) {
-            // We are too close to the car behind
-            return true;
-        }
+    if (car_behind.car && car_behind.time_headway < desired_time_headway) {
+        // We will be too close to the car behind
+        return true;
     }
     return false;
 }
@@ -296,7 +262,7 @@ void nearby_vehicles_flatten(NearbyVehicles* nearby_vehicles, NearbyVehiclesFlat
 
     // Add vehicles from the front lane
     for (int i = 0; i < 3; i++) {
-        NearbyVehicle v = nearby_vehicles->lane_change_front[i];
+        NearbyVehicle v = nearby_vehicles->ahead[i];
         const Car* c = v.car;
         CarId id = c ? c->id : ID_NULL;
         flattened->car_ids[count] = id;
@@ -308,7 +274,7 @@ void nearby_vehicles_flatten(NearbyVehicles* nearby_vehicles, NearbyVehiclesFlat
 
     // Add vehicles from the colliding lane
     for (int i = 0; i < 3; i++) {
-        NearbyVehicle v = nearby_vehicles->lane_change_colliding[i];
+        NearbyVehicle v = nearby_vehicles->colliding[i];
         const Car* c = v.car;
         CarId id = c ? c->id : ID_NULL;
         flattened->car_ids[count] = id;
@@ -320,7 +286,7 @@ void nearby_vehicles_flatten(NearbyVehicles* nearby_vehicles, NearbyVehiclesFlat
 
     // Add vehicles from the rear lane
     for (int i = 0; i < 3; i++) {
-        NearbyVehicle v = nearby_vehicles->lane_change_rear[i];
+        NearbyVehicle v = nearby_vehicles->behind[i];
         const Car* c = v.car;
         CarId id = c ? c->id : ID_NULL;
         flattened->car_ids[count] = id;
@@ -334,7 +300,7 @@ void nearby_vehicles_flatten(NearbyVehicles* nearby_vehicles, NearbyVehiclesFlat
 
         // Add vehicles from the outgoing lane
         for (int i = 0; i < 3; i++) {
-            NearbyVehicle v = nearby_vehicles->turn_front[i];
+            NearbyVehicle v = nearby_vehicles->after_next_turn[i];
             const Car* c = v.car;
             CarId id = c ? c->id : ID_NULL;
             flattened->car_ids[count] = id;
@@ -346,7 +312,7 @@ void nearby_vehicles_flatten(NearbyVehicles* nearby_vehicles, NearbyVehiclesFlat
 
         // Add vehicles from the incoming lanes
         for (int i = 0; i < 3; i++) {
-            NearbyVehicle v = nearby_vehicles->merge_approaching[i];
+            NearbyVehicle v = nearby_vehicles->incoming_from_previous_turn[i];
             const Car* c = v.car;
             CarId id = c ? c->id : ID_NULL;
             flattened->car_ids[count] = id;
@@ -356,6 +322,8 @@ void nearby_vehicles_flatten(NearbyVehicles* nearby_vehicles, NearbyVehiclesFlat
             count++;
         }
     }
+    
+    flattened->count = count;
 
     // Fill the rest with ID_NULL if we have less than 15 cars
     for (; count < 15; count++) {

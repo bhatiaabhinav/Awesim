@@ -135,3 +135,128 @@ Intersection* map_get_intersections(Map* self) {
 int map_get_num_intersections(const Map* self) {
     return self->num_intersections;
 }
+
+void map_print(Map* self, FILE* file) {
+    // First print all lanes, their properties, their incoming & outgoing connections, what roads they belong to, and what intersections they are at.
+    fprintf(file, "Map Information:\n\n");
+    fprintf(file, "Total Lanes: %d\n", self->num_lanes);
+    for (int i = 0; i < self->num_lanes; i++) {
+        Lane* lane = map_get_lane(self, i);
+        fprintf(file, "Lane %d: Name: %s, Type: %d, Direction: %d, Width: %.2f m, Speed Limit: %.2f m/s, Grip: %.2f, Length: %.2f m\n",
+                lane->id,
+                lane->name,
+                lane->type,
+                lane->direction,
+                lane->width,
+                lane->speed_limit,
+                lane->grip,
+                lane->length);
+        fprintf(file, "  Start Point: (%.2f, %.2f), End Point: (%.2f, %.2f), Mid Point: (%.2f, %.2f), Center: (%.2f, %.2f)\n",
+                lane->start_point.x, lane->start_point.y,
+                lane->end_point.x, lane->end_point.y,
+                lane->mid_point.x, lane->mid_point.y,
+                lane->center.x, lane->center.y);
+        fprintf(file, "  Radius: %.2f m, Start Angle: %.2f rad, End Angle: %.2f rad, Quadrant: %d\n",
+                lane->radius,
+                lane->start_angle,
+                lane->end_angle,
+                lane->quadrant);
+        fprintf(file, "  Road ID: %d, Intersection ID: %d, Is at Intersection: %s\n",
+                lane->road_id,
+                lane->intersection_id,
+                lane->is_at_intersection ? "Yes" : "No");
+        fprintf(file, "  Connections: Incoming Left: %d, Incoming Straight: %d, Incoming Right: %d\n",
+                lane->connections_incoming[0],
+                lane->connections_incoming[1],
+                lane->connections_incoming[2]);
+        fprintf(file, "  Connections: Left: %d, Straight: %d, Right: %d\n",
+                lane->connections[0],
+                lane->connections[1],
+                lane->connections[2]);
+        fprintf(file, "  Adjacents: Left: %d, Right: %d\n",
+                lane->adjacents[0],
+                lane->adjacents[1]);
+        fprintf(file, "  Merges Into: Lane ID: %d, Start: %.2f, End: %.2f\n",
+                lane->merges_into_id,
+                lane->merges_into_start,
+                lane->merges_into_end);
+        fprintf(file, "  Exit Lane: Lane ID: %d, Start: %.2f, End: %.2f\n",
+                lane->exit_lane_id,
+                lane->exit_lane_start,
+                lane->exit_lane_end);
+        fprintf(file, "  Cars in Lane: ");
+        for (int j = 0; j < lane->num_cars; j++) {
+            fprintf(file, "%d ", lane->cars_ids[j]);
+        }
+        fprintf(file, "\n");
+    }
+    fprintf(file, "\n");
+    // Now print all roads, their properties, and the lanes they contain.
+    fprintf(file, "Total Roads: %d\n", self->num_roads);
+    for (int i = 0; i < self->num_roads; i++) {
+        Road* road = map_get_road(self, i);
+        fprintf(file, "Road %d: Name: %s, Type: %d, Direction: %d, Speed Limit: %.2f m/s, Grip: %.2f, Lane Width: %.2f m, Length: %.2f m, Width: %.2f m\n",
+                road->id,
+                road->name,
+                road->type,
+                road->direction,
+                road->speed_limit,
+                road->grip,
+                road->lane_width,
+                road->length,
+                road->width);
+        fprintf(file, "  Start Point: (%.2f, %.2f), End Point: (%.2f, %.2f), Mid Point: (%.2f, %.2f), Center: (%.2f, %.2f)\n",
+                road->start_point.x, road->start_point.y,
+                road->end_point.x, road->end_point.y,
+                road->mid_point.x, road->mid_point.y,
+                road->center.x, road->center.y);
+        fprintf(file, "  Radius: %.2f m, Start Angle: %.2f rad, End Angle: %.2f rad, Quadrant: %d\n",
+                road->radius,
+                road->start_angle,
+                road->end_angle,
+                road->quadrant);
+        fprintf(file, "  Road From ID: %d, Road To ID: %d\n",
+                road->road_from_id,
+                road->road_to_id);
+        fprintf(file, "  Lanes: ");
+        for (int j = 0; j < road->num_lanes; j++) {
+            fprintf(file, "%d ", road->lane_ids[j]);
+        }
+        fprintf(file, "\n");
+    }
+    fprintf(file, "\n");
+    // Finally, print all intersections, their properties, lanes they contain, and the roads they connect.
+    fprintf(file, "Total Intersections: %d\n", self->num_intersections);
+    for (int i = 0; i < self->num_intersections; i++) {
+        Intersection* intersection = map_get_intersection(self, i);
+        fprintf(file, "Intersection %d: Name: %s, Center: (%.2f, %.2f), Dimensions: %.2f x %.2f, Lane Width: %.2f m, Grip: %.2f, Speed limit: %.2f m/s, Turn radius: %.2f m, Left lane turns left only: %s, Right lane turns right only: %s\n",
+                intersection->id,
+                intersection->name,
+                intersection->center.x, intersection->center.y,
+                intersection->dimensions.x, intersection->dimensions.y,
+                intersection->lane_width,
+                intersection->grip,
+                intersection->speed_limit,
+                intersection->turn_radius,
+                intersection->left_lane_turns_left_only ? "Yes" : "No",
+                intersection->right_lane_turns_right_only ? "Yes" : "No");
+        fprintf(file, "  Lanes: ");
+        for (int j = 0; j < intersection->num_lanes; j++) {
+            fprintf(file, "%d ", intersection->lane_ids[j]);
+        }
+        // Incoming roads (road_eastbound_from_id, road_westbound_from_id, etc.) names:
+        fprintf(file, "\n  Roads: Eastbound From: %d, Eastbound To: %d, Westbound From: %d, Westbound To: %d, Northbound From: %d, Northbound To: %d, Southbound From: %d, Southbound To: %d\n",
+                intersection->road_eastbound_from_id,
+                intersection->road_eastbound_to_id,
+                intersection->road_westbound_from_id,
+                intersection->road_westbound_to_id,
+                intersection->road_northbound_from_id,
+                intersection->road_northbound_to_id,
+                intersection->road_southbound_from_id,
+                intersection->road_southbound_to_id);
+    }
+    fprintf(file, "\n");
+    fprintf(file, "Map Summary:\n");
+    fprintf(file, "Total Roads: %d\n", self->num_roads);
+    fprintf(file, "Total Intersections: %d\n", self->num_intersections);
+}

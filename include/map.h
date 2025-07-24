@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdio.h>
 #include <stdbool.h>
 #include "utils.h"
 
@@ -417,3 +418,7 @@ Intersection* map_get_intersections(Map* self);
 
 // Returns number of intersections currently in the map
 int map_get_num_intersections(const Map* self);
+
+
+// Prints the full map information to a file or stdout
+void map_print(Map* self, FILE* file);

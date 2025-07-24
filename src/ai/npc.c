@@ -37,6 +37,8 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
     CarIndictor rand_turn = turn_sample_possible(situation);
     CarIndictor rand_lane_change = lane_change_sample_possible(situation);
 
+    bool indicate_only = false; // whether to indicate only, without requesting the sim to execute the lane change or turn.
+
     if (situation->is_an_intersection_upcoming) {
         // Whe approaching an intersection, turn and lane change decision will depend on distance to intersection. If we are far off, we can randomly change lanes or change turn intent. Else, we should not change lanes or change turn intent.
         if (situation->is_approaching_end_of_lane || situation->braking_distance.preferred_smooth >= 1.1 * distance_to_stop_line) {
@@ -54,7 +56,14 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
                 turn_indicator = rand_turn;
             }
             // printf("Turn indicator: %d\n", turn_indicator);
-            lane_change_indicator = (r2 < dt / 5) ? rand_lane_change : INDICATOR_NONE;
+
+            CarIndictor current_lane_indicator = car_get_indicator_lane(self);
+            if (current_lane_indicator == INDICATOR_NONE) {
+                lane_change_indicator = (r2 < dt / 5) ? rand_lane_change : INDICATOR_NONE;  // about every 5 seconds we have been travelling straight without indicating, decide to change lanes randomly
+            } else {
+                lane_change_indicator = (r2 < dt / 5) ? INDICATOR_NONE : current_lane_indicator; // about every 5 seconds we have been indicating unsuccessfully, decide to cancel the lane change indicator
+            }
+
             // printf("Lane change indicator: %d\n", lane_change_indicator);
             // printf("0. Intersection upcoming: sampled turn indicator and lane change indicator: %d, %d\n", turn_indicator, lane_change_indicator);
         }
@@ -73,7 +82,14 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
     } else {
         // We are not approaching an intersection or a dead end. We can randomly change lanes (and turn intent is not relevant).
         turn_indicator = INDICATOR_NONE;
-        lane_change_indicator = (r3 < dt) ? rand_lane_change : INDICATOR_NONE;
+
+        CarIndictor current_lane_indicator = car_get_indicator_lane(self);
+        if (current_lane_indicator == INDICATOR_NONE) {
+            lane_change_indicator = (r3 < dt / 5) ? rand_lane_change : INDICATOR_NONE;  // about every 5 seconds we have been travelling straight without indicating, decide to change lanes randomly
+        } else {
+            lane_change_indicator = (r3 < dt / 5) ? INDICATOR_NONE : current_lane_indicator; // about every 5 seconds we have been indicating unsuccessfully, decide to cancel the lane change indicator
+        }
+
         if (lane_change_indicator != INDICATOR_NONE) {
             // printf("0. Not an intersection or dead end: lane change indicator: %d\n", lane_change_indicator);
         }
@@ -85,8 +101,9 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
 
     // cancel lane change if it is dangerous
     if (car_is_lane_change_dangerous(self, sim, situation, lane_change_indicator)) {
-        lane_change_indicator = INDICATOR_NONE;
-        // printf("Lane change is dangerous. Canceling lane change.\n");
+        indicate_only = true; // we will just indicate the lane change, but not request it
+        // keep the indicator as it is, but do not request the lane change
+        // printf("Lane change is dangerous.\n");
     }
 
     // Next up is to determine the acceleration. If there is a vehicle ahead, then we just need to follow it with its speed. If nothing ahead, we just cruise. But we should override to a slower acceleration if we are close to an intersection (and approaching yellow / red), or approaching a dead end. It is possible that the lead vehicle is going faster than it should be!
@@ -104,18 +121,32 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
         position_target_overshoot_buffer = target_distance_from_next_car - car_lengths_offset - from_feet(1.0); // let's call being within 1.0 feet of the next car as a crash.
         speed_at_target = car_get_speed(situation->lead_vehicle);
         accel = car_compute_acceleration_chase_target(self, position_target, speed_at_target, position_target_overshoot_buffer, speed_cruise, true);
-        // accel += situation->lead_vehicle->acceleration; // add the lead vehicle's acceleration to our acceleration to account for the fact that we are following it and it may be accelerating or braking.
 
-        // If are already within 2.0 feet of the lead vehicle, let's try to change lanes to avoid rear-ending it.
-        rand_lane_change = lane_change_sample_possible(situation);
-        if (situation->distance_to_lead_vehicle - (car_half_length + car_get_length(situation->lead_vehicle) / 2) < from_feet(2.0)) { // TODO: make it depend on more variables
+        // If are already within ttc_threshold of the lead vehicle, we should suddenly change the lane to avoid rear-ending it.
+        Meters bumper_to_bumper_distance = situation->distance_to_lead_vehicle - car_lengths_offset;
+        MetersPerSecond relative_speed = car_speed - car_get_speed(situation->lead_vehicle);
+        Seconds lead_ttc = bumper_to_bumper_distance / relative_speed;
+        if (lead_ttc < 0) {
+            lead_ttc = INFINITY;    // we are receding relative to the lead vehicle
+        }
+        Seconds ttc_threshold = 1.0; // 1 second time to collision threshold
+        if (lead_ttc < ttc_threshold) {
             // printf("Emergency lane change maneuver to avoid rear-ending the next car.\n");
-            if (lane_change_indicator == INDICATOR_NONE) {
-                lane_change_indicator = rand_lane_change;
-                if (lane_change_indicator == INDICATOR_NONE) {
-                    // printf("Oh no! No lane change possible. We might rear-end the lead vehicle!\n");
-                }
-                // TODO: check if we will crash into the side car if we change lanes. If so, then we should not change lanes. Or maybe a side crash is better than a rear-end crash?
+            // go to the side where time-to-collision is higher
+            bool can_go_left = situation->is_lane_change_left_possible && situation->nearby_vehicles.colliding[INDICATOR_LEFT].car == NULL && situation->nearby_vehicles.ahead[INDICATOR_LEFT].time_to_collision > ttc_threshold;
+            bool can_go_right = situation->is_lane_change_right_possible && situation->nearby_vehicles.colliding[INDICATOR_RIGHT].car == NULL && situation->nearby_vehicles.ahead[INDICATOR_RIGHT].time_to_collision > ttc_threshold;
+            if (can_go_left && can_go_right) {
+                lane_change_indicator = (situation->nearby_vehicles.ahead[INDICATOR_LEFT].time_to_collision > situation->nearby_vehicles.ahead[INDICATOR_RIGHT].time_to_collision) ? INDICATOR_LEFT : INDICATOR_RIGHT;
+                indicate_only = false; // we will request the lane change asap
+            } else if (can_go_left) {
+                lane_change_indicator = INDICATOR_LEFT;
+                indicate_only = false; // we will request the lane change asap
+            } else if (can_go_right) {
+                lane_change_indicator = INDICATOR_RIGHT;
+                indicate_only = false; // we will request the lane change asap
+            } else {
+                // no better lane change possible, just brake hard. Keep the lane change indicator & request as they are.
+                accel = car_compute_acceleration_stop_max_brake(self, false);
             }
         }
     } else {
@@ -239,7 +270,8 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
     accel = 0.95 * accel + 0.05 * car_get_acceleration(self); // smooth the acceleration
     car_set_acceleration(self, accel);
     car_set_indicator_turn_and_request(self, turn_indicator);
-    car_set_indicator_lane_and_request(self, lane_change_indicator);
+    car_set_indicator_lane(self, lane_change_indicator);
+    car_set_request_indicated_lane(self, !indicate_only && lane_change_indicator != INDICATOR_NONE);
 }
 
 

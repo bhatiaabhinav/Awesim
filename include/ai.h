@@ -48,32 +48,33 @@ struct NearbyVehicle {
                                     // Special cases:
                                     //   - If no collision path (rel_speed <= 0 and rel_accel <= 0, or no positive real roots): INFINITY (safe, no threat).
                                     //   - If already colliding/overlapping (adj_distance <= 0): 0 (imminent/ongoing).
-                                    //   - Negative values not used; clamp to 0 for passed/recoding cases.
-                                    // Informs reactive decisions: e.g., brake if TTC < 2s.
+                                    //   - Negative values not used; clamp to 0 for passed/receding cases.
+                                    // Informs reactive decisions: e.g., brake if TTC < 2s; feeds into RL reward (penalize low TTC).
     
     Seconds time_headway;           // Time-based safe spacing metric in seconds (proactive headway).
                                     // Direction-specific:
-                                    //   - For front/turn_front/colliding (ahead): bumper_distance / ego_speed (if ego_speed > 0; else INFINITY).
+                                    //   - For ahead/after_next_turn (ahead): bumper_distance / ego_speed (if ego_speed > 0; else INFINITY).
                                     //     Models "3-second rule" for following; low value (<3s) means too close—slow down.
-                                    //   - For rear/lane_change_rear (behind): bumper_distance / other_speed (if other_speed > 0; else INFINITY).
+                                    //   - For behind/incoming_from_previous_turn (behind): bumper_distance / other_speed (if other_speed > 0; else INFINITY).
                                     //     Models tailgating risk; low value (<2s) means rear vehicle closing fast—accelerate or yield.
-                                    //   - For merge_approaching: Use relative speed if angled paths; simplify to bumper_distance / rel_closing_speed.
-                                    // Special cases: INFINITY if no vehicle or speed <= 0 (no risk).
-                                    // Assumes constant speeds for simplicity;
+                                    // Special cases:
+                                    //   - If no vehicle (car == NULL) or speed <= 0 (no risk): INFINITY.
+                                    //   - If colliding/overlapping (in colliding, adj_distance <= 0): 0 (no safe gap, collision state).
+                                    // Informs proactive spacing: e.g., maintain 3s headway; penalize <3s in RL reward or NPC logic.
 };
 typedef struct NearbyVehicle NearbyVehicle;
 
 // Struct for vehicles near the ego, aiding lane/turn/merge decisions.
 // Arrays indexed by CarIndicator: [0] left, [1] straight, [2] right.
 // Fields are NULL/invalid if no vehicle (car == NULL; distances/TTC/headway = INFINITY).
-// "Front/rear" are closest non-colliding; "colliding" overlaps (TTC=0).
-// Populate in sim update loop; use for AI (e.g., RL inputs) and NPC behaviors.
+// "ahead/behind" are closest non-colliding; "colliding" overlaps (TTC=0, time_headway=0).
+// Populate in sim update loop; use for RL inputs (state features) and NPC behaviors (rule-based or learned).
 struct NearbyVehicles {
-    NearbyVehicle lane_change_front[3];      // Front vehicle in target lane for change/merge.
-    NearbyVehicle lane_change_colliding[3];  // Colliding vehicle during lane change (or current for straight).
-    NearbyVehicle lane_change_rear[3];       // Rear vehicle in target lane for change/merge.
-    NearbyVehicle turn_front[3];             // Front vehicle on outgoing path after turn.
-    NearbyVehicle merge_approaching[3];      // Approaching vehicle from incoming/merging lane.
+    NearbyVehicle ahead[3];                 // Vehicle ahead in target lane for change/merge. If none, closest in next lane (straight outgoing).
+    NearbyVehicle colliding[3];             // Colliding vehicle during lane change (for indicator_none, it is the currently colliding vehicle).
+    NearbyVehicle behind[3];                // Vehicle behind in target lane for change/merge. If none, closest in prev lane (straight incoming).
+    NearbyVehicle after_next_turn[3];              // First vehicle encountered on outgoing path after turn. Populated only if ego vehicle is the frontmost vehicle in the lane (and therefore, about to make a turn decision).
+    NearbyVehicle incoming_from_previous_turn[3];  // Leading vehicle turning onto ego's lane. Populated only if ego vehicle is the last vehicle in ego's lane (and therefore, one of these vehicles will be the first to turn into ego's lane and tail the ego vehicle).
 };
 typedef struct NearbyVehicles NearbyVehicles;
 
@@ -135,10 +136,10 @@ struct SituationalAwareness {
     // Surrounding Vehicles
     bool is_vehicle_ahead;                 // Is there a vehicle ahead of us (see lead_vehicle)?
     bool is_vehicle_behind;                // Is there a vehicle behind us (see following_vehicle)?
-    const Car* lead_vehicle;               // Vehicle ahead in the same lane. If none in the same lane, then the closest vehicle ahead in the next lane (straight outgoing).
-    const Car* following_vehicle;          // Vehicle behind in the same lane. If none in the same lane, then the closest vehicle behind in the prev lane (straight incoming).
-    Meters distance_to_lead_vehicle;       // Distance to the lead vehicle
-    Meters distance_to_following_vehicle;  // Distance to the following vehicle
+    const Car* lead_vehicle;               // Vehicle ahead in the same lane, defined as the closest vehicle with progress greater than ours. If none in the same lane, then the closest vehicle ahead in the next lane (straight outgoing).
+    const Car* following_vehicle;          // Vehicle behind in the same lane, defined as the closest vehicle with progress less than ours. If none in the same lane, then the closest vehicle behind in the prev lane (straight incoming).
+    Meters distance_to_lead_vehicle;       // Distance to the lead vehicle (center-to-center distance)
+    Meters distance_to_following_vehicle;  // Distance to the following vehicle (center-to-center distance)
     NearbyVehicles nearby_vehicles;
     BrakingDistance braking_distance;
 
