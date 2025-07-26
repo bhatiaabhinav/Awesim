@@ -49,8 +49,8 @@ int car_get_lane_rank(const Car* self) { return self->lane_rank; }
 MetersPerSecond car_get_speed(const Car* self) { return self->speed; }
 double car_get_damage(const Car* self) { return self->damage; }
 MetersPerSecondSquared car_get_acceleration(const Car* self) { return self->acceleration; }
-CarIndictor car_get_indicator_turn(const Car* self) { return self->indicator_turn; }
-CarIndictor car_get_indicator_lane(const Car* self) { return self->indicator_lane; }
+CarIndicator car_get_indicator_turn(const Car* self) { return self->indicator_turn; }
+CarIndicator car_get_indicator_lane(const Car* self) { return self->indicator_lane; }
 bool car_get_request_indicated_lane(const Car* self) { return self->request_indicated_lane; }
 bool car_get_request_indicated_turn(const Car* self) { return self->request_indicated_turn; }
 bool car_get_auto_turn_off_indicators(const Car* self) { return self->auto_turn_off_indicators; }
@@ -103,11 +103,11 @@ void car_set_damage(Car* self, const double damage) {
     self->damage = fclamp(damage, 0.0, 1.0);
 }
 
-void car_set_indicator_turn(Car* self, CarIndictor indicator) {
+void car_set_indicator_turn(Car* self, CarIndicator indicator) {
     self->indicator_turn = indicator;
 }
 
-void car_set_indicator_lane(Car* self, CarIndictor indicator) {
+void car_set_indicator_lane(Car* self, CarIndicator indicator) {
     self->indicator_lane = indicator;
 }
 
@@ -118,7 +118,7 @@ void car_set_request_indicated_turn(Car* self, bool request) {
     self->request_indicated_turn = request;
 }
 
-void car_set_indicator_turn_and_request(Car* self, CarIndictor indicator) {
+void car_set_indicator_turn_and_request(Car* self, CarIndicator indicator) {
     car_set_indicator_turn(self, indicator);
     if (indicator != INDICATOR_NONE) {
         car_set_request_indicated_turn(self, true);
@@ -127,7 +127,7 @@ void car_set_indicator_turn_and_request(Car* self, CarIndictor indicator) {
     }
 }
 
-void car_set_indicator_lane_and_request(Car* self, CarIndictor indicator) {
+void car_set_indicator_lane_and_request(Car* self, CarIndicator indicator) {
     car_set_indicator_lane(self, indicator);
     if (indicator != INDICATOR_NONE) {
         car_set_request_indicated_lane(self, true);

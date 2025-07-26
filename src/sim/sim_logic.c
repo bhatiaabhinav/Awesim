@@ -64,10 +64,10 @@ void sim_integrate(Simulation* self, Seconds time_period) {
             Lane* lane = car_get_lane(car, map);
             double progress = car_get_lane_progress(car);
             Meters s = car_get_lane_progress_meters(car);
-            CarIndictor lane_change_intent = car_get_indicator_lane(car);
-            CarIndictor turn_intent = car_get_indicator_turn(car);
-            CarIndictor lane_change_requested = car_get_request_indicated_lane(car) ? lane_change_intent : INDICATOR_NONE;
-            CarIndictor turn_requested = car_get_request_indicated_turn(car) ? turn_intent : INDICATOR_NONE;
+            CarIndicator lane_change_intent = car_get_indicator_lane(car);
+            CarIndicator turn_intent = car_get_indicator_turn(car);
+            CarIndicator lane_change_requested = car_get_request_indicated_lane(car) ? lane_change_intent : INDICATOR_NONE;
+            CarIndicator turn_requested = car_get_request_indicated_turn(car) ? turn_intent : INDICATOR_NONE;
             MetersPerSecondSquared a = car_get_acceleration(car);
             MetersPerSecond v = car_get_speed(car);
             bool lane_changed = false;

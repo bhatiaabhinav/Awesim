@@ -165,15 +165,15 @@ void situational_awareness_build(Simulation* sim, CarId car_id);
 void npc_car_make_decisions(Car* self, Simulation* sim);
 
 // sample a turn that is feasible from the current lane
-CarIndictor turn_sample_possible(const SituationalAwareness* situation);
+CarIndicator turn_sample_possible(const SituationalAwareness* situation);
 
 // sample a lane change intent that is feasible in terms of existence of such lanes
-CarIndictor lane_change_sample_possible(const SituationalAwareness* situation);
+CarIndicator lane_change_sample_possible(const SituationalAwareness* situation);
 
 // If you were to change lanes (or merge or exit), what would be the hypothetical position on the target lane? Assuming the target_lane is either an adjacent lane or a merge/exit lane adjacent to the current lane.
 Meters calculate_hypothetical_position_on_lane_change(const Car* car, const Lane* lane, const Lane* lane_target, Map* map);
 
-bool car_is_lane_change_dangerous(Car* car, Simulation* sim, const SituationalAwareness* situation, CarIndictor lane_change_indicator, Seconds time_headway_threshold);
+bool car_is_lane_change_dangerous(Car* car, Simulation* sim, const SituationalAwareness* situation, CarIndicator lane_change_indicator, Seconds time_headway_threshold);
 
 
 
@@ -197,7 +197,7 @@ MetersPerSecondSquared car_compute_acceleration_adaptive_cruise(const Car* car, 
 
 BrakingDistance car_compute_braking_distance(const Car* car);
 
-bool car_should_yield_at_intersection(const Car* car, Simulation* sim, const SituationalAwareness* situation, CarIndictor turn_indicator);
+bool car_should_yield_at_intersection(const Car* car, Simulation* sim, const SituationalAwareness* situation, CarIndicator turn_indicator);
 
 
 
@@ -355,8 +355,8 @@ typedef struct DrivingAssistant {
     Meters position_target;            // Determines target position
 
     // Requested intents to determine steering:
-    CarIndictor merge_intent;           // For switching lanes within a road, or merge/exit a highway. Set to None automatically once the assistant issues merge command.
-    CarIndictor turn_intent;            // For which lane to take when approaching intersections. Set to None automatically once the assistant issues turn command.
+    CarIndicator merge_intent;           // For switching lanes within a road, or merge/exit a highway. Set to None automatically once the assistant issues merge command.
+    CarIndicator turn_intent;            // For which lane to take when approaching intersections. Set to None automatically once the assistant issues turn command.
 
     // Smart modes (overrides the standard mode):
     bool cruise_mode;                       // Sets speed_target automatically to reach cruise_speed. If follow_mode is on, matches the speed of the next vehicle, but never exceeds cruise_speed. If there is no vehicle ahead, then targets cruise speed.

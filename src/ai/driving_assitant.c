@@ -12,8 +12,8 @@ bool driving_assistant_control_car(DrivingAssistant das, Car* car, Simulation* s
     // Car control variables to determine:
 
     MetersPerSecondSquared accel;
-    CarIndictor lane_indicator;
-    CarIndictor turn_indicator;
+    CarIndicator lane_indicator;
+    CarIndicator turn_indicator;
     bool request_lane_change;
     bool request_turn;
 
@@ -83,11 +83,12 @@ bool driving_assistant_control_car(DrivingAssistant das, Car* car, Simulation* s
             das.feasible_thw = distance_to_lead_vehicle_feasible / sa->lead_vehicle->speed;
         }
     }
+    // NOTE: Forward crash is still possible if the lead vehicle is backing into us, but we don't handle that case here since that is not about emergency braking.
 
     // auto engagement conditions
-    bool enagement_conditions_met;
+    bool engagement_conditions_met;
     if (das.feasible_thw < das.aeb_min_thw || das.aeb_in_progress) {
-        enagement_conditions_met = true; // AEB should be engaged if feasible THW is below the threshold or if AEB is already in progress.
+        engagement_conditions_met = true; // AEB should be engaged if feasible THW is below the threshold or if AEB is already in progress.
     }
     // auto disengagement conditions
     bool disengagement_conditions_met;
@@ -96,7 +97,7 @@ bool driving_assistant_control_car(DrivingAssistant das, Car* car, Simulation* s
     }
 
     bool execute_aeb = false;
-    if (enagement_conditions_met) {
+    if (engagement_conditions_met) {
         // unless manually disengaged, apply AEB
         execute_aeb = !das.aeb_manually_disengaged;
     }

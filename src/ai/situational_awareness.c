@@ -105,7 +105,7 @@ static void _update_ttc_headways(Car* car, NearbyVehicles* nearby_vehicles) {
     Meters car_length = car_get_length(car);
     Meters car_half_length = car_length / 2.0; // Half the length of the car
     // first do for all front vehicles
-    for (CarIndictor i = 0; i < 3; i++) {
+    for (CarIndicator i = 0; i < 3; i++) {
         if (nearby_vehicles->ahead[i].car) {
             const Car* front_car = nearby_vehicles->ahead[i].car;
             Meters front_car_half_length = car_get_length(front_car) / 2.0; // Half the length of the front car
@@ -132,7 +132,7 @@ static void _update_ttc_headways(Car* car, NearbyVehicles* nearby_vehicles) {
         }
     }
     // then do for all rear vehicles
-    for (CarIndictor i = 0; i < 3; i++) {
+    for (CarIndicator i = 0; i < 3; i++) {
         if (nearby_vehicles->behind[i].car) {
             const Car* rear_car = nearby_vehicles->behind[i].car;
             Meters rear_car_half_length = car_get_length(rear_car) / 2.0; // Half the length of the rear car
@@ -159,7 +159,7 @@ static void _update_ttc_headways(Car* car, NearbyVehicles* nearby_vehicles) {
         }
     }
     // then do for all colliding vehicles
-    for (CarIndictor i = 0; i < 3; i++) {
+    for (CarIndicator i = 0; i < 3; i++) {
         if (nearby_vehicles->colliding[i].car) {
             nearby_vehicles->colliding[i].time_headway = 0; // For colliding vehicles, time headway is 0 since they are already colliding.
             nearby_vehicles->colliding[i].time_to_collision = 0; // For colliding vehicles, time to collision is 0 since they are already colliding.
@@ -173,7 +173,7 @@ static void _update_ttc_headways(Car* car, NearbyVehicles* nearby_vehicles) {
         }
     }
     // for turn front vehicles, logic is similar to front vehicles.
-    for (CarIndictor i = 0; i < 3; i++) {
+    for (CarIndicator i = 0; i < 3; i++) {
         if (nearby_vehicles->after_next_turn[i].car) {
             const Car* front_car = nearby_vehicles->after_next_turn[i].car;
             Meters front_car_half_length = car_get_length(front_car) / 2.0; // Half the length of the front car
@@ -200,7 +200,7 @@ static void _update_ttc_headways(Car* car, NearbyVehicles* nearby_vehicles) {
         }
     }
     // for merge approaching vehicles, logic is similar to rear vehicles.
-    for (CarIndictor i = 0; i < 3; i++) {
+    for (CarIndicator i = 0; i < 3; i++) {
         if (nearby_vehicles->incoming_from_previous_turn[i].car) {
             const Car* rear_car = nearby_vehicles->incoming_from_previous_turn[i].car;
             Meters rear_car_half_length = car_get_length(rear_car) / 2.0; // Half the length of the rear car
@@ -457,7 +457,7 @@ void situational_awareness_build(Simulation* sim, CarId car_id) {
     bool we_are_last_on_our_lane = car_get_lane_rank(car) == lane_get_num_cars(lane) - 1;
 
     // find the closest vehicle after each turn (only if we are leading in our lane and preparing to turn):
-    for (CarIndictor turn_indicator = 0; turn_indicator < 3; turn_indicator++) {
+    for (CarIndicator turn_indicator = 0; turn_indicator < 3; turn_indicator++) {
         Car* closest_car = NULL;
         Meters closest_distance = INFINITY;
         const Lane* next_lane = situation->lane_next_after_turn[turn_indicator];
@@ -475,7 +475,7 @@ void situational_awareness_build(Simulation* sim, CarId car_id) {
     }
 
     // find closest vehicle turning into our lane from each incoming direction (only if we are last on our lane and worried about incoming cars tailgating us):
-    for (CarIndictor turn_indicator = 0; turn_indicator < 3; turn_indicator++) {
+    for (CarIndicator turn_indicator = 0; turn_indicator < 3; turn_indicator++) {
         Car* closest_car = NULL;
         Meters closest_distance = INFINITY;
         LaneId incoming_lane_id = lane->connections_incoming[turn_indicator];

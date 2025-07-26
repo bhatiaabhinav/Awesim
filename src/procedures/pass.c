@@ -165,7 +165,7 @@ ProcedureStatusCode procedure_pass_step(Simulation* sim, Car* car, Procedure* pr
 
                 const Lane *left  = situation->lane_left;
                 const Lane *right = situation->lane_right;
-                CarIndictor dir =
+                CarIndicator dir =
                     (left  && left->id  == orig_lane) ? INDICATOR_LEFT  :
                     (right && right->id == orig_lane) ? INDICATOR_RIGHT :
                     (orig_lane < car_get_lane_id(car)) ? INDICATOR_LEFT  :

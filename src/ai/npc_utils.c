@@ -4,11 +4,11 @@
 #include <math.h>
 #include <math.h>
 
-CarIndictor turn_sample_possible(const SituationalAwareness* situation) {
+CarIndicator turn_sample_possible(const SituationalAwareness* situation) {
     if (situation->is_approaching_dead_end) {
         return INDICATOR_NONE;
     }
-    CarIndictor possibles[3];
+    CarIndicator possibles[3];
     int num_possibles = 0;
     for (int i = 0; i < 3; i++) {
         if (situation->is_turn_possible[i]) {
@@ -21,8 +21,8 @@ CarIndictor turn_sample_possible(const SituationalAwareness* situation) {
     return possibles[rand_int(num_possibles)];
 }
 
-CarIndictor lane_change_sample_possible(const SituationalAwareness* situation) {
-    CarIndictor possibles[2];
+CarIndicator lane_change_sample_possible(const SituationalAwareness* situation) {
+    CarIndicator possibles[2];
     int num_possibles = 0;
     if (situation->is_lane_change_left_possible) {
         possibles[num_possibles++] = INDICATOR_LEFT;
@@ -58,7 +58,7 @@ Meters calculate_hypothetical_position_on_lane_change(const Car* car, const Lane
     return my_hypothetical_target_progress_m;
 }
 
-bool car_is_lane_change_dangerous(Car* car, Simulation* sim, const SituationalAwareness* situation, CarIndictor lane_change_indicator, Seconds time_headway_threshold) {
+bool car_is_lane_change_dangerous(Car* car, Simulation* sim, const SituationalAwareness* situation, CarIndicator lane_change_indicator, Seconds time_headway_threshold) {
     const Lane* lane = situation->lane;
     const Lane* lane_target = situation->lane_target_for_indicator[lane_change_indicator];
     if (lane_target == lane) return false;      // no lane change
@@ -145,7 +145,7 @@ static bool intersection_has_oncoming_vehicle(const Road* approach_road,
 }
 
 
-bool car_should_yield_at_intersection(const Car* self, Simulation* sim, const SituationalAwareness* situation, CarIndictor turn_indicator) {
+bool car_should_yield_at_intersection(const Car* self, Simulation* sim, const SituationalAwareness* situation, CarIndicator turn_indicator) {
     Map* map = sim_get_map(sim);
     // Not at an intersection
     if (!situation->is_an_intersection_upcoming && !situation->is_on_intersection) {

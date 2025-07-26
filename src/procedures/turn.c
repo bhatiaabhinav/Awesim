@@ -7,7 +7,7 @@
 
 ProcedureStatusCode procedure_turn_init(Simulation* sim, Car* ego_car, Procedure* procedure, const double* args) {
     // Read arguments
-    CarIndictor turn_ind = (CarIndictor) args[0];
+    CarIndicator turn_ind = (CarIndicator) args[0];
     Seconds timeout_duration = args[1];
     bool should_brake = args[2] > 0;
     bool use_preferred_accel_profile = args[3] > 0;
@@ -37,7 +37,7 @@ ProcedureStatusCode procedure_turn_step(Simulation* sim, Car* car, Procedure* pr
     SituationalAwareness* situation = sim_get_situational_awareness(sim, car->id);
 
     // extract state
-    CarIndictor turn_ind = (CarIndictor) procedure->state[0];
+    CarIndicator turn_ind = (CarIndicator) procedure->state[0];
     Seconds start_time = procedure->state[1];
     Seconds timeout_duration = procedure->state[2];
     bool should_brake = procedure->state[3] > 0;

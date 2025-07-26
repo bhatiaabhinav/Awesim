@@ -9,7 +9,7 @@
 ProcedureStatusCode procedure_merge_init(Simulation* sim, Car* car, Procedure* procedure, const double* args) {
 
     // Read arguments
-    CarIndictor ind = (CarIndictor) args[0];
+    CarIndicator ind = (CarIndicator) args[0];
     Seconds timeout_duration = args[1];
     MetersPerSecond cruise_speed_desired = args[2];
     bool is_cruise_adaptive = args[3] > 0;
@@ -77,7 +77,7 @@ ProcedureStatusCode procedure_merge_step(Simulation* sim, Car* car, Procedure* p
     SituationalAwareness* situation = sim_get_situational_awareness(sim, car->id);
 
     // extract state
-    CarIndictor ind = (CarIndictor) procedure->state[0];
+    CarIndicator ind = (CarIndicator) procedure->state[0];
     LaneId target_lane_id = (LaneId) procedure->state[1];
     Seconds start_time = procedure->state[2];
     Seconds timeout_duration = procedure->state[3];

@@ -30,7 +30,7 @@ static void _cruise_to_speed(Car *self, MetersPerSecond target) {
 }
 
 /** Determine indicator enum from textual direction spec. */
-static CarIndictor _dir_to_indicator(const char *dir) {
+static CarIndicator _dir_to_indicator(const char *dir) {
     if (!dir) return INDICATOR_NONE;
     if (strcmp(dir, "left") == 0 || strcmp(dir, "l") == 0)  return INDICATOR_LEFT;
     if (strcmp(dir, "right") == 0 || strcmp(dir, "r") == 0) return INDICATOR_RIGHT;
@@ -83,7 +83,7 @@ static double _merge_started_at[MAX_CARS] = {0};
 bool merge(Car *self, Simulation *sim, const char *direction, double duration) {
     const SituationalAwareness *s = sim_get_situational_awareness(sim, self->id);
 
-    CarIndictor ind = _dir_to_indicator(direction);
+    CarIndicator ind = _dir_to_indicator(direction);
     if (ind == INDICATOR_NONE) return true;      // nothing requested → done
 
     /* ── check duration timer -----------─────────────────────────────── */
