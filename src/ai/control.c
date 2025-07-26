@@ -251,7 +251,7 @@ MetersPerSecondSquared car_compute_acceleration_stop_max_brake(const Car* car, b
     return speed >= 0 ? -profile.max_deceleration : profile.max_deceleration;
 }
 
-MetersPerSecondSquared car_compute_acceleration_adaptive_cruise(const Car* car, const SituationalAwareness* situation, MetersPerSecond speed_target, MetersPerSecond lead_car_distance_in_seconds_target, bool use_preferred_accel_profile) {
+MetersPerSecondSquared car_compute_acceleration_adaptive_cruise(const Car* car, const SituationalAwareness* situation, MetersPerSecond speed_target, MetersPerSecond lead_car_distance_in_seconds_target, Meters min_distance,  bool use_preferred_accel_profile) {
     if (speed_target < 0) {
         LOG_ERROR("Error: Car %d speed_target must be non-negative. Received: %f", car_get_id(car), speed_target);
         exit(EXIT_FAILURE);
@@ -266,7 +266,7 @@ MetersPerSecondSquared car_compute_acceleration_adaptive_cruise(const Car* car, 
         MetersPerSecond car_speed = car_get_speed(car);
         Meters car_position = car_get_lane_progress_meters(car);
 
-        Meters target_distance_from_next_car = fmax(car_speed, 0) * lead_car_distance_in_seconds_target + from_feet(3);
+        Meters target_distance_from_next_car = fmax(car_speed, 0) * lead_car_distance_in_seconds_target + min_distance;
         Meters car_lengths_offset = (car_get_length(car) + car_get_length(situation->lead_vehicle)) / 2;
         target_distance_from_next_car += car_lengths_offset;
         Meters position_target = car_position + situation->distance_to_lead_vehicle - target_distance_from_next_car;

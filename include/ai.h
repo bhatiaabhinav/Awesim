@@ -193,7 +193,7 @@ MetersPerSecondSquared car_compute_acceleration_stop(const Car* car, bool use_pr
 MetersPerSecondSquared car_compute_acceleration_stop_max_brake(const Car* car, bool use_preferred_accel_profile);
 
 // Computes the acceleration required to maintain a safe following distance (in seconds to collision) from a lead vehicle by matching its speed, as long as it does not exceed speed_target. If there is no vehicle ahead, it returns the acceleration required to maintain speed speed_target. The car's preferred acceleration profile is used if use_preferred_accel_profile is true, otherwise the car's capabilities are used. Regardless, full capabilities are utilized for crash avoidance.
-MetersPerSecondSquared car_compute_acceleration_adaptive_cruise(const Car* car, const SituationalAwareness* situation, MetersPerSecond speed_target, MetersPerSecond lead_car_distance_target_in_seconds, bool use_preferred_accel_profile);
+MetersPerSecondSquared car_compute_acceleration_adaptive_cruise(const Car* car, const SituationalAwareness* situation, MetersPerSecond speed_target, MetersPerSecond lead_car_distance_target_in_seconds, Meters min_distance, bool use_preferred_accel_profile);
 
 BrakingDistance car_compute_braking_distance(const Car* car);
 
@@ -342,3 +342,47 @@ MetersPerSecondSquared control_compute_bounded_accel(ControlError error, MetersP
 // - v(t) initially decreases linearly under max_accel clipping,
 //   then follows exponential convergence once |Δv| ≤ max_speed / 4
 MetersPerSecondSquared control_speed_compute_bounded_accel(ControlError error, MetersPerSecondSquared max_accel, MetersPerSecond max_speed);
+
+
+
+
+typedef struct DrivingAssistant {
+    // Acceleration based on target speed:
+    MetersPerSecond speed_target;       // Determines target speed
+
+    // Standard PD mode to adjust both speed and position.
+    bool PD_mode;                     // Whether to adjust speed AND position.
+    Meters position_target;            // Determines target position
+
+    // Requested intents to determine steering:
+    CarIndictor merge_intent;           // For switching lanes within a road, or merge/exit a highway. Set to None automatically once the assistant issues merge command.
+    CarIndictor turn_intent;            // For which lane to take when approaching intersections. Set to None automatically once the assistant issues turn command.
+
+    // Smart modes (overrides the standard mode):
+    bool cruise_mode;                       // Sets speed_target automatically to reach cruise_speed. If follow_mode is on, matches the speed of the next vehicle, but never exceeds cruise_speed. If there is no vehicle ahead, then targets cruise speed.
+    bool follow_mode;                       // (Requires cruise_mode on) Sets position_target automatically to maintain speed * follow_mode_thw distance from the next vehicle. If follow_mode is not on, then there is no position error.
+    Meters follow_mode_buffer;              // Buffer distance to maintain from the next vehicle, in addition to the follow_mode_thw distance. You can also think of this as the distance to maintain in stopped traffic.
+
+    // Smart mode parameters:
+    double cruise_speed;                            // Target speed in cruise mode. If follow_mode is on, then this is the maximum speed to maintain irrespective of whether there is a lead vehicle and its speed. Even in standard modes, this is the maximum speed the car is allowed while it minimizes the errors.
+    Seconds follow_mode_thw;                        // Follow distance = car_speed * follow_mode_thw (time headway)
+
+    // Safety assistent
+    bool merge_assistance;          // Whether indicated lane change happens only when it is safe to merge.
+    bool aeb_assistance;            // Auto-Emergency-Braking (AEB). Whether to apply max braking if in the frame of reference of the target car, our car is closing in quickly and can barely avoid colliding even if it applied max braking, i.e., To be precise, it is triggered when the feasible THW is below a safe threshold aeb_min_thw.
+
+    // Safety assistants parameters
+    Seconds merge_min_thw;          // Minimum THW for both to-be next and to-be rear vehicles, to trigger merge. About ~3 seconds is ideal. ~2 seconds would be aggressive. ~1 is reckless driving.
+    Seconds aeb_min_thw;            // Use AEB to maintain at least this much THW with the next vehicle. ~0.5 seconds.
+
+    // Internal state variables
+    Seconds feasible_thw;            // Feasible time headway, i.e., the time headway that can be achieved by applying max braking. This is used to determine if AEB should be triggered.
+    bool aeb_in_progress;           // Disengages automatically once feasible THW > 1 second or manually disengaged.
+    bool aeb_manually_disengaged;   // Once true, will stay until feasible THW is > 1 second, then will be set to false.
+    
+    // Other settings
+    bool use_preferred_accel_profile; // Whether to use the car's preferred acceleration profile (if true) to limit acceleration, or use the car's full acceleration and braking capabilities (if false). Preferred profile can be set in car->preferences.
+} DrivingAssistant;
+
+// Set the car's control variables. Returns false if there is an error, true otherwise.
+bool driving_assistant_control_car(DrivingAssistant das, Car* car, Simulation* sim);
