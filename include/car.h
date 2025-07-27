@@ -31,13 +31,12 @@ typedef struct CarCapabilities CarCapabilities;
 
 
 // --- Car indicator to indicate lane and turn intent ------
-
-enum CarIndictor {
+enum CarIndicator {
     INDICATOR_LEFT,         // Turn left or change to the left lane
     INDICATOR_NONE,         // Go straight or do not change lane
     INDICATOR_RIGHT,        // Turn right or change to the right lane
 };
-typedef enum CarIndictor CarIndictor;
+typedef enum CarIndicator CarIndicator;
 
 
 
@@ -88,8 +87,8 @@ struct Car {
 
     // control variables:
     MetersPerSecondSquared acceleration;    // current acceleration. Should be determined by the car's decision-making logic when car_make_decision() is called.
-    CarIndictor indicator_lane;                  // Lane change indicator. This is purely an intent signal and does not request the sim to execute the lane change. Should be set by the car's decision-making logic when car_make_decision() is called.
-    CarIndictor indicator_turn;                  // Turn indicator. This is purely an intent signal and does not request the sim to execute the turn. Should be set by the car's decision-making logic when car_make_decision() is called.
+    CarIndicator indicator_lane;                  // Lane change indicator. This is purely an intent signal and does not request the sim to execute the lane change. Should be set by the car's decision-making logic when car_make_decision() is called.
+    CarIndicator indicator_turn;                  // Turn indicator. This is purely an intent signal and does not request the sim to execute the turn. Should be set by the car's decision-making logic when car_make_decision() is called.
     bool request_indicated_lane;        // Whether the car requests to change lane as per the indicator_lane. This is set by the car's decision-making logic when car_make_decision() is called.
     bool request_indicated_turn;        // Whether the car requests to turn as per the indicator_turn. This is set by the car's decision-making logic when car_make_decision() is called.
 
@@ -121,8 +120,8 @@ MetersPerSecond car_get_speed(const Car* self);
 double car_get_damage(const Car* self);
 
 MetersPerSecondSquared car_get_acceleration(const Car* self);
-CarIndictor car_get_indicator_turn(const Car* self);
-CarIndictor car_get_indicator_lane(const Car* self);
+CarIndicator car_get_indicator_turn(const Car* self);
+CarIndicator car_get_indicator_lane(const Car* self);
 bool car_get_request_indicated_lane(const Car* self);
 bool car_get_request_indicated_turn(const Car* self);
 bool car_get_auto_turn_off_indicators(const Car* self);
@@ -141,17 +140,17 @@ void car_set_acceleration(Car* self, MetersPerSecondSquared acceleration);
 // Sets the damage level of the car. The damage should be between 0.0 and 1.0.
 void car_set_damage(Car* self, const double damage);
 // Sets the turn indicator signal of the car. This is purely an intent signal and does not request the sim to execute the turn.
-void car_set_indicator_turn(Car* self, CarIndictor indicator);
+void car_set_indicator_turn(Car* self, CarIndicator indicator);
 // Sets the lane change indicator signal of the car. This is purely an intent signal and does not request the sim to execute the lane change.
-void car_set_indicator_lane(Car* self, CarIndictor indicator);
+void car_set_indicator_lane(Car* self, CarIndicator indicator);
 // Sets the request to change lane as per the indicator_lane. This is set by the car's decision-making logic when car_make_decision() is called.
 void car_set_request_indicated_lane(Car* self, bool request);
 // Sets the request to turn as per the indicator_turn. This is set by the car's decision-making logic when car_make_decision() is called.
 void car_set_request_indicated_turn(Car* self, bool request);
 // Sets the turn indicator signal of the car and requests the sim to execute the turn.
-void car_set_indicator_turn_and_request(Car* self, CarIndictor indicator);
+void car_set_indicator_turn_and_request(Car* self, CarIndicator indicator);
 // Sets the lane change indicator signal of the car and requests the sim to execute the lane change.
-void car_set_indicator_lane_and_request(Car* self, CarIndictor indicator);
+void car_set_indicator_lane_and_request(Car* self, CarIndicator indicator);
 // Sets whether the sim should automatically turn off the car's indicators after the requested lane change or turn is completed.
 void car_set_auto_turn_off_indicators(Car* self, bool auto_turn_off);
 // Resets all control variables of the car to their default values: all indicators off, no requests, acceleration set to 0.

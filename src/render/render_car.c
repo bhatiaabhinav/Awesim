@@ -64,7 +64,7 @@ CarPose get_car_pose(const Car* car, Map* map) {
     return pose;
 }
 
-static void render_indicator(SDL_Renderer* renderer, const Car* car, CarIndictor indicator, const CarPose pose, double length, double width, int screen_width, int screen_height, int light_thickness, double cos_a, double sin_a, Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
+static void render_indicator(SDL_Renderer* renderer, const Car* car, CarIndicator indicator, const CarPose pose, double length, double width, int screen_width, int screen_height, int light_thickness, double cos_a, double sin_a, Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
 
     if (indicator == INDICATOR_NONE) return; // No indicator to render
 

@@ -27,15 +27,15 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
     Meters position_target;
     Meters position_target_overshoot_buffer;    // car will try its best to not overshoot target + this buffer, by applying max capable braking.
     MetersPerSecond speed_at_target;
-    CarIndictor turn_indicator;
-    CarIndictor lane_change_indicator;
+    CarIndicator turn_indicator;
+    CarIndicator lane_change_indicator;
 
     // Some random calls. It is always good to sample same number of randoms in each decision-making cycle and make them independent of branching (which depends on floating point comparisons), to make decisions consistent across platforms / compilers, as different platforms / compilers may have different floating point comparison results due to precision issues.
     double r1 = rand_0_to_1();
     double r2 = rand_0_to_1();
     double r3 = rand_0_to_1();
-    CarIndictor rand_turn = turn_sample_possible(situation);
-    CarIndictor rand_lane_change = lane_change_sample_possible(situation);
+    CarIndicator rand_turn = turn_sample_possible(situation);
+    CarIndicator rand_lane_change = lane_change_sample_possible(situation);
 
     bool indicate_only = false; // whether to indicate only, without requesting the sim to execute the lane change or turn.
 
@@ -57,7 +57,7 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
             }
             // printf("Turn indicator: %d\n", turn_indicator);
 
-            CarIndictor current_lane_indicator = car_get_indicator_lane(self);
+            CarIndicator current_lane_indicator = car_get_indicator_lane(self);
             if (current_lane_indicator == INDICATOR_NONE) {
                 lane_change_indicator = (r2 < dt / 5) ? rand_lane_change : INDICATOR_NONE;  // about every 5 seconds we have been travelling straight without indicating, decide to change lanes randomly
             } else {
@@ -83,7 +83,7 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
         // We are not approaching an intersection or a dead end. We can randomly change lanes (and turn intent is not relevant).
         turn_indicator = INDICATOR_NONE;
 
-        CarIndictor current_lane_indicator = car_get_indicator_lane(self);
+        CarIndicator current_lane_indicator = car_get_indicator_lane(self);
         if (current_lane_indicator == INDICATOR_NONE) {
             lane_change_indicator = (r3 < dt / 5) ? rand_lane_change : INDICATOR_NONE;  // about every 5 seconds we have been travelling straight without indicating, decide to change lanes randomly
         } else {
