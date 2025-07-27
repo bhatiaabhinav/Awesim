@@ -110,7 +110,7 @@ static void sim_sync_with_render_server(Simulation* self) {
                 break;
             case COMMAND_SIM_DECREASE_SPEED: // Slow down
                 self->simulation_speedup -= self->simulation_speedup < 1.01 ? 0.1 : 1.0;
-                self->simulation_speedup = fmax(self->simulation_speedup, 0.0);
+                self->simulation_speedup = fmax(self->simulation_speedup, 0.02);
                 LOG_DEBUG("Received slow_down command, new speedup: %.1f", self->simulation_speedup);
                 break;
             case COMMAND_SIM_INCREASE_SPEED: // Speed up

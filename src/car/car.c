@@ -21,6 +21,8 @@ void car_init(Car* car, Dimensions dimensions, CarCapabilities capabilities, Car
     car->request_indicated_lane = false;
     car->request_indicated_turn = false;
     car->auto_turn_off_indicators = true; // Default to true, can be changed later
+    car->prev_lane_id = ID_NULL; // Initialize previous lane ID to NULL
+    car->recent_forward_movement = 0.0; // Initialize recent forward movement to 0
 }
 
 void car_free(Car* self) {
@@ -56,10 +58,11 @@ bool car_get_request_indicated_turn(const Car* self) { return self->request_indi
 bool car_get_auto_turn_off_indicators(const Car* self) { return self->auto_turn_off_indicators; }
 
 void car_set_lane(Car* self, const Lane* lane) {
+    self->prev_lane_id = self->lane_id; // Store the lane ID at the previous timestep
     self->lane_id = lane->id;
 }
 
-void car_set_lane_progress(Car* self, double progress, Meters progress_meters) {
+void car_set_lane_progress(Car* self, double progress, Meters progress_meters, Meters recent_forward_movement) {
     if (progress < 0.0 || progress > 1.0) {
         LOG_WARN("Car %d, lane %d : Lane progress must be between 0.0 and 1.0. You are trying to set it to %f. Clipping.", self->id, self->lane_id, progress);
     }
@@ -69,6 +72,7 @@ void car_set_lane_progress(Car* self, double progress, Meters progress_meters) {
         progress_meters = 0.0;
     }
     self->lane_progress_meters = progress_meters;
+    self->recent_forward_movement = recent_forward_movement;
 }
 
 void car_set_lane_rank(Car* self, int rank) {
@@ -138,6 +142,15 @@ void car_set_indicator_lane_and_request(Car* self, CarIndicator indicator) {
 
 void car_set_auto_turn_off_indicators(Car* self, bool auto_turn_off) {
     self->auto_turn_off_indicators = auto_turn_off;
+}
+
+
+Meters car_get_recent_forward_movement(const Car* self) {
+    return self->recent_forward_movement;
+}
+
+LaneId car_get_prev_lane_id(const Car* self) {
+    return self->prev_lane_id;
 }
 
 void car_reset_all_control_variables(Car* self) {

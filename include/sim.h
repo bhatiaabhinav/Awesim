@@ -74,12 +74,14 @@ typedef struct Simulation {
     ClockReading initial_clock_reading; // Start clock
     Car cars[MAX_CARS_IN_SIMULATION];  // Car list; car[0] = agent
     SituationalAwareness situational_awarenesses[MAX_CARS_IN_SIMULATION]; // Situational awareness for each car
-    Procedure ongoing_procedures[MAX_CARS_IN_SIMULATION]; // Ongoing procedures for each car
+    // Procedure ongoing_procedures[MAX_CARS_IN_SIMULATION]; // Ongoing procedures for each car
+    DrivingAssistant driving_assistants[MAX_CARS_IN_SIMULATION]; // Driving assistants for each car
     int num_cars;   // Number of cars in simulation
     Seconds time;   // Time simulated so far
     Seconds dt;     // Simulation engine's time resolution for integration (in seconds)
     Weather weather;
     bool is_agent_enabled; // Whether car 0 is an agent (true) or an NPC (false). False by default. When true, car 0 is the agent car and must be controlled using car_set_acceleration, car_set_indicator_turn, and car_set_indicator_lane functions outside the sim loop.
+    bool is_agent_driving_assistant_enabled; // Whether the agent car has a driving assistant enabled, the simulator will automatically set the agent car's controls using the driving assistant within the sim loop. The driving assistant must be configured periodically outside the sim loop.
 
     bool is_synchronized; // Whether the simulation is synchronized with wall time. If true, the simulation will run in real-time, simulating `simulation_speedup` seconds of simulation time per second of wall time. If false, the simulation will run as fast as possible without synchronization.
     bool is_paused; // Whether the simulation is paused. If true, the simulation will not advance time until it is resumed.
@@ -119,13 +121,15 @@ ClockReading sim_get_initial_clock_reading(Simulation* self);
 int sim_get_num_cars(const Simulation* self);
 Car* sim_get_car(Simulation* self, CarId id);
 SituationalAwareness* sim_get_situational_awareness(Simulation* self, CarId id);
-Procedure* sim_get_ongoing_procedure(Simulation* self, CarId id);
-Seconds sim_get_time(Simulation* self);
+// Procedure* sim_get_ongoing_procedure(Simulation* self, CarId id);
+DrivingAssistant* sim_get_driving_assistant(Simulation* self, CarId id);
+Seconds sim_get_time(const Simulation* self);
 Seconds sim_get_dt(const Simulation* self);
 Weather sim_get_weather(Simulation* self);
 ClockReading sim_get_clock_reading(Simulation* self);
 DayOfWeek sim_get_day_of_week(const Simulation* self);
 bool sim_is_agent_enabled(Simulation* self);
+bool sim_is_agent_driving_assistant_enabled(Simulation* self);
 // returns NULL if the agent is not enabled
 Car* sim_get_agent_car(Simulation* self);
 
@@ -134,6 +138,7 @@ void sim_set_dt(Simulation* self, Seconds dt);
 void sim_set_initial_clock_reading(Simulation* self, ClockReading clock);
 void sim_set_weather(Simulation* self, Weather weather);
 void sim_set_agent_enabled(Simulation* self, bool enabled);
+void sim_set_agent_driving_assistant_enabled(Simulation* self, bool enabled);
 void sim_set_synchronized(Simulation* self, bool is_synchronized, double simulation_speedup);
 void sim_set_should_quit_when_rendering_window_closed(Simulation* self, bool should_quit);
 

@@ -93,6 +93,10 @@ struct Car {
     bool request_indicated_turn;        // Whether the car requests to turn as per the indicator_turn. This is set by the car's decision-making logic when car_make_decision() is called.
 
     bool auto_turn_off_indicators; // Whether the sim should automatically turn off the car's indicators after the requested lane change or turn is completed.
+
+    // history:
+    LaneId prev_lane_id; // Previous lane ID, useful to detect lane changes. This is the lane that the car was at the previous simulation timestep.
+    Meters recent_forward_movement;
 };
 typedef struct Car Car;
 
@@ -126,12 +130,17 @@ bool car_get_request_indicated_lane(const Car* self);
 bool car_get_request_indicated_turn(const Car* self);
 bool car_get_auto_turn_off_indicators(const Car* self);
 
+// Returns the recent forward movement of the car in the current simulation timestep.
+Meters car_get_recent_forward_movement(const Car* self);
+// Returns the previous lane ID of the car.
+LaneId car_get_prev_lane_id(const Car* self);
+
 // setters:
 
 // Sets the lane of the car.
 void car_set_lane(Car* self, const Lane* lane);
 // Sets the lane progress of the car. The progress should be between 0.0 and 1.0. Will be clipped automatically.
-void car_set_lane_progress(Car* self, double progress, Meters progress_meters);
+void car_set_lane_progress(Car* self, double progress, Meters progress_meters, Meters recent_forward_movement);
 void car_set_lane_rank(Car* self, int rank);
 // Sets the speed of the car. The speed should be between 0.0 and max_speed_capability. Will be clipped automatically.
 void car_set_speed(Car* self, MetersPerSecond speed);

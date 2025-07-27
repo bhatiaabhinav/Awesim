@@ -241,7 +241,6 @@ void situational_awareness_build(Simulation* sim, CarId car_id) {
         return;
     }
 
-    const Lane* lane_prev_t = situation->lane; // Previous lane, used to detect lane changes.
 
     LOG_TRACE("\nBuilding situational awareness for car %d:", car->id);
     Map* map = sim_get_map(sim);
@@ -522,7 +521,7 @@ void situational_awareness_build(Simulation* sim, CarId car_id) {
     situation->braking_distance = car_compute_braking_distance(car);
     LOG_TRACE("Car %d: Braking distance: capable=%.2f m, preferred=%.2f m, preferred smooth=%.2f m", car->id, situation->braking_distance.capable, situation->braking_distance.preferred, situation->braking_distance.preferred_smooth);
 
-    if (lane_prev_t && lane == lane_prev_t) {
+    if (car->prev_lane_id == lane->id) {
         // No lane change detected, just update the position and speed
         if (car_speed < situation->slowest_speed_yet_on_current_lane) {
             situation->slowest_speed_yet_on_current_lane = car_speed;
@@ -531,7 +530,7 @@ void situational_awareness_build(Simulation* sim, CarId car_id) {
         }
     } else {
         // Lane change detected, reset the slowest speed
-        LOG_TRACE("Car %d has just changed lanes from %d to %d. So, resetting slowest speed yet on current lane and the corresponding position.", car->id, lane_prev_t ? lane_prev_t->id : -1, lane->id);
+        LOG_TRACE("Car %d has just changed lanes from %d to %d. So, resetting slowest speed yet on current lane and the corresponding position.", car->id, car->prev_lane_id, lane->id);
         situation->slowest_speed_yet_on_current_lane = car_speed;
         situation->slowest_speed_position = lane_progress_m;
     }

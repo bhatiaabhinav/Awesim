@@ -53,8 +53,15 @@ void sim_integrate(Simulation* self, Seconds time_period) {
                 // NPC car logic
                 npc_car_make_decisions(car, self);
             } else {
-                // Assume that the first car (id 0) is the agent car and it is controlled externally.
-                LOG_TRACE("Skipping decision-making for agent car %d, assuming it is controlled externally using car_set_acceleration, car_set_indicator_turn, and car_set_indicator_lane functions.", car->id);
+                // Assume that the first car (id 0) is the agent car and it is either controlled externally or has a driving assistant enabled.
+                if (self->is_agent_driving_assistant_enabled) {
+                    DrivingAssistant* da = sim_get_driving_assistant(self, car_id);
+                    LOG_TRACE("Agent car %d has a driving assistant enabled. Using it to set controls.", car->id);
+                    driving_assistant_control_car(da, car, self);
+                } else {
+                    // Agent car logic without driving assistant
+                    LOG_TRACE("Agent car %d does not have a driving assistant enabled. Assuming it is controlled externally.", car->id);
+                }
             }
         }
 
@@ -73,7 +80,7 @@ void sim_integrate(Simulation* self, Seconds time_period) {
             bool lane_changed = false;
             bool turned = false;
 
-            LOG_TRACE("T=%.2f: Processing car %d on lane %d with progress %.2f (s = %.2f), v = %.2f, a = %.2f, lane_change_requested = %d, turn_requested = %d", self->time, car->id, lane->id, progress, s, v, a, lane_change_requested, turn_requested);
+            LOG_TRACE("T=%.2f: Processing car %d on lane %d with progress %.5f (s = %.5f), v = %.2f, a = %.2f, lane_change_requested = %d, turn_requested = %d", self->time, car->id, lane->id, progress, s, v, a, lane_change_requested, turn_requested);
 
             Lane* adjacent_left = lane_get_adjacent_left(lane, map);
             Lane* adjacent_right = lane_get_adjacent_right(lane, map);
@@ -84,6 +91,7 @@ void sim_integrate(Simulation* self, Seconds time_period) {
                 lane = adjacent_left;
                 lane_change_requested = INDICATOR_NONE; // Reset request after lane change
                 lane_changed = true;
+                s = progress * lane->length; // Update s after changing lane. Progress is constant across neighbor lanes, but s can be different for curved roads.
                 LOG_TRACE("Car %d changed to left lane %d", car->id, lane->id);
             } else if (lane_change_requested == INDICATOR_RIGHT && adjacent_right) {
                 assert(adjacent_right->direction == lane->direction && "How did this happen? Map error!");
@@ -91,6 +99,7 @@ void sim_integrate(Simulation* self, Seconds time_period) {
                 lane = adjacent_right;
                 lane_change_requested = INDICATOR_NONE; // Reset request after lane change
                 lane_changed = true;
+                s = progress * lane->length; // Update s after changing lane. Progress is constant across neighbor lanes, but s can be different for curved roads.
                 LOG_TRACE("Car %d changed to right lane %d", car->id, lane->id);
             } else {
                 // Do nothing
@@ -110,6 +119,7 @@ void sim_integrate(Simulation* self, Seconds time_period) {
             MetersPerSecond dv = a * dt;
             Meters ds = v * dt + 0.5 * a * dt * dt;
             v += dv;
+            Meters s_initial = s; // Save initial position
             s += ds;    // May cause overshooting end of lane.
             progress = s / lane->length;    // progress after accounting for motion and maybe a lange change. Maybe greater than 1.
             if (progress < 0.0) {
@@ -117,8 +127,10 @@ void sim_integrate(Simulation* self, Seconds time_period) {
                 progress = 0.0; // Clamp progress to 0 if it goes negative.
                 progress += rand_0_to_1() * 0.01; // Add a small random value to avoid multiple cars having the same progress.
                 if (v < 0) v = 0; // If speed is negative, clamp it to 0 as well.
+                s = progress * lane->length; // Update s after calculating progress.
             }
-            LOG_TRACE("Car %d: Updated speed = %.2f, position s = %.2f, progress = %.2f", car->id, v, s, progress);
+            Meters net_forward_movement_meters = s - s_initial; // Calculate net movement in meters.
+            LOG_TRACE("Car %d: Updated speed = %.2f, position s = %.2f, Net forward movement = %.2f, progress = %.5f", car->id, v, s, net_forward_movement_meters, progress);
 
             // --------------- handle approaching dead end ---------------
             // -----------------------------------------------------------
@@ -196,7 +208,7 @@ void sim_integrate(Simulation* self, Seconds time_period) {
             }
             s = progress * lane->length; // update s after all changes to lane and progress.
 
-            car_set_lane_progress(car, progress, s);
+            car_set_lane_progress(car, progress, s, net_forward_movement_meters);
             car_set_speed(car, v);
             car_handle_movement_or_lane_change(self, car, lane);
             if (lane_changed) { 
@@ -216,13 +228,19 @@ void sim_integrate(Simulation* self, Seconds time_period) {
             Road* road = lane_get_road(lane, map);
             Intersection* intersection = lane_get_intersection(lane, map);
             const char* road_name = road ? road->name : intersection ? intersection->name : "Unknown";
-            LOG_TRACE("Car %d processing complete: Updated state: lane %d (%s), progress %.2f (%.2f miles), speed = %.2f mps (%.2f mph), acceleration = %.2f mpss", car->id, lane->id, road_name, progress, to_miles(s), v, to_mph(v), a);
+            LOG_TRACE("Car %d processing complete: Updated state: lane %d (%s), progress %.5f (%.5f miles), speed = %.5f mps (%.5f mph), acceleration = %.5f mpss", car->id, lane->id, road_name, progress, to_miles(s), v, to_mph(v), a);
         }
 
         LOG_TRACE("Marking current situational awareness as invalid for all cars since the simulation has advanced.");
         for(int car_id=0; car_id < self->num_cars; car_id++) {
             SituationalAwareness* sa = sim_get_situational_awareness(self, car_id);
             sa->is_valid = false; // Reset situational awareness validity for the next iteration
+        }
+
+        if (self->is_agent_enabled && self->is_agent_driving_assistant_enabled) {
+            LOG_TRACE("Agent car %d has a driving assistant enabled. Running post-simulation step for the driving assistant.", self->cars[0].id);
+            DrivingAssistant* das = sim_get_driving_assistant(self, 0);
+            driving_assistant_post_sim_step(das, sim_get_car(self, 0), self);
         }
 
         self->time += dt;
