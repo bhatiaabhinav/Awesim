@@ -18,30 +18,34 @@ class AwesimEnv(gym.Env):
         self.sim = sim_malloc()
         sim_init(self.sim)
         sim_set_agent_enabled(self.sim, True)
+        sim_set_agent_driving_assistant_enabled(self.sim, True)
         self.agent: Car = sim_get_new_car(self.sim)
+        self.das: DrivingAssistant = sim_get_driving_assistant(self.sim, self.agent.id)
         print(f"Agent car ID: {self.agent.id}")
 
-        # self.action_space = spaces.Discrete(5) # speed inc 10, speed dec 5, merge left, merge right, cruise, cruise_adaptive  # TODO: removing adaptive for a while
 
-        # Action factors:
-        # Index 0: Whether to execute NO_OP procedure (> 0 means yes)
-        # Index 1: Whether to execute MERGE procedure (> 0 means yes)
-        # Index 2: Whether to execute ADJUST_SPEED procedure (> 0 means yes)
-        # Index 3: Whether to execute STOP procedure (> 0 means yes)
-        # Index 4: Whether to execute CRUISE procedure (> 0 means yes). Ultimately, the selected procedure will be the one with the highest value.
-        # Index 5: Whether to execute PASS procedure (> 0 means yes)
-        # Index 6: Speed delta. -1 means -60mph, 0 means no change, 1 means +60mph. Final desired speed will be clamped between [-10mph, top_speed_mph].
-        # Index 7: Procedure duration: -1: 0.1, 0: 5 second, 1: 10 seconds.
-        # Index 8: Merge direction: <0 means left, >0 means right
-        # Index 9: Adaptive cruise: >0 means yes.
-        # Index 10: Follow distance in seconds (if adaptive cruise is enabled): -1: 0.1, 0: 3, 1: 6.0
-        # Index 11: Whether to use preferred acceleration profile, >0 means yes.
-        # Index 12: Whether to leave indicators on during NO_OP procedure, >0 means yes.
-        # Index 13: Whether to use linear braking for STOP procedure, >0 means yes, else smooth braking is used.
+        # action factors to adjust driving assistant state:
+        # 0. speed_target_adjustment: -1: subtract 10 mph, 1: add 60 mph.
+        # 1. PD toggle
+        # 2. position_error_adjustment
+        # 3. merge_intent adjustment
+        # 4. turn_intent adjustment
+        # 5. cruise_mode toggle
+        # 6. cruise_speed_adjustment
+        # 7. follow_mode toggle
+        # 8. follow_mode_thw_adjustment
+        # 9. follow_mode_buffer_adjustment
+        # 10. merge_assistance toggle
+        # 11. aeb_assistance toggle
+        # 12. merge_min_thw_adjustment
+        # 13. aeb_min_thw_adjustment
+        # 14. aeb manually disengage
+        # 15. use_preferred_acceleration_profile toggle
+
         self.action_space = spaces.Box(
             low=-1.0,
             high=1.0,
-            shape=(14,),
+            shape=(16,),
             dtype=np.float32
         )
 
@@ -49,27 +53,114 @@ class AwesimEnv(gym.Env):
         self.observation_space = spaces.Box(low=-10, high=10, shape=(n_state_factors,), dtype=np.float32)
 
     def _get_observation(self):
-        situation = sim_get_situational_awareness(self.sim, 0)
-        speed = car_get_speed(self.agent)
-        left_possible = situation.is_lane_change_left_possible
-        right_possible = situation.is_lane_change_right_possible
-        flattened = NearbyVehiclesFlattened()
-        nearby_vehicles_flatten(situation.nearby_vehicles, flattened, False)
-        flattened_count = nearby_vehicles_flattened_get_count(flattened)
-        nearby_exists_flags = np.array([nearby_vehicles_flattened_get_car_id(flattened, i) != -1 for i in range(flattened_count)], dtype=np.float32)
-        nearby_distances = np.array([nearby_vehicles_flattened_get_distance(flattened, i) for i in range(flattened_count)], dtype=np.float32).clip(0, 1000.0)  # Clip distances to [0, 1000] meters
-        nearby_ttcs = np.array([nearby_vehicles_flattened_get_time_to_collision(flattened, i) for i in range(flattened_count)], dtype=np.float32).clip(0, 10.0)  # Clip TTC to [0, 10] seconds
-        nearby_thws = np.array([nearby_vehicles_flattened_get_time_headway(flattened, i) for i in range(flattened_count)], dtype=np.float32).clip(0, 10.0)  # Clip THW to [0, 10] seconds
+        agent = self.agent
+        sim = self.sim
+        situation = sim_get_situational_awareness(sim, 0)
+        das = sim_get_driving_assistant(sim, 0)
 
-        # concat all these:
+        # driving stuff:
+        speed = car_get_speed(agent)
+        speed_target = das.speed_target
+        pd_mode = das.PD_mode
+        position_error = das.position_error
+        das_merge_intent = das.merge_intent - 1
+        das_turn_intent = das.turn_intent - 1
+        cruise_mode = das.cruise_mode
+        cruise_speed = das.cruise_speed
+        follow_mode = das.follow_mode
+        follow_mode_thw = das.follow_mode_thw
+        follow_mode_buffer = das.follow_mode_buffer
+        merge_assistance = das.merge_assistance
+        aeb_assistance = das.aeb_assistance
+        merge_min_thw = das.merge_min_thw
+        aeb_min_thw = das.aeb_min_thw
+        feasible_thw = min(das.feasible_thw, 100.0)
+        aeb_in_progress = das.aeb_in_progress
+        aeb_manually_disengaged = das.aeb_manually_disengaged
+        use_preferred_acc_profile = das.use_preferred_accel_profile
+
+        # traffic around us:
+        nearby_flattened = NearbyVehiclesFlattened()
+        nearby_vehicles_flatten(situation.nearby_vehicles, nearby_flattened, True)
+        flattened_count = nearby_vehicles_flattened_get_count(nearby_flattened)
+        nearby_exists_flags = np.array([nearby_vehicles_flattened_get_car_id(nearby_flattened, i) != -1 for i in range(flattened_count)], dtype=np.float32)
+        nearby_distances = np.array([nearby_vehicles_flattened_get_distance(nearby_flattened, i) for i in range(flattened_count)], dtype=np.float32).clip(0, 1000.0)  # Clip distances to [0, 1000] meters
+        nearby_ttcs = np.array([nearby_vehicles_flattened_get_time_to_collision(nearby_flattened, i) for i in range(flattened_count)], dtype=np.float32).clip(0, 10.0)  # Clip TTC to [0, 10] seconds
+        nearby_thws = np.array([nearby_vehicles_flattened_get_time_headway(nearby_flattened, i) for i in range(flattened_count)], dtype=np.float32).clip(0, 10.0)  # Clip THW to [0, 10] seconds
+        
+        # map variables:
+        lane_indicator = car_get_indicator_lane(agent) - 1
+        turn_indicator = car_get_indicator_turn(agent) - 1
+        lane_change_requested = car_get_request_indicated_lane(agent)
+        turn_requested = car_get_request_indicated_turn(agent)
+        is_on_leftmost_lane = situation.is_on_leftmost_lane
+        is_on_rightmost_lane = situation.is_on_rightmost_lane
+        left_exists = situation.is_lane_change_left_possible    # merge considered
+        right_exists = situation.is_lane_change_right_possible  # exit considered
+        exit_available = situation.is_exit_available # if rightmost lane of this road provides opportunity to exit
+        merge_available = situation.is_on_entry_ramp # if leftmost lane of this road provides opportunity to merge
+        approaching_dead_end = situation.is_approaching_dead_end
+        approaching_intersection = situation.is_an_intersection_upcoming
+        distance_to_lane_end = situation.distance_to_end_of_lane_from_leading_edge
+        # is_turn_left_possible = # TODO
+        # is_turn_right_possible = # TODO
+
+        # # concat all these into a float32 np array
         obs = np.concatenate([
-            np.array([speed, left_possible, right_possible], dtype=np.float32),
-            nearby_distances / 100, # Normalize distances to [0, 10] by dividing by 100
-            nearby_exists_flags,    # Boolean flags indicating if a nearby vehicle exists
-            nearby_ttcs / 10,  # Normalize TTC to [0, 1] by dividing by 10
-            nearby_thws / 10   # Normalize THW to [0, 1] by dividing by 10
+            # Driving assistant state
+            np.array([
+            speed / 10,
+            speed_target / 10,
+            pd_mode,
+            position_error / 100,
+            das_merge_intent,
+            das_turn_intent,
+            cruise_mode,
+            cruise_speed / 10,
+            follow_mode,
+            follow_mode_thw / 10,
+            follow_mode_buffer / 10,
+            merge_assistance,
+            aeb_assistance,
+            merge_min_thw / 10,
+            aeb_min_thw / 10,
+            feasible_thw / 10,
+            aeb_in_progress,
+            aeb_manually_disengaged,
+            use_preferred_acc_profile
+            ], dtype=np.float32),
+
+            # Nearby vehicles existence flags
+            nearby_exists_flags.astype(np.float32),
+
+            # Nearby vehicles distances
+            nearby_distances.astype(np.float32) / 100,
+
+            # Nearby vehicles time-to-collision
+            nearby_ttcs.astype(np.float32) / 10,
+
+            # Nearby vehicles time-headway
+            nearby_thws.astype(np.float32) / 10,
+
+            # Map and situational variables
+            np.array([
+            lane_indicator,
+            turn_indicator,
+            lane_change_requested,
+            turn_requested,
+            is_on_leftmost_lane,
+            is_on_rightmost_lane,
+            left_exists,
+            right_exists,
+            exit_available,
+            merge_available,
+            approaching_dead_end,
+            approaching_intersection,
+            distance_to_lane_end / 100
+            ], dtype=np.float32)
         ])
-        return obs.astype(np.float32)
+
+        return obs
 
     def _get_reward(self):
         # if there is no lead vehicle, we want to encourage the agent to drive faster. If there is, we want the agent to maintain 3 seconds distance to the lead vehicle
@@ -77,16 +168,6 @@ class AwesimEnv(gym.Env):
         my_speed = car_get_speed(self.agent)
 
         return to_mph(my_speed) / 100.0  # Encourage driving faster
-
-        # if not situation.is_vehicle_ahead:
-        #     return to_mph(my_speed) / 100.0  # Encourage driving faster when no lead vehicle is present
-        # else:
-        #     # Maintain 3 seconds distance to the lead vehicle
-        #     desired_distance = my_speed * 3.0  # 3 seconds distance
-        #     actual_distance = situation.distance_to_lead_vehicle
-        #     difference = actual_distance - desired_distance
-        #     difference_in_time = difference / my_speed if my_speed > 0 else 0.0
-        #     return -abs(difference_in_time)  # Penalize for not maintaining distance
         
     def _should_terminate(self):
         # detect crash with lead vehicle
@@ -112,9 +193,6 @@ class AwesimEnv(gym.Env):
 
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
         super().reset(seed=seed, options=options)
-        # if self.sim is not None:
-        #     sim_free(self.sim)
-        # self.sim = sim_malloc()
         sim_disconnect_from_render_server(self.sim)
         awesim_setup(self.sim, self.city_width, self.num_cars, 0.02, clock_reading(0, 8, 0, 0), WEATHER_SUNNY)
         if self.synchronized:
@@ -123,177 +201,167 @@ class AwesimEnv(gym.Env):
             sim_connect_to_render_server(self.sim, "127.0.0.1", 4242)
 
         sim_set_agent_enabled(self.sim, True)
+        sim_set_agent_driving_assistant_enabled(self.sim, True)
         self.agent = sim_get_agent_car(self.sim)
+        self.das = sim_get_driving_assistant(self.sim, self.agent.id)
+        driving_assistant_reset_settings(self.das, self.agent)
         
         situational_awareness_build(self.sim, self.agent.id)
         obs = self._get_observation()
         info = {}
         return obs, info
-    
-    def step(self, action: Any) -> tuple[Any, SupportsFloat, bool, bool, dict[str, Any]]:
-        return self.step_cont_action_space(action) if isinstance(self.action_space, spaces.Box) else self.step_discrete_action_space(action)
-
-    def step_cont_action_space(self, action: Any) -> tuple[Any, float, bool, bool, dict[str, Any]]:
-
-        situational_awareness_build(self.sim, self.agent.id)
-        situation = sim_get_situational_awareness(self.sim, self.agent.id)
-        ongoing_procedure = sim_get_ongoing_procedure(self.sim, self.agent.id)
-        status = PROCEDURE_STATUS_INIT_FAILED_REASON_NOT_IMPLEMENTED
-
-        # Action factors:
-        no_op_proc_logit = action[0]
-        merge_proc_logit = action[1]
-        adjust_speed_proc_logit = action[2]
-        stop_proc_logit = action[3]
-        cruise_proc_logit = action[4]
-        pass_proc_logit = action[5]
-        procedure_to_follow = np.argmax([no_op_proc_logit, merge_proc_logit, adjust_speed_proc_logit, stop_proc_logit, cruise_proc_logit]) # TODO: temporarily removing pass_proc_logit
-        current_speed = car_get_speed(self.agent)
-        desired_speed = current_speed + (action[6] * from_mph(60))  # Scale action[6] to mph
-        top_speed = self.agent.capabilities.top_speed
-        desired_speed = np.clip(desired_speed, -from_mph(10), top_speed)  # Clamp desired speed between [-10mph, top_speed_mph]
-        duration = (action[7] + 1) * 5.0  # Scale action[7] to [0, 10] seconds
-        duration = np.clip(duration, 0.1, 10.0)  # Clamp duration between [0.1s, 10s]
-        merge_dir = INDICATOR_LEFT if action[8] < 0 else INDICATOR_RIGHT
-        adaptive_cruise = 1.0 if action[9] > 0 else 0.0
-        follow_distance_seconds = (action[10] + 1) * 3.0  # Scale action[10] to [0, 6] seconds
-        follow_distance_seconds = np.clip(follow_distance_seconds, 0.1, 6.0)  # Clamp follow distance between [0.1s, 6s]
-        use_preferred_acceleration_profile = 1.0 if action[11] > 0 else 0.0
-        leave_indicators_on = 1.0 if action[12] > 0 else 0.0
-        use_linear_braking = 1.0 if action[13] > 0 else 0.0
 
 
-        if procedure_to_follow == 0:  # NO_OP
-            # print(f"Initializing NO_OP procedure with duration {duration} seconds and leave indicators on: {leave_indicators_on}...")
-            status = procedure_init(self.sim, self.agent, ongoing_procedure, PROCEDURE_NO_OP, [duration, leave_indicators_on, use_preferred_acceleration_profile])  # Arguments: duration, whether to leave indicators on, whether to use preferred acceleration profile (0 or 1)
-        elif procedure_to_follow == 1:  # MERGE
-            if merge_dir == INDICATOR_LEFT and not situation.lane_left:
-                # print(f"Car {self.agent.id} cannot merge left, lane does not exist.")
-                status = PROCEDURE_STATUS_INIT_FAILED_REASON_IMPOSSIBLE
-            elif merge_dir == INDICATOR_RIGHT and not situation.lane_right:
-                # print(f"Car {self.agent.id} cannot merge right, lane does not exist.")
-                status = PROCEDURE_STATUS_INIT_FAILED_REASON_IMPOSSIBLE
-            else:
-                if current_speed < 0:
-                    # print(f"Car {self.agent.id} cannot merge, speed is negative.")
-                    status = PROCEDURE_STATUS_INIT_FAILED_REASON_IMPOSSIBLE
-                else:
-                    # print(f"Initializing MERGE procedure with direction {merge_dir}...")
-                    status = procedure_init(self.sim, self.agent, ongoing_procedure, PROCEDURE_MERGE, [float(merge_dir), duration, max(desired_speed, from_mph(1)), adaptive_cruise, follow_distance_seconds, 0.0])
-        elif procedure_to_follow == 2:  # ADJUST_SPEED
-            # print(f"Initializing ADJUST_SPEED procedure with speed delta {to_mph(desired_speed)} mph...")
-            status = procedure_init(self.sim, self.agent, ongoing_procedure, PROCEDURE_ADJUST_SPEED, [desired_speed, from_mph(0.5), duration, 0.0])
-        elif procedure_to_follow == 3:  # STOP
-            # print(f"Initializing STOP procedure with linear braking={use_linear_braking} and duration={duration} seconds...")
-            status = procedure_init(self.sim, self.agent, ongoing_procedure, PROCEDURE_STOP, [use_linear_braking, duration, use_preferred_acceleration_profile])
-        elif procedure_to_follow == 4:  # CRUISE
-            # print(f"Initializing CRUISE procedure with adaptive={adaptive_cruise} and speed={to_mph(desired_speed)} mph...")
-            status = procedure_init(self.sim, self.agent, ongoing_procedure, PROCEDURE_CRUISE, [duration, max(desired_speed, from_mph(0)), adaptive_cruise, follow_distance_seconds, 0.0])
-        elif procedure_to_follow == 5:  # PASS
-            # print(f"Initializing PASS procedure with duration={duration} seconds...")
-            # check if there is a car ahead to pass
-            if not situation.is_vehicle_ahead or not situation.lane_left or current_speed < 0:
-                # print(f"Car {self.agent.id} cannot pass, no lead vehicle or no left lane or car is reversing.")
-                status = PROCEDURE_STATUS_INIT_FAILED_REASON_IMPOSSIBLE
-            else:
-                next_vehicle_speed = car_get_speed(situation.lead_vehicle)
-                # make our desired speed higher than the lead vehicle's speed
-                desired_speed = max(next_vehicle_speed + from_mph(5), desired_speed)  # Ensure we want to pass at least 5 mph faster than the lead vehicle
-                status = procedure_init(self.sim, self.agent, ongoing_procedure, PROCEDURE_PASS, [situation.lead_vehicle.id, duration, desired_speed, True, meters(10), use_preferred_acceleration_profile])  # Arguments: lead vehicle ID, duration, desired speed, whether to merge back after passing, merge distance buffer, whether to use preferred acceleration profile (0 or 1)
+    def step(self, action: Any) -> tuple[Any, float, bool, bool, dict[str, Any]]:
+        # configure das based on action
+
+        # print(f"Action received: {action}")
+
+        # speed adjustment. +/- 10 mph
+        speed_adjustment = float(action[0]) * from_mph(10)
+        speed_target_new = self.das.speed_target + speed_adjustment
+        speed_target_new = np.clip(speed_target_new, from_mph(-10), from_mph(self.agent.capabilities.top_speed))
+        # print(f"Setting speed target to {to_mph(speed_target_new)} mph (adjusted by {to_mph(speed_adjustment)} mph)")
+        driving_assistant_configure_speed_target(self.das, self.agent, self.sim, mps(speed_target_new))
+
+        # PD toggle
+        pd_mode = not self.das.PD_mode if action[1] > 0 else self.das.PD_mode
+        # print(f"Setting PD mode to {'enabled' if pd_mode else 'disabled'}")
+        driving_assistant_configure_PD_mode(self.das, self.agent, self.sim, pd_mode)
+
+        # position error adjustment
+        position_error_adjustment = float(action[2]) * meters(10)  # Adjust by +/- 10 meters
+        new_position_error = self.das.position_error + position_error_adjustment
+        # print(f"Setting position error to {new_position_error} m")
+        driving_assistant_configure_position_error(self.das, self.agent, self.sim, meters(new_position_error))
+
+        # merge intent adjustment. More than 0.75 magnitude should set the intent on that side. Between 0.25 and 0.75 should adjust the intent towards that side. Less than 0.25 magnitude should not change the intent.
+        new_merge_intent = self.das.merge_intent
+        if action[3] > 0.75:
+            new_merge_intent = INDICATOR_RIGHT
+        elif action[3] < -0.75:
+            new_merge_intent = INDICATOR_LEFT
+        elif action[3] > 0.25:
+            # if it was NO_INDICATOR, set it to INDICATOR_RIGHT, if it was INDICATOR_LEFT, set it to INDICATOR_NONE, if it was INDICATOR_RIGHT, do nothing
+            if self.das.merge_intent == INDICATOR_NONE:
+                new_merge_intent = INDICATOR_RIGHT
+            elif self.das.merge_intent == INDICATOR_LEFT:
+                new_merge_intent = INDICATOR_NONE
+        elif action[3] < -0.25:
+            # if it was NO_INDICATOR, set it to INDICATOR_LEFT, if it was INDICATOR_RIGHT, set it to INDICATOR_NONE, if it was INDICATOR_LEFT, do nothing
+            if self.das.merge_intent == INDICATOR_NONE:
+                new_merge_intent = INDICATOR_LEFT
+            elif self.das.merge_intent == INDICATOR_RIGHT:
+                new_merge_intent = INDICATOR_NONE
         else:
-            # print(f"Invalid procedure_to_follow: {procedure_to_follow}")
-            status = PROCEDURE_STATUS_INIT_FAILED_REASON_NOT_IMPLEMENTED
+            # do nothing
+            pass
+        # print(f"Setting merge intent to {new_merge_intent}")
+        driving_assistant_configure_merge_intent(self.das, self.agent, self.sim, new_merge_intent)
 
-        reward = 0
-        terminated = False
-        truncated = False
 
-        if status == PROCEDURE_STATUS_INITIALIZED:
-            while (status in [PROCEDURE_STATUS_INITIALIZED, PROCEDURE_STATUS_IN_PROGRESS] and not terminated and not truncated):
-                status = procedure_step(self.sim, self.agent, ongoing_procedure)
-                if status not in [PROCEDURE_STATUS_IN_PROGRESS, PROCEDURE_STATUS_COMPLETED]:
-                    # print(f"Agent {self.agent.id} failed to execute procedure. Status: {status}")
-                    break   # Note: Even though procedure_step will recommend some controls even when the procedure already succeeded, we do not apply it since we want the agent to be able to apply new procedures right away.
-                simulate(self.sim, self.decision_interval)
-                situational_awareness_build(self.sim, self.agent.id)
-                reward += self._get_reward() * self.decision_interval  # Accumulate reward over the decision interval
-                terminated = self._should_terminate()
-                truncated = self._should_truncate()
-
+        # similarly, do turn intent adjustment
+        new_turn_intent = self.das.turn_intent
+        if action[4] > 0.75:
+            new_turn_intent = INDICATOR_RIGHT
+        elif action[4] < -0.75:
+            new_turn_intent = INDICATOR_LEFT
+        elif action[4] > 0.25:
+            # if it was NO_INDICATOR, set it to INDICATOR_RIGHT, if it was INDICATOR_LEFT, set it to INDICATOR_NONE, if it was INDICATOR_RIGHT, do nothing
+            if self.das.turn_intent == INDICATOR_NONE:
+                new_turn_intent = INDICATOR_RIGHT
+            elif self.das.turn_intent == INDICATOR_LEFT:
+                new_turn_intent = INDICATOR_NONE
+        elif action[4] < -0.25:
+            # if it was NO_INDICATOR, set it to INDICATOR_LEFT, if it was INDICATOR_RIGHT, set it to INDICATOR_NONE, if it was INDICATOR_LEFT, do nothing
+            if self.das.turn_intent == INDICATOR_NONE:
+                new_turn_intent = INDICATOR_LEFT
+            elif self.das.turn_intent == INDICATOR_RIGHT:
+                new_turn_intent = INDICATOR_NONE
         else:
-            # print(f"Agent {self.agent.id} failed to initialize procedure. Status: {status}")
-            car_reset_all_control_variables(self.agent)
-            simulate(self.sim, self.decision_interval)  # simulate the step even if procedure initialization failed
-            situational_awareness_build(self.sim, self.agent.id)
-            reward += self._get_reward() * self.decision_interval  # Accumulate reward over the decision interval
-            terminated = self._should_terminate()
-            truncated = self._should_truncate()
+            # do nothing
+            pass
+        # print(f"Setting turn intent to {new_turn_intent}")
+        driving_assistant_configure_turn_intent(self.das, self.agent, self.sim, new_turn_intent)
 
+        # cruise mode toggle. Toggle if action[5] > 0.25
+        new_cruise_mode = self.das.cruise_mode if action[5] <= 0.25 else not self.das.cruise_mode
+        # print(f"Setting cruise mode to {'enabled' if new_cruise_mode else 'disabled'}")
+        driving_assistant_configure_cruise_mode(self.das, self.agent, self.sim, new_cruise_mode)
+
+        # cruise speed adjustment. Adjust like speed adjustment. Clip to keep it positive
+        cruise_speed_adjustment = float(action[6]) * from_mph(10)  # Adjust by +/- 10 mph
+        new_cruise_speed = self.das.cruise_speed + cruise_speed_adjustment
+        new_cruise_speed = np.clip(new_cruise_speed, from_mph(0.1), from_mph(self.agent.capabilities.top_speed))
+        # print(f"Setting cruise speed to {to_mph(new_cruise_speed)} mph (adjusted by {to_mph(cruise_speed_adjustment)} mph)")
+        driving_assistant_configure_cruise_speed(self.das, self.agent, self.sim, mps(new_cruise_speed))
+
+        # follow mode toggle. Toggle if action[7] > 0.25
+        new_follow_mode = self.das.follow_mode if action[7] <= 0.25 else not self.das.follow_mode
+        # print(f"Setting follow mode to {'enabled' if new_follow_mode else 'disabled'}")
+        driving_assistant_configure_follow_mode(self.das, self.agent, self.sim, new_follow_mode)
+
+        # follow mode time headway adjustment. Adjust by +/- 1 second
+        follow_mode_thw_adjustment = float(action[8]) * 1.0  # Adjust by +/- 1 second
+        new_follow_mode_thw = self.das.follow_mode_thw + follow_mode_thw_adjustment
+        new_follow_mode_thw = np.clip(new_follow_mode_thw, 0.1, 5.0)  # Clip to [0.1, 5.0] seconds
+        # print(f"Setting follow mode time headway to {new_follow_mode_thw} seconds (adjusted by {follow_mode_thw_adjustment} seconds)")
+        driving_assistant_configure_follow_mode_thw(self.das, self.agent, self.sim, seconds(new_follow_mode_thw))
+
+        # follow mode buffer adjustment. Adjust by +/- 1 meter
+        follow_mode_buffer_adjustment = float(action[9]) * meters(1)  # Adjust by +/- 1 meter
+        new_follow_mode_buffer = self.das.follow_mode_buffer + follow_mode_buffer_adjustment
+        new_follow_mode_buffer = np.clip(new_follow_mode_buffer, from_feet(1), meters(10))  # Clip to [1 foot, 10 meters]
+        # print(f"Setting follow mode buffer to {to_feet(new_follow_mode_buffer)} feet (adjusted by {to_feet(follow_mode_buffer_adjustment)} feet)")
+        driving_assistant_configure_follow_mode_buffer(self.das, self.agent, self.sim, meters(new_follow_mode_buffer))
+
+        # merge assistance toggle. Toggle if action[10] > 0.25
+        new_merge_assistance = self.das.merge_assistance if action[10] <= 0.25 else not self.das.merge_assistance
+        # print(f"Setting merge assistance to {'enabled' if new_merge_assistance else 'disabled'}")
+        driving_assistant_configure_merge_assistance(self.das, self.agent, self.sim, new_merge_assistance)
+
+        # aeb assistance toggle. Toggle if action[11] > 0.25
+        new_aeb_assistance = self.das.aeb_assistance if action[11] <= 0.25 else not self.das.aeb_assistance
+        # print(f"Setting AEB assistance to {'enabled' if new_aeb_assistance else 'disabled'}")
+        driving_assistant_configure_aeb_assistance(self.das, self.agent, self.sim, new_aeb_assistance)
+
+        # merge minimum time headway adjustment. Adjust by +/- 1 seconds
+        merge_min_thw_adjustment = float(action[12]) * 1.0  # Adjust by +/- 1 second
+        new_merge_min_thw = self.das.merge_min_thw + merge_min_thw_adjustment
+        new_merge_min_thw = np.clip(new_merge_min_thw, 0.1, 5.0)  # Clip to [0.1, 5.0] seconds
+        # print(f"Setting merge minimum time headway to {new_merge_min_thw} seconds (adjusted by {merge_min_thw_adjustment} seconds)")
+        driving_assistant_configure_merge_min_thw(self.das, self.agent, self.sim, seconds(new_merge_min_thw))
+
+        # aeb minimum time headway adjustment. Adjust by +/- 0.2 seconds
+        aeb_min_thw_adjustment = float(action[13]) * 0.2  # Adjust by +/- 0.2 seconds
+        new_aeb_min_thw = self.das.aeb_min_thw + aeb_min_thw_adjustment
+        new_aeb_min_thw = np.clip(new_aeb_min_thw, 0.1, 1.0)  # Clip to [0.1, 1.0] seconds
+        # print(f"Setting AEB minimum time headway to {new_aeb_min_thw} seconds (adjusted by {aeb_min_thw_adjustment} seconds)")
+        driving_assistant_configure_aeb_min_thw(self.das, self.agent, self.sim, seconds(new_aeb_min_thw))
+
+        # aeb manually disengage. do it if action[14] > 0.25
+        if action[14] > 0.25:
+            if self.das.aeb_in_progress:
+                # print(f"Manually disengaging AEB for agent {self.agent.id}")
+                driving_assistant_aeb_manually_disengage(self.das, self.agent, self.sim)
+
+        # use preferred acceleration profile toggle. Toggle if action[15] > 0.25
+        new_use_preferred_acc_profile = self.das.use_preferred_accel_profile if action[15] <= 0.25 else not self.das.use_preferred_accel_profile
+        # print(f"Setting use preferred acceleration profile to {'enabled' if new_use_preferred_acc_profile else 'disabled'}")
+        driving_assistant_configure_use_preferred_accel_profile(self.das, self.agent, self.sim, new_use_preferred_acc_profile)
+
+        # simulate for a while. das will operate for us during this time
+        simulate(self.sim, self.decision_interval)
+
+        reward = self._get_reward()
+        terminated = self._should_terminate()
+        truncated = self._should_truncate()
         obs = self._get_observation()
-        info = {"status": status, "time": sim_get_time(self.sim)}
+        
+        obs = self._get_observation()
+        info = {"time": sim_get_time(self.sim)}
         return obs, reward, terminated, truncated, info
 
-    def step_discrete_action_space(self, action: Any) -> tuple[Any, float, bool, bool, dict[str, Any]]:
-        situational_awareness_build(self.sim, self.agent.id)
-        situation = sim_get_situational_awareness(self.sim, self.agent.id)
-        ongoing_procedure = sim_get_ongoing_procedure(self.sim, self.agent.id)
-        status = PROCEDURE_STATUS_INIT_FAILED_REASON_NOT_IMPLEMENTED
-        if action == 0 or action == 1:
-            speed_delta_mag = from_mph(10) if action == 0 else from_mph(5)  # Increase speed by 10 mph or decrease by 5 mph
-            speed_delta_direction = 1 if action == 0 else -1
-            speed_delta = speed_delta_direction * speed_delta_mag
-            # print(f"Initializing ADJUST_SPEED procedure with speed delta {to_mph(speed_delta)} mph...")
-            status = procedure_init(self.sim, self.agent, ongoing_procedure, PROCEDURE_ADJUST_SPEED, [car_get_speed(self.agent) + speed_delta, from_mph(0.5), 5.0, 0.0])  # Arguments: desired speed, tolerance, timeout duration, whether to use preferred acceleration profile (0 or 1)
-        elif action == 2 or action == 3:
-            merge_dir = INDICATOR_LEFT if action == 2 else INDICATOR_RIGHT
-            if merge_dir == INDICATOR_LEFT and not situation.lane_left:
-                # print(f"Car {self.agent.id} cannot merge left, lane does not exist.")
-                status = PROCEDURE_STATUS_INIT_FAILED_REASON_IMPOSSIBLE
-            elif merge_dir == INDICATOR_RIGHT and not situation.lane_right:
-                # print(f"Car {self.agent.id} cannot merge right, lane does not exist.")
-                status = PROCEDURE_STATUS_INIT_FAILED_REASON_IMPOSSIBLE
-            else:
-                speed = car_get_speed(self.agent)
-                if speed < 0:
-                    # print(f"Car {self.agent.id} cannot merge, speed is negative.")
-                    status = PROCEDURE_STATUS_INIT_FAILED_REASON_IMPOSSIBLE
-                else:
-                # print(f"Initializing MERGE procedure with direction {merge_dir}...")
-                    status = procedure_init(self.sim, self.agent, ongoing_procedure, PROCEDURE_MERGE, [float(merge_dir), 5.0, max(speed, from_mph(1)), 0.0, 2.0, 0.0])  # Arguments: CarIndicator direction (left/right), timeout_duration, desired cruise speed, whether cruise is adaptive, follow distance in seconds (if adaptive), whether to use preferred acceleration profile (0 or 1)
-        elif action == 4 or action == 5:
-            speed = car_get_speed(self.agent)
-            adaptive = 1.0 if action == 5 else 0.0
-            # print(f"Initializing CRUISE procedure with adaptive={adaptive} and speed={to_mph(speed)} mph...")
-            status = procedure_init(self.sim, self.agent, ongoing_procedure, PROCEDURE_CRUISE, [5.0, max(speed, from_mph(0)), adaptive, 2.0, 0.0])  # Arguments: duration, desired cruise speed, whether adaptive, follow duration in seconds (if adaptive), whether to use preferred acceleration profile (0 or 1)
-
-        reward = 0
-        terminated = False
-        truncated = False
-
-        if status == PROCEDURE_STATUS_INITIALIZED:
-            while (status in [PROCEDURE_STATUS_INITIALIZED, PROCEDURE_STATUS_IN_PROGRESS] and not terminated and not truncated):
-                status = procedure_step(self.sim, self.agent, ongoing_procedure)
-                if status not in [PROCEDURE_STATUS_IN_PROGRESS, PROCEDURE_STATUS_COMPLETED]:
-                    # print(f"Agent {self.agent.id} failed to execute procedure. Status: {status}")
-                    break   # Note: Even though procedure_step will recommend some controls even when the procedure already succeeded, we do not apply it since we want the agent to be able to apply new procedures right away.
-                simulate(self.sim, self.decision_interval)
-                situational_awareness_build(self.sim, self.agent.id)
-                reward += self._get_reward() * self.decision_interval  # Accumulate reward over the decision interval
-                terminated = self._should_terminate()
-                truncated = self._should_truncate()
-
-        else:
-            # print(f"Agent {self.agent.id} failed to initialize procedure. Status: {status}")
-            car_reset_all_control_variables(self.agent)
-            simulate(self.sim, self.decision_interval)  # simulate the step even if procedure initialization failed
-            situational_awareness_build(self.sim, self.agent.id)
-            reward += self._get_reward() * self.decision_interval  # Accumulate reward over the decision interval
-            terminated = self._should_terminate()
-            truncated = self._should_truncate()
-
-        obs = self._get_observation()
-        info = {"status": status, "time": sim_get_time(self.sim)}
-        return obs, reward, terminated, truncated, info
     
     def close(self) -> None:
         sim_disconnect_from_render_server(self.sim)
