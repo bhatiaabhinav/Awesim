@@ -15,11 +15,12 @@ bool DRAW_ROAD_NAMES = true;           // Draw road names
 int HUD_FONT_SIZE = 24;                // Font size for HUD text
 
 // Keep the screen centered on the following car ID:
-int CAMERA_CENTERED_ON_CAR_ID = 0;              // Car 0 is "agent" car
+const static CarId AGENT_CAR = 0;
+CarId CAMERA_CENTERED_ON_CAR_ID = AGENT_CAR;              // Car 0 is "agent" car
 bool CAMERA_CENTERED_ON_CAR_ENABLED = false;    // can be toggled with 'f' key
 
 const CarId HIGHLIGHTED_CARS[] = {
-    0,      // Highlight the agent car by default
+    AGENT_CAR,      // Highlight the agent car by default
     ID_NULL // The last element MUST be ID_NULL to mark end of array.
 };
 

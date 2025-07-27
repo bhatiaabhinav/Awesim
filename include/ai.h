@@ -157,7 +157,7 @@ struct SituationalAwareness {
 };
 typedef struct SituationalAwareness SituationalAwareness;
 
-Seconds sim_get_time(Simulation* self); // Get the current simulation time. Forward declaration.
+Seconds sim_get_time(const Simulation* self); // Get the current simulation time. Forward declaration.
 SituationalAwareness* sim_get_situational_awareness(Simulation* self, CarId id);    // Forward declaration
 void situational_awareness_build(Simulation* sim, CarId car_id);
 
@@ -347,12 +347,14 @@ MetersPerSecondSquared control_speed_compute_bounded_accel(ControlError error, M
 
 
 typedef struct DrivingAssistant {
+    Seconds last_configured_at;                  // Timestamp of the driving assistant's last settings update
+
     // Acceleration based on target speed:
     MetersPerSecond speed_target;       // Determines target speed
 
     // Standard PD mode to adjust both speed and position.
-    bool PD_mode;                     // Whether to adjust speed AND position.
-    Meters position_target;            // Determines target position
+    bool PD_mode;                       // Whether to adjust speed AND position.
+    Meters position_error;             // Determines target position. Error = current position - target position. i.e., this is error in target position's frame of reference.
 
     // Requested intents to determine steering:
     CarIndicator merge_intent;           // For switching lanes within a road, or merge/exit a highway. Set to None automatically once the assistant issues merge command.
@@ -364,7 +366,7 @@ typedef struct DrivingAssistant {
     Meters follow_mode_buffer;              // Buffer distance to maintain from the next vehicle, in addition to the follow_mode_thw distance. You can also think of this as the distance to maintain in stopped traffic.
 
     // Smart mode parameters:
-    double cruise_speed;                            // Target speed in cruise mode. If follow_mode is on, then this is the maximum speed to maintain irrespective of whether there is a lead vehicle and its speed. Even in standard modes, this is the maximum speed the car is allowed while it minimizes the errors.
+    MetersPerSecond cruise_speed;                            // Target speed in cruise mode. If follow_mode is on, then this is the maximum speed to maintain irrespective of whether there is a lead vehicle and its speed. Even in standard modes, this is the maximum speed the car is allowed while it minimizes the errors.
     Seconds follow_mode_thw;                        // Follow distance = car_speed * follow_mode_thw (time headway)
 
     // Safety assistent
@@ -385,4 +387,55 @@ typedef struct DrivingAssistant {
 } DrivingAssistant;
 
 // Set the car's control variables. Returns false if there is an error, true otherwise.
-bool driving_assistant_control_car(DrivingAssistant das, Car* car, Simulation* sim);
+bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* sim);
+
+// To update internal state of the driving assistant, this is called at the end of each simulation step.
+void driving_assistant_post_sim_step(DrivingAssistant* das, Car* car, Simulation* sim);
+
+// Clear the driving assistant's parameters to default values.
+bool driving_assistant_reset_settings(DrivingAssistant* das, Car* car);
+
+
+// Getters
+
+Seconds driving_assistant_get_last_configured_at(const DrivingAssistant* das);
+MetersPerSecond driving_assistant_get_speed_target(const DrivingAssistant* das);
+bool driving_assistant_get_PD_mode(const DrivingAssistant* das);
+Meters driving_assistant_get_position_error(const DrivingAssistant* das);
+CarIndicator driving_assistant_get_merge_intent(const DrivingAssistant* das);
+CarIndicator driving_assistant_get_turn_intent(const DrivingAssistant* das);
+bool driving_assistant_get_cruise_mode(const DrivingAssistant* das);
+bool driving_assistant_get_follow_mode(const DrivingAssistant* das);
+Meters driving_assistant_get_follow_mode_buffer(const DrivingAssistant* das);
+double driving_assistant_get_cruise_speed(const DrivingAssistant* das);
+Seconds driving_assistant_get_follow_mode_thw(const DrivingAssistant* das);
+bool driving_assistant_get_merge_assistance(const DrivingAssistant* das);
+bool driving_assistant_get_aeb_assistance(const DrivingAssistant* das);
+Seconds driving_assistant_get_merge_min_thw(const DrivingAssistant* das);
+Seconds driving_assistant_get_aeb_min_thw(const DrivingAssistant* das);
+Seconds driving_assistant_get_feasible_thw(const DrivingAssistant* das);
+bool driving_assistant_get_aeb_in_progress(const DrivingAssistant* das);
+bool driving_assistant_get_aeb_manually_disengaged(const DrivingAssistant* das);
+bool driving_assistant_get_use_preferred_accel_profile(const DrivingAssistant* das);
+
+
+// Setters (will update the timestamp)
+
+void driving_assistant_configure_speed_target(DrivingAssistant* das, const Car* car, const Simulation* sim, MetersPerSecond speed_target);
+void driving_assistant_configure_PD_mode(DrivingAssistant* das, const Car* car, const Simulation* sim, bool PD_mode);
+void driving_assistant_configure_position_error(DrivingAssistant* das, const Car* car, const Simulation* sim, Meters position_error);
+void driving_assistant_configure_merge_intent(DrivingAssistant* das, const Car* car, const Simulation* sim, CarIndicator merge_intent);
+void driving_assistant_configure_turn_intent(DrivingAssistant* das, const Car* car, const Simulation* sim, CarIndicator turn_intent);
+void driving_assistant_configure_cruise_mode(DrivingAssistant* das, const Car* car, const Simulation* sim, bool cruise_mode);
+void driving_assistant_configure_follow_mode(DrivingAssistant* das, const Car* car, const Simulation* sim, bool follow_mode);
+void driving_assistant_configure_follow_mode_buffer(DrivingAssistant* das, const Car* car, const Simulation* sim, Meters follow_mode_buffer);
+void driving_assistant_configure_cruise_speed(DrivingAssistant* das, const Car* car, const Simulation* sim, MetersPerSecond cruise_speed);
+void driving_assistant_configure_follow_mode_thw(DrivingAssistant* das, const Car* car, const Simulation* sim, Seconds follow_mode_thw);
+void driving_assistant_configure_merge_assistance(DrivingAssistant* das, const Car* car, const Simulation* sim, bool merge_assistance);
+void driving_assistant_configure_aeb_assistance(DrivingAssistant* das, const Car* car, const Simulation* sim, bool aeb_assistance);
+void driving_assistant_configure_merge_min_thw(DrivingAssistant* das, const Car* car, const Simulation* sim, Seconds merge_min_thw);
+void driving_assistant_configure_aeb_min_thw(DrivingAssistant* das, const Car* car, const Simulation* sim, Seconds aeb_min_thw);
+void driving_assistant_configure_use_preferred_accel_profile(DrivingAssistant* das, const Car* car, const Simulation* sim, bool use_preferred_accel_profile);
+
+// Manually disengage AEB. This will stay true until feasible THW > 1 second, then will be set to false.
+void driving_assistant_aeb_manually_disengage(DrivingAssistant* das, const Car* car, const Simulation* sim);

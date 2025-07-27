@@ -82,6 +82,7 @@ void sim_init(Simulation* sim) {
     sim->dt = 0.02;
     sim->weather = WEATHER_SUNNY;
     sim->is_agent_enabled = false; // Agent car is disabled by default
+    sim->is_agent_driving_assistant_enabled = false; // Driving assistant is disabled by default
     sim->is_synchronized = false; // Not synchronized by default
     sim->is_paused = false; // Simulation is not paused by default
     sim->simulation_speedup = 1.0; // Default to real-time speed
@@ -90,11 +91,12 @@ void sim_init(Simulation* sim) {
     sim->is_connected_to_render_server = false; // Not connected to render server by default
     for (int i = 0; i < MAX_CARS_IN_SIMULATION; i++) {
         sim->situational_awarenesses[i].is_valid = false; // Initialize situational awareness for each car
-        sim->ongoing_procedures[i].type = PROCEDURE_NONE;
-        sim->ongoing_procedures[i].status = PROCEDURE_STATUS_NONE; // Initialize procedure status
-        for (int j = 0; j < MAX_PROCEDURE_STATE_VARS; j++) {
-            sim->ongoing_procedures[i].state[j] = 0.0; // Initialize procedure state variables
-        }
+        // sim->ongoing_procedures[i].type = PROCEDURE_NONE;
+        // sim->ongoing_procedures[i].status = PROCEDURE_STATUS_NONE; // Initialize procedure status
+        // for (int j = 0; j < MAX_PROCEDURE_STATE_VARS; j++) {
+        //     sim->ongoing_procedures[i].state[j] = 0.0; // Initialize procedure state variables
+        // }
+        driving_assistant_reset_settings(&sim->driving_assistants[i], &sim->cars[i]); // Reset driving assistant settings for each car
     }
 }
 
@@ -136,12 +138,17 @@ SituationalAwareness* sim_get_situational_awareness(Simulation* self, CarId id) 
     return &self->situational_awarenesses[id];
 }
 
-Procedure* sim_get_ongoing_procedure(Simulation* self, CarId id) {
+// Procedure* sim_get_ongoing_procedure(Simulation* self, CarId id) {
+//     if (!self || id < 0 || id >= self->num_cars) return NULL;
+//     return &self->ongoing_procedures[id];
+// }
+
+DrivingAssistant* sim_get_driving_assistant(Simulation* self, CarId id) {
     if (!self || id < 0 || id >= self->num_cars) return NULL;
-    return &self->ongoing_procedures[id];
+    return &self->driving_assistants[id];
 }
 
-Seconds sim_get_time(Simulation* self) {
+Seconds sim_get_time(const Simulation* self) {
     return self ? self->time : 0;
 }
 
@@ -160,6 +167,10 @@ DayOfWeek sim_get_day_of_week(const Simulation* self) {
 
 bool sim_is_agent_enabled(Simulation* self) {
     return self ? self->is_agent_enabled : false;
+}
+
+bool sim_is_agent_driving_assistant_enabled(Simulation* self) {
+    return self ? self->is_agent_driving_assistant_enabled : false;
 }
 
 Car* sim_get_agent_car(Simulation* self) {
@@ -181,6 +192,15 @@ void sim_set_agent_enabled(Simulation* self, bool enabled) {
         LOG_INFO("Agent enabled: %s", enabled ? "true" : "false");
     } else {
         LOG_ERROR("Attempted to set agent enabled on a NULL Simulation pointer");
+    }
+}
+
+void sim_set_agent_driving_assistant_enabled(Simulation* self, bool enabled) {
+    if (self) {
+        self->is_agent_driving_assistant_enabled = enabled;
+        LOG_INFO("Agent driving assistant enabled: %s", enabled ? "true" : "false");
+    } else {
+        LOG_ERROR("Attempted to set agent driving assistant enabled on a NULL Simulation pointer");
     }
 }
 
