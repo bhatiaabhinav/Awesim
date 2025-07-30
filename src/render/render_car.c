@@ -276,12 +276,15 @@ void render_car(SDL_Renderer* renderer, const Car* car, Map* map, const bool pai
                                               screen_right_headlight_end.x, screen_right_headlight_end.y, light_thickness, 255, 255, 100, 255);
     }
 
-    // Draw taillights (always on, unless braking)
+    // Draw taillights
     bool is_braking = false;
-    if (car->speed > 0 && car->acceleration < -0.1) {   // a little bit of tolerance since brake lights don't turn on with just a touch of brake
+    bool is_reversing = false;
+    if (car->speed > 0 && car->acceleration < -0.01) {   // a little bit of tolerance since brake lights don't turn on with just a touch of brake
         is_braking = true; // Braking
-    } else if (car->speed < 0) {
-        is_braking = true; // reversing
+    } else if (car->speed < -0 && car->acceleration > 0.01) {
+        is_braking = true; // Reversing with brake
+    } else if (car->speed < -0.001) {
+        is_reversing = true; // reversing. Will render taillights in colors used for reversing in real cars, which is white-yellowish.
     }
 
     {
@@ -325,10 +328,26 @@ void render_car(SDL_Renderer* renderer, const Car* car, Map* map, const bool pai
         SDL_Point screen_right_taillight_end = to_screen_coords(world_right_taillight_end, screen_width, screen_height);
 
         // Draw taillights (faint red normally, full red when braking)
-        Uint8 taillight_r = is_braking ? 255 : 100;
-        Uint8 taillight_g = 0;
-        Uint8 taillight_b = 0;
-        Uint8 taillight_a = is_braking ? 255 : 150;
+        // Uint8 taillight_r = is_braking ? 255 : 100;
+        // Uint8 taillight_g = 0;
+        // Uint8 taillight_b = 0;
+
+        Uint8 taillight_r, taillight_g, taillight_b;
+        if (is_reversing) {
+            taillight_r = 255; // White-yellowish for reversing
+            taillight_g = 255;
+            taillight_b = 128;
+        } else if (is_braking) {
+            taillight_r = 255; // Full red when braking
+            taillight_g = 0;
+            taillight_b = 0;
+        } else {
+            taillight_r = 100; // Faint red normally
+            taillight_g = 0;
+            taillight_b = 0;
+        }
+
+        Uint8 taillight_a = (is_braking || is_reversing) ? 255 : 150;
         thickLineRGBA_ignore_if_outside_screen(renderer, screen_left_taillight_start.x, screen_left_taillight_start.y,
                                               screen_left_taillight_end.x, screen_left_taillight_end.y, light_thickness, taillight_r, taillight_g, taillight_b, taillight_a);
         thickLineRGBA_ignore_if_outside_screen(renderer, screen_right_taillight_start.x, screen_right_taillight_start.y,

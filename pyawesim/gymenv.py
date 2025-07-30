@@ -230,10 +230,11 @@ class AwesimEnv(gym.Env):
         driving_assistant_configure_PD_mode(self.das, self.agent, self.sim, pd_mode)
 
         # position error adjustment
-        position_error_adjustment = float(action[2]) * meters(10)  # Adjust by +/- 10 meters
-        new_position_error = self.das.position_error + position_error_adjustment
-        # print(f"Setting position error to {new_position_error} m")
-        driving_assistant_configure_position_error(self.das, self.agent, self.sim, meters(new_position_error))
+        if pd_mode:
+            position_error_adjustment = float(action[2]) * meters(10)  # Adjust by +/- 10 meters
+            new_position_error = self.das.position_error + position_error_adjustment
+            # print(f"Setting position error to {new_position_error} m")
+            driving_assistant_configure_position_error(self.das, self.agent, self.sim, meters(new_position_error))
 
         # merge intent adjustment. More than 0.75 magnitude should set the intent on that side. Between 0.25 and 0.75 should adjust the intent towards that side. Less than 0.25 magnitude should not change the intent.
         new_merge_intent = self.das.merge_intent
@@ -301,19 +302,20 @@ class AwesimEnv(gym.Env):
         # print(f"Setting follow mode to {'enabled' if new_follow_mode else 'disabled'}")
         driving_assistant_configure_follow_mode(self.das, self.agent, self.sim, new_follow_mode)
 
-        # follow mode time headway adjustment. Adjust by +/- 1 second
-        follow_mode_thw_adjustment = float(action[8]) * 1.0  # Adjust by +/- 1 second
-        new_follow_mode_thw = self.das.follow_mode_thw + follow_mode_thw_adjustment
-        new_follow_mode_thw = np.clip(new_follow_mode_thw, 0.1, 5.0)  # Clip to [0.1, 5.0] seconds
-        # print(f"Setting follow mode time headway to {new_follow_mode_thw} seconds (adjusted by {follow_mode_thw_adjustment} seconds)")
-        driving_assistant_configure_follow_mode_thw(self.das, self.agent, self.sim, seconds(new_follow_mode_thw))
+        if new_follow_mode:
+            # follow mode time headway adjustment. Adjust by +/- 1 second
+            follow_mode_thw_adjustment = float(action[8]) * 1.0  # Adjust by +/- 1 second
+            new_follow_mode_thw = self.das.follow_mode_thw + follow_mode_thw_adjustment
+            new_follow_mode_thw = np.clip(new_follow_mode_thw, 0.1, 5.0)  # Clip to [0.1, 5.0] seconds
+            # print(f"Setting follow mode time headway to {new_follow_mode_thw} seconds (adjusted by {follow_mode_thw_adjustment} seconds)")
+            driving_assistant_configure_follow_mode_thw(self.das, self.agent, self.sim, seconds(new_follow_mode_thw))
 
-        # follow mode buffer adjustment. Adjust by +/- 1 meter
-        follow_mode_buffer_adjustment = float(action[9]) * meters(1)  # Adjust by +/- 1 meter
-        new_follow_mode_buffer = self.das.follow_mode_buffer + follow_mode_buffer_adjustment
-        new_follow_mode_buffer = np.clip(new_follow_mode_buffer, from_feet(1), meters(10))  # Clip to [1 foot, 10 meters]
-        # print(f"Setting follow mode buffer to {to_feet(new_follow_mode_buffer)} feet (adjusted by {to_feet(follow_mode_buffer_adjustment)} feet)")
-        driving_assistant_configure_follow_mode_buffer(self.das, self.agent, self.sim, meters(new_follow_mode_buffer))
+            # follow mode buffer adjustment. Adjust by +/- 1 meter
+            follow_mode_buffer_adjustment = float(action[9]) * meters(1)  # Adjust by +/- 1 meter
+            new_follow_mode_buffer = self.das.follow_mode_buffer + follow_mode_buffer_adjustment
+            new_follow_mode_buffer = np.clip(new_follow_mode_buffer, from_feet(1), meters(10))  # Clip to [1 foot, 10 meters]
+            # print(f"Setting follow mode buffer to {to_feet(new_follow_mode_buffer)} feet (adjusted by {to_feet(follow_mode_buffer_adjustment)} feet)")
+            driving_assistant_configure_follow_mode_buffer(self.das, self.agent, self.sim, meters(new_follow_mode_buffer))
 
         # merge assistance toggle. Toggle if action[10] > 0.25
         new_merge_assistance = self.das.merge_assistance if action[10] <= 0.25 else not self.das.merge_assistance
@@ -325,19 +327,21 @@ class AwesimEnv(gym.Env):
         # print(f"Setting AEB assistance to {'enabled' if new_aeb_assistance else 'disabled'}")
         driving_assistant_configure_aeb_assistance(self.das, self.agent, self.sim, new_aeb_assistance)
 
-        # merge minimum time headway adjustment. Adjust by +/- 1 seconds
-        merge_min_thw_adjustment = float(action[12]) * 1.0  # Adjust by +/- 1 second
-        new_merge_min_thw = self.das.merge_min_thw + merge_min_thw_adjustment
-        new_merge_min_thw = np.clip(new_merge_min_thw, 0.1, 5.0)  # Clip to [0.1, 5.0] seconds
-        # print(f"Setting merge minimum time headway to {new_merge_min_thw} seconds (adjusted by {merge_min_thw_adjustment} seconds)")
-        driving_assistant_configure_merge_min_thw(self.das, self.agent, self.sim, seconds(new_merge_min_thw))
+        if new_merge_assistance:
+            # merge minimum time headway adjustment. Adjust by +/- 1 seconds
+            merge_min_thw_adjustment = float(action[12]) * 1.0  # Adjust by +/- 1 second
+            new_merge_min_thw = self.das.merge_min_thw + merge_min_thw_adjustment
+            new_merge_min_thw = np.clip(new_merge_min_thw, 0.1, 5.0)  # Clip to [0.1, 5.0] seconds
+            # print(f"Setting merge minimum time headway to {new_merge_min_thw} seconds (adjusted by {merge_min_thw_adjustment} seconds)")
+            driving_assistant_configure_merge_min_thw(self.das, self.agent, self.sim, seconds(new_merge_min_thw))
 
-        # aeb minimum time headway adjustment. Adjust by +/- 0.2 seconds
-        aeb_min_thw_adjustment = float(action[13]) * 0.2  # Adjust by +/- 0.2 seconds
-        new_aeb_min_thw = self.das.aeb_min_thw + aeb_min_thw_adjustment
-        new_aeb_min_thw = np.clip(new_aeb_min_thw, 0.1, 1.0)  # Clip to [0.1, 1.0] seconds
-        # print(f"Setting AEB minimum time headway to {new_aeb_min_thw} seconds (adjusted by {aeb_min_thw_adjustment} seconds)")
-        driving_assistant_configure_aeb_min_thw(self.das, self.agent, self.sim, seconds(new_aeb_min_thw))
+        if new_aeb_assistance:
+            # aeb minimum time headway adjustment. Adjust by +/- 0.2 seconds
+            aeb_min_thw_adjustment = float(action[13]) * 0.2  # Adjust by +/- 0.2 seconds
+            new_aeb_min_thw = self.das.aeb_min_thw + aeb_min_thw_adjustment
+            new_aeb_min_thw = np.clip(new_aeb_min_thw, 0.1, 1.0)  # Clip to [0.1, 1.0] seconds
+            # print(f"Setting AEB minimum time headway to {new_aeb_min_thw} seconds (adjusted by {aeb_min_thw_adjustment} seconds)")
+            driving_assistant_configure_aeb_min_thw(self.das, self.agent, self.sim, seconds(new_aeb_min_thw))
 
         # aeb manually disengage. do it if action[14] > 0.25
         if action[14] > 0.25:
@@ -351,7 +355,17 @@ class AwesimEnv(gym.Env):
         driving_assistant_configure_use_preferred_accel_profile(self.das, self.agent, self.sim, new_use_preferred_acc_profile)
 
         # simulate for a while. das will operate for us during this time
-        simulate(self.sim, self.decision_interval)
+
+        done = False
+        t = 0
+        termination_check_interval = 0.1  # Check for termination conditions every 0.1 seconds
+        while not done and t < self.decision_interval:
+            # We are breaking the decision_interval into smaller steps to check for termination or truncation conditions more frequently
+            simulate(self.sim, termination_check_interval)
+            t += termination_check_interval
+            situational_awareness_build(self.sim, self.agent.id)  # Update situational awareness after simulation step
+            done = self._should_terminate() or self._should_truncate()
+
 
         reward = self._get_reward()
         terminated = self._should_terminate()

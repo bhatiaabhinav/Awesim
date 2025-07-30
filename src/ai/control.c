@@ -93,16 +93,15 @@ MetersPerSecondSquared control_speed_compute_bounded_accel(ControlError error, M
 }
 
 
-
 // Target may be moving or stationary
 MetersPerSecondSquared car_compute_acceleration_chase_target(const Car* car, Meters position_target, MetersPerSecond speed_target, Meters position_target_overshoot_buffer, MetersPerSecond speed_limit, bool use_preferred_accel_profile) {
     Meters position_current = car_get_lane_progress_meters(car);
     MetersPerSecond speed_current = car_get_speed(car);
-    // printf("position_current: %f, speed_current: %f\n", position_current, speed_current);
-    // printf("position_target: %f, speed_target: %f\n", position_target, speed_target);
+    LOG_TRACE("position_current: %f, speed_current: %f", position_current, speed_current);
+    LOG_TRACE("position_target: %f, speed_target: %f", position_target, speed_target);
     Meters position_error = position_current - position_target;     // in target frame
     MetersPerSecond speed_error = speed_current - speed_target;     // in target frame
-    // printf("Position error: %f, Speed error: %f\n", position_error, speed_error);
+    LOG_TRACE("Position error: %f, Speed error: %f", position_error, speed_error);
     ControlError error = {position_error, speed_error};
     CarAccelProfile capable = car->capabilities.accel_profile;
     CarAccelProfile preferred = use_preferred_accel_profile ? car_accel_profile_get_effective(car->capabilities.accel_profile, car->preferences.acceleration_profile) : capable;
@@ -110,75 +109,83 @@ MetersPerSecondSquared car_compute_acceleration_chase_target(const Car* car, Met
     const MetersPerSecondSquared acc_eps = 0.1;
 
     if (position_current <= position_target) { // target in front of us
-        // printf("Target in front of us\n");
+        LOG_TRACE("Target in front of us");
         if (speed_current >= 0 ) {    // we are travelling forward            // already catching up. we need to slow down at some point
             MetersPerSecondSquared const_accel = control_compute_const_accel(error);
             if (const_accel < -preferred.max_deceleration) {    // can't brake in time with preferred profile. So, we brake max.
-                // printf("Can't brake in time with preferred profile. So, we brake max.\n");
+                LOG_TRACE("Can't brake in time with preferred profile. So, we brake max.");
                 accel = fmax(const_accel, -capable.max_deceleration);
             } else {
                 accel = control_compute_bounded_accel(error, preferred.max_deceleration, MPH_60);
                 if (accel > 0) {   // we are still too far to brake if the braking controller is suggesting acceleration. Cruise to a higher speed using the acceleration controller.
+                    LOG_TRACE("We are still too far to brake if the braking controller is suggesting acceleration. Cruise to a higher speed using the acceleration controller.");
                     accel = control_speed_compute_bounded_accel((ControlError){0, speed_current - speed_limit}, preferred.max_acceleration, MPH_60);
+                    LOG_TRACE("Accel: %f", accel);
+                } else {
+                    LOG_TRACE("We are not too far to brake. Just brake smoothly.");
                 }
             }
         } else {    // we are in reverse gear, even though the target is ahead. We need to bring speed to 0 using brakes as soon as possible within comfort.
             accel = control_speed_compute_bounded_accel((ControlError){0, speed_current}, capable.max_deceleration, MPH_60) + acc_eps;
         }
     } else {    // target already left behind. We are in overshot situation.
-        // printf("We are in overshot situation.\n");
-        // printf("Position error: %f, Speed error: %f\n", position_error, speed_error);
-        if (position_current > position_target + position_target_overshoot_buffer) {
-            // fprintf(stderr, "CRASHED! Breaking hard and backing up.\n");
+        LOG_TRACE("We are in overshot situation.");
+
+        bool crashed = position_current > position_target + position_target_overshoot_buffer;
+        bool crashed_and_still_moving_ahead = crashed && speed_current >= 0;
+
+        if (crashed_and_still_moving_ahead) {
+            LOG_TRACE("CRASHED! Breaking hard.");
             // exit(EXIT_FAILURE);
-            accel = speed_current > 0 ? -capable.max_deceleration : -capable.max_acceleration_reverse_gear;
-        } else { // not crashed yet, but target still left behind
-            // printf("Not crashed yet, but target still left behind\n");
-            if (speed_current > 0) {    // and we are moving forward.
-                // printf("And we are moving forward.\n");
+            accel = -capable.max_deceleration;
+        } else { // not crashed yet or backing out of a crash, but target still left behind
+            LOG_TRACE("Not crashed yet (or backing out of a crash), target position behind us");
+            if (speed_current > 0) {    // and we are moving forward (and yet to crash)
+                LOG_TRACE("And we are moving forward.");
                 if (speed_current > speed_target) { // and moving forward at a faster pace than the target speed. Gap decreasing from the final crash point and increasing from where we should be.
                     MetersPerSecondSquared const_acc_to_prevent_crash = control_compute_const_accel((ControlError){position_current - (position_target + position_target_overshoot_buffer), speed_current});
                     if (const_acc_to_prevent_crash < -preferred.max_deceleration) { // our preferred profile can't avoid the crash
-                        // printf("Our preferred profile can't avoid the crash\n");
+                        LOG_TRACE("Our preferred profile can't avoid the crash");
                         accel = fmax(const_acc_to_prevent_crash, -capable.max_deceleration);
                         if (const_acc_to_prevent_crash < -capable.max_deceleration) {
-                            // fprintf(stderr, "OH NO!!!!!: Can't brake in time with capable profile. We are going to crash! Unless some lane change or some other event saves us.\n");
+                            LOG_TRACE("OH NO!!!!!: Can't brake in time with capable profile. We are going to crash! Unless some lane change or some other event saves us.");
                         }
                     } else {
                         // we don't press full brakes if overshot only by little (e.g., we were trying to maintain a particular distance from the next vehicle, but overshot such that current distance is desired minus small eps), but allow full brakes if overshot by much.
-                        // printf("We don't press full brakes if overshot only by little, but allow full brakes if overshot by much.\n");
+                        LOG_TRACE("We don't press full brakes if overshot only by little, but allow full brakes if overshot by much.");
                         accel = control_speed_compute_bounded_accel(error, capable.max_deceleration, MPH_60) - acc_eps;
                     }
                 } else {    // we are still moving forward but gap decreasing as our target (probably d distance behind the leading vehile when we are trying to tail) chases us. Just brake smoothly, unless chasing us too fast... like the next car suddenly sped up.
-                    // printf("We are still moving forward but gap decreasing as our target chases us.\n");
+                    LOG_TRACE("We are still moving forward but gap decreasing as our target chases us.");
                     MetersPerSecondSquared const_acc = control_compute_const_accel(error);
                     if (const_acc > preferred.max_deceleration) {   // target chasing us too fast.
-                        // printf("Target chasing us too fast.\n");
+                        LOG_TRACE("Target chasing us too fast.");
                         accel = fmin(const_acc, capable.max_deceleration);
                     } else {
-                        // printf("Target not chasing us too fast.\n");
+                        LOG_TRACE("Target not chasing us too fast.");
                         accel = control_compute_bounded_accel(error, preferred.max_deceleration, MPH_60);
                     }
                 }
             } else {    // we are in reverse gear. We want to get back to the target as soon as possible.
-                // printf("We are in reverse gear. We want to get back to the target as soon as possible.\n");
+                LOG_TRACE("We are in reverse gear. We want to get back to the target as soon as possible.");
                 if (speed_current < speed_target) { // we are reversing fast enough. Need to break at some point.
-                    // printf("We are reversing fast enough. Need to break at some point.\n");
+                    LOG_TRACE("We are reversing fast enough. Need to break at some point.");
                     MetersPerSecondSquared const_acc = control_compute_const_accel(error);
                     if (const_acc > preferred.max_deceleration) {   // can't brake slowly
-                        // printf("Can't brake slowly\n");
+                        LOG_TRACE("Can't brake slowly");
                         accel = fmin(const_acc, capable.max_deceleration);
-                    } else {    // brake smoothly
-                        // printf("Brake smoothly\n");
+                    } else {    // can brake smoothly
                         accel = control_compute_bounded_accel(error, capable.max_deceleration, MPH_60);
-                        if (accel > 0) {   // we are too far. Let us reverse faster.
-                            // printf("We are too far. Let us reverse faster.\n");
-                            accel = control_speed_compute_bounded_accel((ControlError){0, speed_current + speed_limit}, preferred.max_acceleration_reverse_gear, MPH_60);
+                        if (accel < 0) {   // we are too far. Let us reverse faster.
+                            LOG_TRACE("We are too far. Let us reverse faster.");
+                            accel = control_speed_compute_bounded_accel((ControlError){0, speed_current + speed_limit}, preferred.max_acceleration_reverse_gear, MPH_60); 
+                        } else {
+                            LOG_TRACE("Braking smoothly");
                         }
                     }
                 } else {
                     // were reversing too slow. Gap increasing as our target is also reversing. We might even crash if gap increases target + buffer. Just reverse full speed to catch up to the speed of the target, unless the error is too low.
-                    // printf("Were reversing too slow. Gap increasing as our target is also reversing.\n");
+                    LOG_TRACE("Were reversing too slow. Gap increasing as our target is also reversing.");
                     accel = control_speed_compute_bounded_accel((ControlError){0, speed_current - (speed_target - MPH_60)}, capable.max_acceleration_reverse_gear, MPH_60);
                 }
             }

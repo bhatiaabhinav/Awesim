@@ -169,7 +169,7 @@ void procedure_cancel(Simulation* sim, Car* car, Procedure* procedure) {
 void set_acceleration_cruise_control(Car* car, const SituationalAwareness* situation, MetersPerSecond cruise_speed_desired, bool adaptive, MetersPerSecond follow_distance_in_seconds, bool use_preferred_acc_profile) {
     MetersPerSecondSquared acc;
     if (adaptive) {
-        acc = car_compute_acceleration_adaptive_cruise(car, situation, cruise_speed_desired, follow_distance_in_seconds, use_preferred_acc_profile, from_feet(3));
+        acc = car_compute_acceleration_adaptive_cruise(car, situation, cruise_speed_desired, follow_distance_in_seconds, from_feet(3), use_preferred_acc_profile);
     } else {
         acc = car_compute_acceleration_cruise(car, cruise_speed_desired, use_preferred_acc_profile);
     }

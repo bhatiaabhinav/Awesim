@@ -94,6 +94,7 @@ void awesim_map_setup(Map* map, Meters city_width) {
     // Define constants
     const int interstate_num_lanes = 3;
     const int state_num_lanes = 2;
+    const int local_num_lanes = 1;
     const Meters lane_width = from_feet(12);
     const Meters city_height = city_width;
     const Meters city_width_half = city_width / 2;
@@ -205,7 +206,7 @@ void awesim_map_setup(Map* map, Meters city_width) {
     // 1st Avenue
     const Coordinates _Av1N_center = vec_midpoint(_S2E_left->center, _S2W_left->center);
     const Meters av1_length = city_height - 4 * I2E->width;
-    Road* _Av1N = straight_road_create_from_center_dir_len(map, _Av1N_center, DIRECTION_NORTH, av1_length, 1, lane_width, local_speed_limit, 1.0);
+    Road* _Av1N = straight_road_create_from_center_dir_len(map, _Av1N_center, DIRECTION_NORTH, av1_length, local_num_lanes, lane_width, local_speed_limit, 1.0);
     LOG_TRACE("Created 1st Av N at center: (%.2f, %.2f) with length: %.2f", _Av1N_center.x, _Av1N_center.y, av1_length);
     Road* _Av1S = straight_road_make_opposite_and_update_adjacents(map, _Av1N);
     LOG_TRACE("Created 1st Av S at center: (%.2f, %.2f) with length: %.2f", _Av1S->center.x, _Av1S->center.y, av1_length);
@@ -233,7 +234,7 @@ void awesim_map_setup(Map* map, Meters city_width) {
 
     // 2nd Avenue
     const Coordinates _Av2N_center = vec_midpoint(_S2E_right->center, _S2W_right->center);
-    Road* _Av2N = straight_road_create_from_center_dir_len(map, _Av2N_center, DIRECTION_NORTH, av1_length, 1, lane_width, local_speed_limit, 1.0);
+    Road* _Av2N = straight_road_create_from_center_dir_len(map, _Av2N_center, DIRECTION_NORTH, av1_length, local_num_lanes, lane_width, local_speed_limit, 1.0);
     LOG_TRACE("Created 2nd Av N at center: (%.2f, %.2f) with length: %.2f", _Av2N_center.x, _Av2N_center.y, av1_length);
     Road* _Av2S = straight_road_make_opposite_and_update_adjacents(map, _Av2N);
     LOG_TRACE("Created 2nd Av S at center: (%.2f, %.2f) with length: %.2f", _Av2S->center.x, _Av2S->center.y, av1_length);
@@ -262,7 +263,7 @@ void awesim_map_setup(Map* map, Meters city_width) {
     // 1st Street
     const Coordinates _St1E_center = vec_midpoint(_S1N_above->center, _S1S_above->center);
     const Meters st1_length = city_width - 4 * I2E->width;
-    Road* _St1E = straight_road_create_from_center_dir_len(map, _St1E_center, DIRECTION_EAST, st1_length, 1, lane_width, local_speed_limit, 1.0);
+    Road* _St1E = straight_road_create_from_center_dir_len(map, _St1E_center, DIRECTION_EAST, st1_length, local_num_lanes, lane_width, local_speed_limit, 1.0);
     LOG_TRACE("Created 1st St E at center: (%.2f, %.2f) with length: %.2f", _St1E_center.x, _St1E_center.y, st1_length);
     Road* _St1W = straight_road_make_opposite_and_update_adjacents(map, _St1E);
     LOG_TRACE("Created 1st St W at center: (%.2f, %.2f) with length: %.2f", _St1W->center.x, _St1W->center.y, st1_length);
@@ -290,7 +291,7 @@ void awesim_map_setup(Map* map, Meters city_width) {
 
     // 2nd Street
     const Coordinates _St2E_center = vec_midpoint(_S1N_below->center, _S1S_below->center);
-    Road* _St2E = straight_road_create_from_center_dir_len(map, _St2E_center, DIRECTION_EAST, st1_length, 1, lane_width, local_speed_limit, 1.0);
+    Road* _St2E = straight_road_create_from_center_dir_len(map, _St2E_center, DIRECTION_EAST, st1_length, local_num_lanes, lane_width, local_speed_limit, 1.0);
     LOG_TRACE("Created 2nd St E at center: (%.2f, %.2f) with length: %.2f", _St2E_center.x, _St2E_center.y, st1_length);
     Road* _St2W = straight_road_make_opposite_and_update_adjacents(map, _St2E);
     LOG_TRACE("Created 2nd St W at center: (%.2f, %.2f) with length: %.2f", _St2W->center.x, _St2W->center.y, st1_length);
@@ -386,12 +387,12 @@ void awesim_map_setup(Map* map, Meters city_width) {
 
     // Top Right Extension (TRE, TRW, RTN, RTS)
     const Coordinates TRE_center = {_St1E_right_right->center.x, _Av2N_above_above->end_point.y + local_turn_radius + 0.5 * lane_width};
-    Road* TRE = straight_road_create_from_center_dir_len(map, TRE_center, DIRECTION_EAST, _St1E_right_right->length, 1, lane_width, local_speed_limit, 1.0);
+    Road* TRE = straight_road_create_from_center_dir_len(map, TRE_center, DIRECTION_EAST, _St1E_right_right->length, local_num_lanes, lane_width, local_speed_limit, 1.0);
     LOG_TRACE("Created top right extension road TRE at center: (%.2f, %.2f) with length: %.2f", TRE_center.x, TRE_center.y, _St1E_right_right->length);
     Road* TRW = straight_road_make_opposite_and_update_adjacents(map, TRE);
     LOG_TRACE("Created top right extension road TRW at center: (%.2f, %.2f) with length: %.2f", TRW->center.x, TRW->center.y, _St1E_right_right->length);
     const Coordinates RTN_center = {_St1E_right_right->end_point.x + local_turn_radius + 1.5 * lane_width, _Av2N_above_above->center.y};
-    Road* RTN = straight_road_create_from_center_dir_len(map, RTN_center, DIRECTION_NORTH, _Av2N_above_above->length, 1, lane_width, local_speed_limit, 1.0);
+    Road* RTN = straight_road_create_from_center_dir_len(map, RTN_center, DIRECTION_NORTH, _Av2N_above_above->length, local_num_lanes, lane_width, local_speed_limit, 1.0);
     LOG_TRACE("Created top right extension road RTN at center: (%.2f, %.2f) with length: %.2f", RTN_center.x, RTN_center.y, _Av2N_above_above->length);
     Road* RTS = straight_road_make_opposite_and_update_adjacents(map, RTN);
     LOG_TRACE("Created top right extension road RTS at center: (%.2f, %.2f) with length: %.2f", RTS->center.x, RTS->center.y, _Av2N_above_above->length);
@@ -423,12 +424,12 @@ void awesim_map_setup(Map* map, Meters city_width) {
 
     // Bottom Right Extension (BRE, BRW, RBN, RBS)
     const Coordinates BRE_center = {_St2E_right_right->center.x, _Av2N_below_below->start_point.y - local_turn_radius - 1.5 * lane_width};
-    Road* BRE = straight_road_create_from_center_dir_len(map, BRE_center, DIRECTION_EAST, _St2E_right_right->length, 1, lane_width, local_speed_limit, 1.0);
+    Road* BRE = straight_road_create_from_center_dir_len(map, BRE_center, DIRECTION_EAST, _St2E_right_right->length, local_num_lanes, lane_width, local_speed_limit, 1.0);
     LOG_TRACE("Created bottom right extension road BRE at center: (%.2f, %.2f) with length: %.2f", BRE_center.x, BRE_center.y, _St2E_right_right->length);
     Road* BRW = straight_road_make_opposite_and_update_adjacents(map, BRE);
     LOG_TRACE("Created bottom right extension road BRW at center: (%.2f, %.2f) with length: %.2f", BRW->center.x, BRW->center.y, _St2E_right_right->length);
     const Coordinates RBN_center = {_St2E_right_right->end_point.x + local_turn_radius + 1.5 * lane_width, _Av2N_below_below->center.y};
-    Road* RBN = straight_road_create_from_center_dir_len(map, RBN_center, DIRECTION_NORTH, _Av2N_below_below->length, 1, lane_width, local_speed_limit, 1.0);
+    Road* RBN = straight_road_create_from_center_dir_len(map, RBN_center, DIRECTION_NORTH, _Av2N_below_below->length, local_num_lanes, lane_width, local_speed_limit, 1.0);
     LOG_TRACE("Created bottom right extension road RBN at center: (%.2f, %.2f) with length: %.2f", RBN_center.x, RBN_center.y, _Av2N_below_below->length);
     Road* RBS = straight_road_make_opposite_and_update_adjacents(map, RBN);
     LOG_TRACE("Created bottom right extension road RBS at center: (%.2f, %.2f) with length: %.2f", RBS->center.x, RBS->center.y, _Av2N_below_below->length);
@@ -460,12 +461,12 @@ void awesim_map_setup(Map* map, Meters city_width) {
 
     // Bottom Left Extension (BLE, BLW, LBN, LBS)
     const Coordinates BLE_center = {_St2E_left_left->center.x, _Av1N_below_below->start_point.y - local_turn_radius - 1.5 * lane_width};
-    Road* BLE = straight_road_create_from_center_dir_len(map, BLE_center, DIRECTION_EAST, _St2E_left_left->length, 1, lane_width, local_speed_limit, 1.0);
+    Road* BLE = straight_road_create_from_center_dir_len(map, BLE_center, DIRECTION_EAST, _St2E_left_left->length, local_num_lanes, lane_width, local_speed_limit, 1.0);
     LOG_TRACE("Created bottom left extension road BLE at center: (%.2f, %.2f) with length: %.2f", BLE_center.x, BLE_center.y, _St2E_left_left->length);
     Road* BLW = straight_road_make_opposite_and_update_adjacents(map, BLE);
     LOG_TRACE("Created bottom left extension road BLW at center: (%.2f, %.2f) with length: %.2f", BLW->center.x, BLW->center.y, _St2E_left_left->length);
     const Coordinates LBN_center = {_St2E_left_left->start_point.x - local_turn_radius - lane_width / 2, _Av1N_below_below->center.y};
-    Road* LBN = straight_road_create_from_center_dir_len(map, LBN_center, DIRECTION_NORTH, _Av1N_below_below->length, 1, lane_width, local_speed_limit, 1.0);
+    Road* LBN = straight_road_create_from_center_dir_len(map, LBN_center, DIRECTION_NORTH, _Av1N_below_below->length, local_num_lanes, lane_width, local_speed_limit, 1.0);
     LOG_TRACE("Created bottom left extension road LBN at center: (%.2f, %.2f) with length: %.2f", LBN_center.x, LBN_center.y, _Av1N_below_below->length);
     Road* LBS = straight_road_make_opposite_and_update_adjacents(map, LBN);
     LOG_TRACE("Created bottom left extension road LBS at center: (%.2f, %.2f) with length: %.2f", LBS->center.x, LBS->center.y, _Av1N_below_below->length);
@@ -497,12 +498,12 @@ void awesim_map_setup(Map* map, Meters city_width) {
 
     // Top Left Extension (TLE, TLW, LTN, LTS)
     const Coordinates TLE_center = {_St1E_left_left->center.x, _Av1N_above_above->end_point.y + local_turn_radius + lane_width / 2};
-    Road* TLE = straight_road_create_from_center_dir_len(map, TLE_center, DIRECTION_EAST, _St1E_left_left->length, 1, lane_width, local_speed_limit, 1.0);
+    Road* TLE = straight_road_create_from_center_dir_len(map, TLE_center, DIRECTION_EAST, _St1E_left_left->length, local_num_lanes, lane_width, local_speed_limit, 1.0);
     LOG_TRACE("Created top left extension road TLE at center: (%.2f, %.2f) with length: %.2f", TLE_center.x, TLE_center.y, _St1E_left_left->length);
     Road* TLW = straight_road_make_opposite_and_update_adjacents(map, TLE);
     LOG_TRACE("Created top left extension road TLW at center: (%.2f, %.2f) with length: %.2f", TLW->center.x, TLW->center.y, _St1E_left_left->length);
     const Coordinates LTN_center = {_St1E_left_left->start_point.x - local_turn_radius - lane_width / 2, _Av1N_above_above->center.y};
-    Road* LTN = straight_road_create_from_center_dir_len(map, LTN_center, DIRECTION_NORTH, _Av1N_above_above->length, 1, lane_width, local_speed_limit, 1.0);
+    Road* LTN = straight_road_create_from_center_dir_len(map, LTN_center, DIRECTION_NORTH, _Av1N_above_above->length, local_num_lanes, lane_width, local_speed_limit, 1.0);
     LOG_TRACE("Created top left extension road LTN at center: (%.2f, %.2f) with length: %.2f", LTN_center.x, LTN_center.y, _Av1N_above_above->length);
     Road* LTS = straight_road_make_opposite_and_update_adjacents(map, LTN);
     LOG_TRACE("Created top left extension road LTS at center: (%.2f, %.2f) with length: %.2f", LTS->center.x, LTS->center.y, _Av1N_above_above->length);

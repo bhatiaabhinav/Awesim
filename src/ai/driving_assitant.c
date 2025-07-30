@@ -97,6 +97,13 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
     } else {
         // If not in cruise mode, use PD control.
         if (das->PD_mode) {
+            if (fabs(das->position_error) < from_centimeters(1)) {
+                // If position error is negligible, we can use standard speed control
+                LOG_DEBUG("Position error is negligible for car %d. Switching to standard speed control.", car->id);
+                das->PD_mode = false; // Disable PD mode if position error is negligible
+            }
+        }
+        if (das->PD_mode) {
             // Use PD control to adjust both speed and position
             Meters position_target = car_get_lane_progress_meters(car) - das->position_error; // Target position is current position minus the position error (which is the error in target position's frame of reference)
             Meters overshoot_buffer = from_feet(0);
@@ -139,7 +146,7 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
 
     // auto engagement conditions
     bool execute_aeb = false;
-    if (das->feasible_thw < das->aeb_min_thw || das->aeb_in_progress) {
+    if (das->aeb_assistance && (das->feasible_thw < das->aeb_min_thw || das->aeb_in_progress)) {
         // AEB should be engaged if feasible THW is below the threshold or if AEB is already in progress, unless manually disengaged.
         execute_aeb = !das->aeb_manually_disengaged;
     }
@@ -172,7 +179,18 @@ void driving_assistant_post_sim_step(DrivingAssistant* das, Car* car, Simulation
     }
     situational_awareness_build(sim, car_get_id(car)); // Ensure situational awareness is up-to-date
 
-    das->position_error += car_get_recent_forward_movement(car); // Update position error based on recent forward movement
+    if (das->cruise_mode) {
+        das->speed_target = car_get_speed(car); // Update speed target to current speed if in cruise mode, so that if cruise is suddenly disengaged, the car will not accelerate or decelerate unexpectedly.
+    }
+
+    if (das->PD_mode) {
+        das->position_error += car_get_recent_forward_movement(car); // Update position error based on recent forward movement
+        if (fabs(das->position_error) < from_centimeters(1)) {
+            // If position error is negligible, we can use standard speed control
+            LOG_DEBUG("Position error is negligible for car %d. Switching to standard speed control.", car->id);
+            das->PD_mode = false; // Disable PD mode if position error is negligible
+        }
+    }
 
     das->feasible_thw = _compute_feasible_thw(car, sim_get_situational_awareness(sim, car_get_id(car)));
 
@@ -253,7 +271,13 @@ void driving_assistant_configure_position_error(DrivingAssistant* das, const Car
     if (!validate_input(car, das, sim)) {
         return; // Early return if input validation fails
     }
-    das->position_error = position_error;
+    if (das->PD_mode) {
+        das->position_error = position_error;
+    } else {
+        LOG_WARN("Position error can only be configured when PD mode is enabled for car %d", car->id);
+        das->position_error = 0.0; // Reset position error if PD mode is not enabled. Just for good measure.
+        return; // Position error can only be set in PD mode
+    }
     das->last_configured_at = sim_get_time(sim);
 }
 
@@ -304,6 +328,10 @@ void driving_assistant_configure_follow_mode_buffer(DrivingAssistant* das, const
     if (!validate_input(car, das, sim)) {
         return;
     }
+    if (!das->follow_mode) {
+        LOG_WARN("Follow mode buffer can only be configured when follow mode is enabled for car %d", car->id);
+        return; // Follow mode buffer can only be set in follow mode
+    }
     if (follow_mode_buffer < from_feet(MINIMUM_FOLLOW_MODE_BUFFER_FEET)) {
         LOG_WARN("Follow mode buffer too small for car %d. Setting it to a minimum of %.1f feet.", car->id, MINIMUM_FOLLOW_MODE_BUFFER_FEET);
         follow_mode_buffer = from_feet(MINIMUM_FOLLOW_MODE_BUFFER_FEET);
@@ -328,6 +356,10 @@ void driving_assistant_configure_follow_mode_thw(DrivingAssistant* das, const Ca
     if (!validate_input(car, das, sim)) {
         return;
     }
+    if (!das->follow_mode) {
+        LOG_WARN("Follow mode THW can only be configured when follow mode is enabled for car %d", car->id);
+        return; // Follow mode THW can only be set in follow mode
+    }
     if (follow_mode_thw < MINIMUM_FOLLOW_MODE_THW) {
         LOG_WARN("Follow mode THW too small for car %d. Setting it to a minimum of %.1f seconds.", car->id, MINIMUM_FOLLOW_MODE_THW);
         follow_mode_thw = MINIMUM_FOLLOW_MODE_THW;
@@ -348,6 +380,10 @@ void driving_assistant_configure_aeb_assistance(DrivingAssistant* das, const Car
     if (!validate_input(car, das, sim)) {
         return;
     }
+    if (!aeb_assistance) {
+        das->aeb_in_progress = false; // Reset AEB state if AEB assistance is disabled
+        das->aeb_manually_disengaged = false; // Reset manual disengagement state if AEB assistance is disabled
+    }
     das->aeb_assistance = aeb_assistance;
     das->last_configured_at = sim_get_time(sim);
 }
@@ -355,6 +391,10 @@ void driving_assistant_configure_aeb_assistance(DrivingAssistant* das, const Car
 void driving_assistant_configure_merge_min_thw(DrivingAssistant* das, const Car* car, const Simulation* sim, Seconds merge_min_thw) {
     if (!validate_input(car, das, sim)) {
         return;
+    }
+    if (!das->merge_assistance) {
+        LOG_WARN("Merge minimum THW can only be configured when merge assistance is enabled for car %d", car->id);
+        return; // Merge minimum THW can only be set when merge assistance is enabled
     }
     if (merge_min_thw < MINIMUM_MERGE_MIN_THW) {
         LOG_WARN("Merge minimum THW too small for car %d. Setting it to a minimum of %.1f seconds.", car->id, MINIMUM_MERGE_MIN_THW);
@@ -367,6 +407,10 @@ void driving_assistant_configure_merge_min_thw(DrivingAssistant* das, const Car*
 void driving_assistant_configure_aeb_min_thw(DrivingAssistant* das, const Car* car, const Simulation* sim, Seconds aeb_min_thw) {
     if (!validate_input(car, das, sim)) {
         return;
+    }
+    if (!das->aeb_assistance) {
+        LOG_WARN("AEB minimum THW can only be configured when AEB assistance is enabled for car %d", car->id);
+        return; // AEB minimum THW can only be set when AEB assistance is enabled
     }
     if (aeb_min_thw < MINIMUM_AEB_MIN_THW) {
         LOG_WARN("AEB minimum THW too small for car %d. Setting it to a minimum of %.1f seconds.", car->id, MINIMUM_AEB_MIN_THW);
