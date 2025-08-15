@@ -10,7 +10,7 @@ from gymenv import AwesimEnv
 from bindings import *
 
 env = AwesimEnv(city_width=1000, num_cars=256, decision_interval=1, sim_duration=60 * 5)
-experiment_name = "sac_das"
+experiment_name = "sac_ctrl_speed_pdtoggleprob_rew_displacement_minus_heatloss_observe_ttc_256-256"
 
 load_path = sys.argv[1] if len(sys.argv) > 1 else None
 if load_path is not None and not os.path.exists(load_path):
@@ -21,7 +21,7 @@ if load_path is not None:
     print(f"Loading model from {load_path}")
     model = SAC.load(load_path, env=env)
 else:
-    model = SAC("MlpPolicy", env, policy_kwargs=dict(net_arch=[256, 128, 64]), learning_starts=10000, batch_size=64, learning_rate=0.0001, train_freq=1, verbose=1, device="cpu", tensorboard_log="./logs/sac_awesim_tensorboard/")
+    model = SAC("MlpPolicy", env, policy_kwargs=dict(net_arch=[256, 256]), learning_starts=10000, batch_size=64, learning_rate=0.0001, tau=0.001, train_freq=1, verbose=1, device="cpu", tensorboard_log="./logs/sac_awesim_tensorboard/")
 
     # Save a checkpoint every 10000 steps
     checkpoint_callback = CheckpointCallback(

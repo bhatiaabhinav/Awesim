@@ -52,6 +52,7 @@
 #include "../include/awesim.h"
 %}
 
+%include <stdint.i>  // SWIG typemap for uint32_t
 // Parse and wrap the headers
 %include "../include/utils.h"
 %include "../include/map.h"

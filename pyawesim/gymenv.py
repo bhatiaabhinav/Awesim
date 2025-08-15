@@ -5,7 +5,7 @@ from gymnasium import spaces
 from bindings import *
 
 class AwesimEnv(gym.Env):
-    def __init__(self, city_width: int = 1000, num_cars: int = 256, decision_interval: float = 0.1, sim_duration: float = 60 * 60, synchronized: bool = False, synchronized_sim_speedup = 1.0, should_render: bool = False) -> None:
+    def __init__(self, city_width: int = 1000, num_cars: int = 256, decision_interval: float = 0.1, sim_duration: float = 60 * 60, synchronized: bool = False, synchronized_sim_speedup = 1.0, should_render: bool = False, i = 0) -> None:
         super().__init__()
         self.city_width = city_width
         self.num_cars = num_cars
@@ -16,6 +16,7 @@ class AwesimEnv(gym.Env):
         self.should_render = should_render
 
         self.sim = sim_malloc()
+        seed_rng(i + 1)
         sim_init(self.sim)
         sim_set_agent_enabled(self.sim, True)
         sim_set_agent_driving_assistant_enabled(self.sim, True)
@@ -45,7 +46,7 @@ class AwesimEnv(gym.Env):
         self.action_space = spaces.Box(
             low=-1.0,
             high=1.0,
-            shape=(16,),
+            shape=(2,),
             dtype=np.float32
         )
 
@@ -60,13 +61,12 @@ class AwesimEnv(gym.Env):
 
         # driving stuff:
         speed = car_get_speed(agent)
+        acc = car_get_acceleration(agent)
         speed_target = das.speed_target
         pd_mode = das.PD_mode
         position_error = das.position_error
         das_merge_intent = das.merge_intent - 1
         das_turn_intent = das.turn_intent - 1
-        cruise_mode = das.cruise_mode
-        cruise_speed = das.cruise_speed
         follow_mode = das.follow_mode
         follow_mode_thw = das.follow_mode_thw
         follow_mode_buffer = das.follow_mode_buffer
@@ -74,7 +74,7 @@ class AwesimEnv(gym.Env):
         aeb_assistance = das.aeb_assistance
         merge_min_thw = das.merge_min_thw
         aeb_min_thw = das.aeb_min_thw
-        feasible_thw = min(das.feasible_thw, 100.0)
+        feasible_thw = np.clip(das.feasible_thw, 0.0, 100.0)
         aeb_in_progress = das.aeb_in_progress
         aeb_manually_disengaged = das.aeb_manually_disengaged
         use_preferred_acc_profile = das.use_preferred_accel_profile
@@ -87,7 +87,9 @@ class AwesimEnv(gym.Env):
         nearby_distances = np.array([nearby_vehicles_flattened_get_distance(nearby_flattened, i) for i in range(flattened_count)], dtype=np.float32).clip(0, 1000.0)  # Clip distances to [0, 1000] meters
         nearby_ttcs = np.array([nearby_vehicles_flattened_get_time_to_collision(nearby_flattened, i) for i in range(flattened_count)], dtype=np.float32).clip(0, 10.0)  # Clip TTC to [0, 10] seconds
         nearby_thws = np.array([nearby_vehicles_flattened_get_time_headway(nearby_flattened, i) for i in range(flattened_count)], dtype=np.float32).clip(0, 10.0)  # Clip THW to [0, 10] seconds
-        
+        nearby_speeds_relative = np.array([(car_get_speed(sim_get_car(sim, nearby_vehicles_flattened_get_car_id(nearby_flattened, i))) - speed) if nearby_exists_flags[i] else 0 for i in range(flattened_count)], dtype=np.float32)
+        nearby_acc_relative = np.array([(car_get_acceleration(sim_get_car(sim, nearby_vehicles_flattened_get_car_id(nearby_flattened, i))) - car_get_acceleration(agent)) if nearby_exists_flags[i] else 0 for i in range(flattened_count)], dtype=np.float32)
+
         # map variables:
         lane_indicator = car_get_indicator_lane(agent) - 1
         turn_indicator = car_get_indicator_turn(agent) - 1
@@ -110,24 +112,23 @@ class AwesimEnv(gym.Env):
             # Driving assistant state
             np.array([
             speed / 10,
+            acc,
             speed_target / 10,
             pd_mode,
             position_error / 100,
             das_merge_intent,
-            das_turn_intent,
-            cruise_mode,
-            cruise_speed / 10,
-            follow_mode,
-            follow_mode_thw / 10,
-            follow_mode_buffer / 10,
-            merge_assistance,
-            aeb_assistance,
-            merge_min_thw / 10,
-            aeb_min_thw / 10,
+            # das_turn_intent,
+            # follow_mode,
+            # follow_mode_thw / 10,
+            # follow_mode_buffer / 10,
+            # merge_assistance,
+            # aeb_assistance,
+            # merge_min_thw / 10,
+            # aeb_min_thw / 10,
             feasible_thw / 10,
             aeb_in_progress,
-            aeb_manually_disengaged,
-            use_preferred_acc_profile
+            # aeb_manually_disengaged,
+            # use_preferred_acc_profile
             ], dtype=np.float32),
 
             # Nearby vehicles existence flags
@@ -135,6 +136,12 @@ class AwesimEnv(gym.Env):
 
             # Nearby vehicles distances
             nearby_distances.astype(np.float32) / 100,
+
+            # Nearby vehicles relative speeds
+            nearby_speeds_relative.astype(np.float32) / 10,
+
+            # Nearby vehicles relative accelerations
+            nearby_acc_relative.astype(np.float32),
 
             # Nearby vehicles time-to-collision
             nearby_ttcs.astype(np.float32) / 10,
@@ -145,9 +152,9 @@ class AwesimEnv(gym.Env):
             # Map and situational variables
             np.array([
             lane_indicator,
-            turn_indicator,
-            lane_change_requested,
-            turn_requested,
+            # turn_indicator,
+            # lane_change_requested,
+            # turn_requested,
             is_on_leftmost_lane,
             is_on_rightmost_lane,
             left_exists,
@@ -162,14 +169,38 @@ class AwesimEnv(gym.Env):
 
         return obs
 
-    def _get_reward(self):
-        # if there is no lead vehicle, we want to encourage the agent to drive faster. If there is, we want the agent to maintain 3 seconds distance to the lead vehicle
+    def _power_applied_by_wheels_to_accelerate(self):
+        # Calculate the power applied by all wheels based on the current speed and acceleration
         situation = sim_get_situational_awareness(self.sim, 0)
         my_speed = car_get_speed(self.agent)
+        acceleration = car_get_acceleration(self.agent)
+        if (my_speed > 0 and my_speed * acceleration > 0): # speeding up
+            return my_speed * acceleration  # W/Kg
+        return 0    # braking or reversing
 
-        return to_mph(my_speed) / 100.0  # Encourage driving faster
-        
-    def _should_terminate(self):
+    def _power_applied_by_wheels_to_reverse(self):
+        # Calculate the power applied by all wheels based on the current speed and acceleration
+        situation = sim_get_situational_awareness(self.sim, 0)
+        my_speed = car_get_speed(self.agent)
+        acceleration = car_get_acceleration(self.agent)
+        if (my_speed < 0 and my_speed * acceleration > 0): # reversing
+            return my_speed * acceleration  # W/Kg
+        return 0    # braking or reversing
+
+    def _power_applied_by_brakes(self):
+        # Calculate the power applied by the brakes based on the current speed and braking force
+        situation = sim_get_situational_awareness(self.sim, 0)
+        my_speed = car_get_speed(self.agent)
+        acceleration = car_get_acceleration(self.agent)
+        if (my_speed * acceleration < 0): # braking
+            return -my_speed * acceleration  # W/Kg
+        return 0
+
+    def _get_reward(self):
+        # encourage moving forward
+        return to_mph(car_get_speed(self.agent)) / 100
+
+    def _crashed(self):
         # detect crash with lead vehicle
         situation = sim_get_situational_awareness(self.sim, 0)
         if situation.is_vehicle_ahead:
@@ -186,6 +217,9 @@ class AwesimEnv(gym.Env):
                 # print(f"Agent {self.agent.id} crashed into following vehicle #{situation.following_vehicle.id} at distance {distance_bumper_to_tail}.")
                 return True
         return False
+
+    def _should_terminate(self):
+        return self._crashed()
 
     def _should_truncate(self):
         # truncate if simulation time exceeds sim_duration
@@ -205,7 +239,12 @@ class AwesimEnv(gym.Env):
         self.agent = sim_get_agent_car(self.sim)
         self.das = sim_get_driving_assistant(self.sim, self.agent.id)
         driving_assistant_reset_settings(self.das, self.agent)
-        
+
+        # ----------- AEB enabled with hardcoded parameters ---------------------------- TODO: Make this adjustable in action space.
+        driving_assistant_configure_aeb_assistance(self.das, self.agent, self.sim, True)
+        driving_assistant_configure_aeb_min_thw(self.das, self.agent, self.sim, 0.5)
+        # ------------------------------------------------------------------------------
+
         situational_awareness_build(self.sim, self.agent.id)
         obs = self._get_observation()
         info = {}
@@ -217,163 +256,67 @@ class AwesimEnv(gym.Env):
 
         # print(f"Action received: {action}")
 
+        a_id = 0
+
         # speed adjustment. +/- 10 mph
-        speed_adjustment = float(action[0]) * from_mph(10)
+        speed_adjustment = float(action[a_id]) * from_mph(10)
         speed_target_new = self.das.speed_target + speed_adjustment
         speed_target_new = np.clip(speed_target_new, from_mph(-10), from_mph(self.agent.capabilities.top_speed))
         # print(f"Setting speed target to {to_mph(speed_target_new)} mph (adjusted by {to_mph(speed_adjustment)} mph)")
         driving_assistant_configure_speed_target(self.das, self.agent, self.sim, mps(speed_target_new))
+        a_id += 1
 
         # PD toggle
-        pd_mode = not self.das.PD_mode if action[1] > 0 else self.das.PD_mode
-        # print(f"Setting PD mode to {'enabled' if pd_mode else 'disabled'}")
-        driving_assistant_configure_PD_mode(self.das, self.agent, self.sim, pd_mode)
+        # pd_toggle_prob = (action[a_id] + 1) / 2
+        # pd_mode = not self.das.PD_mode if self.np_random.random() < pd_toggle_prob else self.das.PD_mode
+        # # print(f"Setting PD mode to {'enabled' if pd_mode else 'disabled'}")
+        # driving_assistant_configure_PD_mode(self.das, self.agent, self.sim, pd_mode)
+        # a_id += 1
 
-        # position error adjustment
-        if pd_mode:
-            position_error_adjustment = float(action[2]) * meters(10)  # Adjust by +/- 10 meters
-            new_position_error = self.das.position_error + position_error_adjustment
-            # print(f"Setting position error to {new_position_error} m")
-            driving_assistant_configure_position_error(self.das, self.agent, self.sim, meters(new_position_error))
+        # # position error adjustment
+        # if pd_mode:
+        #     position_error_adjustment = float(action[a_id]) * meters(10)  # Adjust by +/- 10 meters
+        #     new_position_error = self.das.position_error + position_error_adjustment
+        #     # print(f"Setting position error to {new_position_error} m")
+        #     driving_assistant_configure_position_error(self.das, self.agent, self.sim, meters(new_position_error))
+        # a_id += 1
 
-        # merge intent adjustment. More than 0.75 magnitude should set the intent on that side. Between 0.25 and 0.75 should adjust the intent towards that side. Less than 0.25 magnitude should not change the intent.
-        new_merge_intent = self.das.merge_intent
-        if action[3] > 0.75:
-            new_merge_intent = INDICATOR_RIGHT
-        elif action[3] < -0.75:
-            new_merge_intent = INDICATOR_LEFT
-        elif action[3] > 0.25:
-            # if it was NO_INDICATOR, set it to INDICATOR_RIGHT, if it was INDICATOR_LEFT, set it to INDICATOR_NONE, if it was INDICATOR_RIGHT, do nothing
-            if self.das.merge_intent == INDICATOR_NONE:
-                new_merge_intent = INDICATOR_RIGHT
-            elif self.das.merge_intent == INDICATOR_LEFT:
-                new_merge_intent = INDICATOR_NONE
-        elif action[3] < -0.25:
-            # if it was NO_INDICATOR, set it to INDICATOR_LEFT, if it was INDICATOR_RIGHT, set it to INDICATOR_NONE, if it was INDICATOR_LEFT, do nothing
-            if self.das.merge_intent == INDICATOR_NONE:
-                new_merge_intent = INDICATOR_LEFT
-            elif self.das.merge_intent == INDICATOR_RIGHT:
-                new_merge_intent = INDICATOR_NONE
-        else:
-            # do nothing
-            pass
+        # merge intent adjustment.
+        should_indicate = self.np_random.random() < abs(action[a_id])
+        new_merge_intent = (INDICATOR_LEFT if action[a_id] < 0 else INDICATOR_RIGHT) if should_indicate else INDICATOR_NONE
         # print(f"Setting merge intent to {new_merge_intent}")
         driving_assistant_configure_merge_intent(self.das, self.agent, self.sim, new_merge_intent)
+        a_id += 1
 
-
-        # similarly, do turn intent adjustment
-        new_turn_intent = self.das.turn_intent
-        if action[4] > 0.75:
-            new_turn_intent = INDICATOR_RIGHT
-        elif action[4] < -0.75:
-            new_turn_intent = INDICATOR_LEFT
-        elif action[4] > 0.25:
-            # if it was NO_INDICATOR, set it to INDICATOR_RIGHT, if it was INDICATOR_LEFT, set it to INDICATOR_NONE, if it was INDICATOR_RIGHT, do nothing
-            if self.das.turn_intent == INDICATOR_NONE:
-                new_turn_intent = INDICATOR_RIGHT
-            elif self.das.turn_intent == INDICATOR_LEFT:
-                new_turn_intent = INDICATOR_NONE
-        elif action[4] < -0.25:
-            # if it was NO_INDICATOR, set it to INDICATOR_LEFT, if it was INDICATOR_RIGHT, set it to INDICATOR_NONE, if it was INDICATOR_LEFT, do nothing
-            if self.das.turn_intent == INDICATOR_NONE:
-                new_turn_intent = INDICATOR_LEFT
-            elif self.das.turn_intent == INDICATOR_RIGHT:
-                new_turn_intent = INDICATOR_NONE
-        else:
-            # do nothing
-            pass
-        # print(f"Setting turn intent to {new_turn_intent}")
-        driving_assistant_configure_turn_intent(self.das, self.agent, self.sim, new_turn_intent)
-
-        # cruise mode toggle. Toggle if action[5] > 0.25
-        new_cruise_mode = self.das.cruise_mode if action[5] <= 0.25 else not self.das.cruise_mode
-        # print(f"Setting cruise mode to {'enabled' if new_cruise_mode else 'disabled'}")
-        driving_assistant_configure_cruise_mode(self.das, self.agent, self.sim, new_cruise_mode)
-
-        # cruise speed adjustment. Adjust like speed adjustment. Clip to keep it positive
-        cruise_speed_adjustment = float(action[6]) * from_mph(10)  # Adjust by +/- 10 mph
-        new_cruise_speed = self.das.cruise_speed + cruise_speed_adjustment
-        new_cruise_speed = np.clip(new_cruise_speed, from_mph(0.1), from_mph(self.agent.capabilities.top_speed))
-        # print(f"Setting cruise speed to {to_mph(new_cruise_speed)} mph (adjusted by {to_mph(cruise_speed_adjustment)} mph)")
-        driving_assistant_configure_cruise_speed(self.das, self.agent, self.sim, mps(new_cruise_speed))
-
-        # follow mode toggle. Toggle if action[7] > 0.25
-        new_follow_mode = self.das.follow_mode if action[7] <= 0.25 else not self.das.follow_mode
-        # print(f"Setting follow mode to {'enabled' if new_follow_mode else 'disabled'}")
-        driving_assistant_configure_follow_mode(self.das, self.agent, self.sim, new_follow_mode)
-
-        if new_follow_mode:
-            # follow mode time headway adjustment. Adjust by +/- 1 second
-            follow_mode_thw_adjustment = float(action[8]) * 1.0  # Adjust by +/- 1 second
-            new_follow_mode_thw = self.das.follow_mode_thw + follow_mode_thw_adjustment
-            new_follow_mode_thw = np.clip(new_follow_mode_thw, 0.1, 5.0)  # Clip to [0.1, 5.0] seconds
-            # print(f"Setting follow mode time headway to {new_follow_mode_thw} seconds (adjusted by {follow_mode_thw_adjustment} seconds)")
-            driving_assistant_configure_follow_mode_thw(self.das, self.agent, self.sim, seconds(new_follow_mode_thw))
-
-            # follow mode buffer adjustment. Adjust by +/- 1 meter
-            follow_mode_buffer_adjustment = float(action[9]) * meters(1)  # Adjust by +/- 1 meter
-            new_follow_mode_buffer = self.das.follow_mode_buffer + follow_mode_buffer_adjustment
-            new_follow_mode_buffer = np.clip(new_follow_mode_buffer, from_feet(1), meters(10))  # Clip to [1 foot, 10 meters]
-            # print(f"Setting follow mode buffer to {to_feet(new_follow_mode_buffer)} feet (adjusted by {to_feet(follow_mode_buffer_adjustment)} feet)")
-            driving_assistant_configure_follow_mode_buffer(self.das, self.agent, self.sim, meters(new_follow_mode_buffer))
-
-        # merge assistance toggle. Toggle if action[10] > 0.25
-        new_merge_assistance = self.das.merge_assistance if action[10] <= 0.25 else not self.das.merge_assistance
-        # print(f"Setting merge assistance to {'enabled' if new_merge_assistance else 'disabled'}")
-        driving_assistant_configure_merge_assistance(self.das, self.agent, self.sim, new_merge_assistance)
-
-        # aeb assistance toggle. Toggle if action[11] > 0.25
-        new_aeb_assistance = self.das.aeb_assistance if action[11] <= 0.25 else not self.das.aeb_assistance
-        # print(f"Setting AEB assistance to {'enabled' if new_aeb_assistance else 'disabled'}")
-        driving_assistant_configure_aeb_assistance(self.das, self.agent, self.sim, new_aeb_assistance)
-
-        if new_merge_assistance:
-            # merge minimum time headway adjustment. Adjust by +/- 1 seconds
-            merge_min_thw_adjustment = float(action[12]) * 1.0  # Adjust by +/- 1 second
-            new_merge_min_thw = self.das.merge_min_thw + merge_min_thw_adjustment
-            new_merge_min_thw = np.clip(new_merge_min_thw, 0.1, 5.0)  # Clip to [0.1, 5.0] seconds
-            # print(f"Setting merge minimum time headway to {new_merge_min_thw} seconds (adjusted by {merge_min_thw_adjustment} seconds)")
-            driving_assistant_configure_merge_min_thw(self.das, self.agent, self.sim, seconds(new_merge_min_thw))
-
-        if new_aeb_assistance:
-            # aeb minimum time headway adjustment. Adjust by +/- 0.2 seconds
-            aeb_min_thw_adjustment = float(action[13]) * 0.2  # Adjust by +/- 0.2 seconds
-            new_aeb_min_thw = self.das.aeb_min_thw + aeb_min_thw_adjustment
-            new_aeb_min_thw = np.clip(new_aeb_min_thw, 0.1, 1.0)  # Clip to [0.1, 1.0] seconds
-            # print(f"Setting AEB minimum time headway to {new_aeb_min_thw} seconds (adjusted by {aeb_min_thw_adjustment} seconds)")
-            driving_assistant_configure_aeb_min_thw(self.das, self.agent, self.sim, seconds(new_aeb_min_thw))
-
-        # aeb manually disengage. do it if action[14] > 0.25
-        if action[14] > 0.25:
-            if self.das.aeb_in_progress:
-                # print(f"Manually disengaging AEB for agent {self.agent.id}")
-                driving_assistant_aeb_manually_disengage(self.das, self.agent, self.sim)
-
-        # use preferred acceleration profile toggle. Toggle if action[15] > 0.25
-        new_use_preferred_acc_profile = self.das.use_preferred_accel_profile if action[15] <= 0.25 else not self.das.use_preferred_accel_profile
-        # print(f"Setting use preferred acceleration profile to {'enabled' if new_use_preferred_acc_profile else 'disabled'}")
-        driving_assistant_configure_use_preferred_accel_profile(self.das, self.agent, self.sim, new_use_preferred_acc_profile)
+        # TODO: control other DAS parameters
 
         # simulate for a while. das will operate for us during this time
-
         done = False
         t = 0
+        r = 0  # distance moved forward minus heat loss penalty
         termination_check_interval = 0.1  # Check for termination conditions every 0.1 seconds
         while not done and t < self.decision_interval:
             # We are breaking the decision_interval into smaller steps to check for termination or truncation conditions more frequently
             simulate(self.sim, termination_check_interval)
             t += termination_check_interval
-            situational_awareness_build(self.sim, self.agent.id)  # Update situational awareness after simulation step
+            situational_awareness_build(self.sim, self.agent.id)    # Update situational awareness after simulation step
+            r += self._get_reward() * termination_check_interval    # integrate speed over time to get displacement
+            r -= 0.01 * self._power_applied_by_brakes() * termination_check_interval   # integrate braking power over time to get energy lost
             done = self._should_terminate() or self._should_truncate()
 
 
-        reward = self._get_reward()
+        # crashed = self._crashed()
+        # if self._crashed():
+        #     r -= 0.5 * car_get_speed(self.agent) ** 2   # All kinetic energy lost
+
+        reward = r
         terminated = self._should_terminate()
         truncated = self._should_truncate()
         obs = self._get_observation()
         
         obs = self._get_observation()
         info = {"time": sim_get_time(self.sim)}
+        info["is_success"] = not terminated
         return obs, reward, terminated, truncated, info
 
     

@@ -32,14 +32,14 @@ static void _find_vehicle_behind_and_at_and_ahead_of_point(Simulation* sim, cons
 
         if (point + at_buffer_half < car_position - car_half_length) {
             *car_ahead_out = car;   // this will keep getting overwritten until we find the first car ahead of the point.
-            *car_ahead_distance_out = car_position - point;
+            *car_ahead_distance_out = car_position - point - (at_buffer_half + car_half_length); // bumper-to-bumper distance
         } else if (fabs(car_position - point) <= car_half_length + at_buffer_half) {
             if (*car_at_out) { continue; } // We already have a car at, so we can skip this one.
             *car_at_out = car;
-            *car_at_distance_out = fabs(car_position - point);
+            *car_at_distance_out = 0;
         } else if (car_position + car_half_length < point - at_buffer_half) {
             *car_behind_out = car;
-            *car_behind_distance_out = point - car_position;
+            *car_behind_distance_out = point - car_position - (at_buffer_half + car_half_length);
             break; // since we are traversing from leading vehicle to last vehicle on the lane, we can stop searching here.
         }
     }
@@ -58,59 +58,73 @@ static void _find_vehicle_behind_and_at_and_ahead_of_point(Simulation* sim, cons
 
 
     // if we did not find a car ahead, then we should pick the trailing car in the next lane in the same direction, if it exists.
+    LOG_TRACE("here 1");
     if (!*car_ahead_out) {
+        LOG_TRACE("No car ahead found, checking next lane");
         Lane* next_lane = lane_get_connection_straight(lane, map);
         if (next_lane && lane_get_num_cars(next_lane) > 0) {
             Car* car = lane_get_car(next_lane, sim, lane_get_num_cars(next_lane) - 1); // last car in the next lane
-            *car_ahead_out = car;
+            Meters car_half_length = car_get_length(car) / 2.0; // Half the length of the car
             Meters point_to_end_of_lane = lane_get_length(lane) - point; // distance from the point to the end of the lane
             Meters start_of_next_lane_to_car_ahead = car_get_lane_progress_meters(car);
-            *car_ahead_distance_out = point_to_end_of_lane + start_of_next_lane_to_car_ahead; // distance from the point to the car ahead in the next lane
+            Meters point_to_center_distance = point_to_end_of_lane + start_of_next_lane_to_car_ahead;
 
             // Edge case: what if this car is in collision with the at_buffer?
-            if (*car_ahead_distance_out <= car_get_length(car) / 2.0 + at_buffer_half) {
+            if (point_to_center_distance <= car_half_length + at_buffer_half) {
                 // If we already don't have a car at, then we can set it to this car.
                 if (!*car_at_out) {
                     *car_at_out = car;
-                    *car_at_distance_out = *car_ahead_distance_out; // distance from the point
+                    *car_at_distance_out = 0; // distance from the point
                 }
+                // TODO: should keep scanning to find a car properly ahead
+            } else {
+                *car_ahead_out = car;
+                *car_ahead_distance_out = point_to_center_distance - (car_half_length + at_buffer_half);
             }
         }
     }
+    LOG_TRACE("here 2");
     // if we did not find a car behind, then we should pick the leading car in the previous lane in the same direction, if it exists
     if (!*car_behind_out) {
+        LOG_TRACE("No car behind found, checking previous lane");
         Lane* prev_lane = lane_get_connection_incoming_straight(lane, map);
         if (prev_lane && lane_get_num_cars(prev_lane) > 0) {
+            LOG_TRACE("Found previous lane with %d cars", lane_get_num_cars(prev_lane));
             Car* car = lane_get_car(prev_lane, sim, 0); // first car in the previous lane
-            *car_behind_out = car;
+            LOG_TRACE("Found car %d in previous lane", car_get_id(car));
+            Meters car_half_length = car_get_length(car) / 2.0; // Half the length of the car
             Meters point_to_start_of_lane = point; // distance from the point to the start of the lane
-            Meters end_of_prev_lane_to_car_behind = lane_get_length(prev_lane) - car_get_lane_progress_meters(*car_behind_out);
-            *car_behind_distance_out = point_to_start_of_lane + end_of_prev_lane_to_car_behind; // distance from the point to the car behind in the previous lane
+            Meters end_of_prev_lane_to_car_behind = lane_get_length(prev_lane) - car_get_lane_progress_meters(car);
+            Meters point_to_center_distance = point_to_start_of_lane + end_of_prev_lane_to_car_behind;
 
             // Edge case: what if this car is in collision with the at_buffer?
-            if (*car_behind_distance_out <= car_get_length(car) / 2.0 + at_buffer_half) {
+            if (point_to_center_distance <= car_half_length + at_buffer_half) {
+                LOG_TRACE("Car %d is in collision with the at_buffer", car_get_id(car));
                 // If we already don't have a car at, then we can set it to this car.
                 if (!*car_at_out) {
                     *car_at_out = car;
-                    *car_at_distance_out = *car_behind_distance_out; // distance from the point
+                    *car_at_distance_out = 0; // distance from the point
                 }
+                // TODO: should keep scanning to find a car properly behind
+            } else {
+                LOG_TRACE("Car %d is behind the point", car_get_id(car));
+                *car_behind_out = car;
+                *car_behind_distance_out = point_to_center_distance - (car_half_length + at_buffer_half);
             }
         }
     }
+    LOG_TRACE("done");
 }
 
 
 static void _update_ttc_headways(Car* car, NearbyVehicles* nearby_vehicles) {
     MetersPerSecond car_speed = car_get_speed(car);
-    Meters car_length = car_get_length(car);
-    Meters car_half_length = car_length / 2.0; // Half the length of the car
     // first do for all front vehicles
     for (CarIndicator i = 0; i < 3; i++) {
         if (nearby_vehicles->ahead[i].car) {
             const Car* front_car = nearby_vehicles->ahead[i].car;
-            Meters front_car_half_length = car_get_length(front_car) / 2.0; // Half the length of the front car
             MetersPerSecond front_car_speed = car_get_speed(front_car);
-            Meters distance_bumper_to_bumper = nearby_vehicles->ahead[i].distance - (car_half_length + front_car_half_length);
+            Meters distance_bumper_to_bumper = nearby_vehicles->ahead[i].distance;
             Seconds time_headway = distance_bumper_to_bumper / car_speed;
             if (time_headway < 0) {
                 time_headway = INFINITY; // If our speed is negative, we set time headway to infinity since we are not approaching the front car.
@@ -135,9 +149,8 @@ static void _update_ttc_headways(Car* car, NearbyVehicles* nearby_vehicles) {
     for (CarIndicator i = 0; i < 3; i++) {
         if (nearby_vehicles->behind[i].car) {
             const Car* rear_car = nearby_vehicles->behind[i].car;
-            Meters rear_car_half_length = car_get_length(rear_car) / 2.0; // Half the length of the rear car
             MetersPerSecond rear_car_speed = car_get_speed(rear_car);
-            Meters distance_bumper_to_bumper = nearby_vehicles->behind[i].distance - (car_half_length + rear_car_half_length);
+            Meters distance_bumper_to_bumper = nearby_vehicles->behind[i].distance;
             Seconds time_headway = distance_bumper_to_bumper / rear_car_speed;
             if (time_headway < 0) {
                 time_headway = INFINITY; // If the rear car's speed is negative, we set time headway to infinity since it is not approaching us.
@@ -176,9 +189,8 @@ static void _update_ttc_headways(Car* car, NearbyVehicles* nearby_vehicles) {
     for (CarIndicator i = 0; i < 3; i++) {
         if (nearby_vehicles->after_next_turn[i].car) {
             const Car* front_car = nearby_vehicles->after_next_turn[i].car;
-            Meters front_car_half_length = car_get_length(front_car) / 2.0; // Half the length of the front car
             MetersPerSecond front_car_speed = car_get_speed(front_car);
-            Meters distance_bumper_to_bumper = nearby_vehicles->after_next_turn[i].distance - (car_half_length + front_car_half_length);
+            Meters distance_bumper_to_bumper = nearby_vehicles->after_next_turn[i].distance;
             Seconds time_headway = distance_bumper_to_bumper / car_speed;
             if (time_headway < 0) {
                 time_headway = INFINITY; // If our speed is negative, we set time headway to infinity since we are not approaching the front car.
@@ -203,9 +215,8 @@ static void _update_ttc_headways(Car* car, NearbyVehicles* nearby_vehicles) {
     for (CarIndicator i = 0; i < 3; i++) {
         if (nearby_vehicles->incoming_from_previous_turn[i].car) {
             const Car* rear_car = nearby_vehicles->incoming_from_previous_turn[i].car;
-            Meters rear_car_half_length = car_get_length(rear_car) / 2.0; // Half the length of the rear car
             MetersPerSecond rear_car_speed = car_get_speed(rear_car);
-            Meters distance_bumper_to_bumper = nearby_vehicles->incoming_from_previous_turn[i].distance - (car_half_length + rear_car_half_length);
+            Meters distance_bumper_to_bumper = nearby_vehicles->incoming_from_previous_turn[i].distance;
             Seconds time_headway = distance_bumper_to_bumper / rear_car_speed;
             if (time_headway < 0) {
                 time_headway = INFINITY; // If the rear car's speed is negative, we set time headway to infinity since it is not approaching us.
@@ -500,9 +511,11 @@ void situational_awareness_build(Simulation* sim, CarId car_id) {
         situation->lead_vehicle = lane_get_car(lane, sim, my_rank - 1);
         situation->distance_to_lead_vehicle = car_get_lane_progress_meters(situation->lead_vehicle) - lane_progress_m;
     } else {
-        // We are the first car in the lane, so there is no lead vehicle, but maybe on next lane. Just check nearby_forward.
-        situation->lead_vehicle = situation->nearby_vehicles.ahead[INDICATOR_NONE].car;
-        situation->distance_to_lead_vehicle = situation->nearby_vehicles.ahead[INDICATOR_NONE].distance;
+        // We are the first car in the lane, so there is no lead vehicle, but maybe on next lane.
+        Lane* lane_next = lane_get_connection_straight(lane, map);
+        Car* lane_next_last_vehicle = (lane_next && lane_get_num_cars(lane_next) > 0) ? lane_get_car(lane_next, sim, lane_get_num_cars(lane_next) - 1) : NULL;
+        situation->lead_vehicle = lane_next_last_vehicle;
+        situation->distance_to_lead_vehicle = situation->lead_vehicle ? (car_get_lane_progress_meters(situation->lead_vehicle) + distance_to_end_of_lane) : INFINITY;
     }
 
     if (my_rank < lane_get_num_cars(lane) - 1) {
@@ -510,9 +523,11 @@ void situational_awareness_build(Simulation* sim, CarId car_id) {
         situation->following_vehicle = lane_get_car(lane, sim, my_rank + 1);
         situation->distance_to_following_vehicle = lane_progress_m - car_get_lane_progress_meters(situation->following_vehicle);
     } else {
-        // We are the last car in the lane, so there is no following vehicle, but maybe on previous lane. Just check nearby_behind.
-        situation->following_vehicle = situation->nearby_vehicles.behind[INDICATOR_NONE].car;
-        situation->distance_to_following_vehicle = situation->nearby_vehicles.behind[INDICATOR_NONE].distance;
+        // We are the last car in the lane, so there is no following vehicle, but maybe on previous lane.
+        Lane* lane_prev = lane_get_connection_incoming_straight(lane, map);
+        Car* lane_prev_first_vehicle = (lane_prev && lane_get_num_cars(lane_prev) > 0) ? lane_get_car(lane_prev, sim, 0) : NULL;
+        situation->following_vehicle = lane_prev_first_vehicle;
+        situation->distance_to_following_vehicle = situation->following_vehicle ? (lane_progress_m + lane_get_length(lane_prev) - car_get_lane_progress_meters(situation->following_vehicle)) : INFINITY;
     }
     situation->is_vehicle_ahead = situation->lead_vehicle != NULL;
     situation->is_vehicle_behind = situation->following_vehicle != NULL;

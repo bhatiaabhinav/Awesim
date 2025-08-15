@@ -34,8 +34,8 @@ typedef struct BrakingDistance BrakingDistance;
 // A vehicle near the ego vehicle, along with its distance, time to collision, and time headway.
 struct NearbyVehicle {
     const Car* car;                 // Pointer to the nearby vehicle (NULL if none).
-    Meters distance;                // Center-to-center distance to the vehicle in meters.
-                                    // Positive value; for absent vehicles (car == NULL), set to INFINITY.
+    Meters distance;                // bumper-to-bumper distance to the vehicle in meters.
+                                    // Positive value; for absent vehicles (car == NULL), set to INFINITY. For 'colliding', vehicles, set to 0.
     
     Seconds time_to_collision;      // Time to collision (TTC) in seconds, considering relative speed and acceleration.
                                     // Computed with bumper-to-bumper adjustment: subtract (ego_half_length + other_half_length) from distance.
@@ -82,7 +82,7 @@ typedef struct NearbyVehicles NearbyVehicles;
 // Useful for deep learning, where we want to flatten the NearbyVehicles struct
 struct NearbyVehiclesFlattened {
     CarId car_ids[15];  // Array to hold extracted car IDs
-    Meters distances[15]; // Corresponding distances to the cars
+    Meters distances[15]; // Corresponding bumper-to-bumper distances to the cars
     Seconds time_to_collisions[15]; // Corresponding time to collisions
     Seconds time_headways[15]; // Corresponding time headways
     int count; // Number of cars extracted
@@ -354,24 +354,20 @@ typedef struct DrivingAssistant {
 
     // Standard PD mode to adjust both speed and position.
     bool PD_mode;                       // Whether to adjust speed AND position.
-    Meters position_error;             // Determines target position. Error = current position - target position. i.e., this is error in target position's frame of reference.
+    Meters position_error;              // Determines target position in PD_mode. Error = current position - target position. i.e., this is error in target position's frame of reference. During PD_control, the position_error is continuously updated as the car moves. The speed is never accelerated to go beyond the speed_target magnitude. Once target position is reached, PD_mode is turned off automatically.
 
     // Requested intents to determine steering:
     CarIndicator merge_intent;           // For switching lanes within a road, or merge/exit a highway. Set to None automatically once the assistant issues merge command.
     CarIndicator turn_intent;            // For which lane to take when approaching intersections. Set to None automatically once the assistant issues turn command.
 
-    // Smart modes (overrides the standard mode):
-    bool cruise_mode;                       // Sets speed_target automatically to reach cruise_speed. If follow_mode is on, matches the speed of the next vehicle, but never exceeds cruise_speed. If there is no vehicle ahead, then targets cruise speed.
-    bool follow_mode;                       // (Requires cruise_mode on) Sets position_target automatically to maintain speed * follow_mode_thw distance from the next vehicle. If follow_mode is not on, then there is no position error.
+    // Smart modes (overrides PD mode parameters):
+    bool follow_mode;                       // Match speed of next vehicle and maintains follow distance = car_speed * follow_mode_thw + follow_mode_buffer, while not exceeding speed_target. If no vehicle ahead, targets speed_target. Follow mode cannot be engaged with a negative speed_target.
+    Seconds follow_mode_thw;                // Time headway distance to the next vehicle.
     Meters follow_mode_buffer;              // Buffer distance to maintain from the next vehicle, in addition to the follow_mode_thw distance. You can also think of this as the distance to maintain in stopped traffic.
 
-    // Smart mode parameters:
-    MetersPerSecond cruise_speed;                            // Target speed in cruise mode. If follow_mode is on, then this is the maximum speed to maintain irrespective of whether there is a lead vehicle and its speed. Even in standard modes, this is the maximum speed the car is allowed while it minimizes the errors.
-    Seconds follow_mode_thw;                        // Follow distance = car_speed * follow_mode_thw (time headway)
-
-    // Safety assistent
+    // Safety assistants
     bool merge_assistance;          // Whether indicated lane change happens only when it is safe to merge.
-    bool aeb_assistance;            // Auto-Emergency-Braking (AEB). Whether to apply max braking if in the frame of reference of the target car, our car is closing in quickly and can barely avoid colliding even if it applied max braking, i.e., To be precise, it is triggered when the feasible THW is below a safe threshold aeb_min_thw.
+    bool aeb_assistance;            // Auto-Emergency-Braking (AEB). Whether to apply max braking if in the frame of reference of the target car, our car is closing in quickly and can barely avoid colliding even if it applied max braking, i.e., To be precise, it is triggered when the feasible THW is below a safe threshold aeb_min_thw. When AEB is triggered, PD_mode is turned off, and if follow mode is not on, the speed_target is reduced with the current speed so that speed control resumes to hold the speed when AEB is disengaged (automatic or manual).
 
     // Safety assistants parameters
     Seconds merge_min_thw;          // Minimum THW for both to-be next and to-be rear vehicles, to trigger merge. About ~3 seconds is ideal. ~2 seconds would be aggressive. ~1 is reckless driving.
@@ -404,10 +400,8 @@ bool driving_assistant_get_PD_mode(const DrivingAssistant* das);
 Meters driving_assistant_get_position_error(const DrivingAssistant* das);
 CarIndicator driving_assistant_get_merge_intent(const DrivingAssistant* das);
 CarIndicator driving_assistant_get_turn_intent(const DrivingAssistant* das);
-bool driving_assistant_get_cruise_mode(const DrivingAssistant* das);
 bool driving_assistant_get_follow_mode(const DrivingAssistant* das);
 Meters driving_assistant_get_follow_mode_buffer(const DrivingAssistant* das);
-double driving_assistant_get_cruise_speed(const DrivingAssistant* das);
 Seconds driving_assistant_get_follow_mode_thw(const DrivingAssistant* das);
 bool driving_assistant_get_merge_assistance(const DrivingAssistant* das);
 bool driving_assistant_get_aeb_assistance(const DrivingAssistant* das);
@@ -426,10 +420,8 @@ void driving_assistant_configure_PD_mode(DrivingAssistant* das, const Car* car, 
 void driving_assistant_configure_position_error(DrivingAssistant* das, const Car* car, const Simulation* sim, Meters position_error);
 void driving_assistant_configure_merge_intent(DrivingAssistant* das, const Car* car, const Simulation* sim, CarIndicator merge_intent);
 void driving_assistant_configure_turn_intent(DrivingAssistant* das, const Car* car, const Simulation* sim, CarIndicator turn_intent);
-void driving_assistant_configure_cruise_mode(DrivingAssistant* das, const Car* car, const Simulation* sim, bool cruise_mode);
 void driving_assistant_configure_follow_mode(DrivingAssistant* das, const Car* car, const Simulation* sim, bool follow_mode);
 void driving_assistant_configure_follow_mode_buffer(DrivingAssistant* das, const Car* car, const Simulation* sim, Meters follow_mode_buffer);
-void driving_assistant_configure_cruise_speed(DrivingAssistant* das, const Car* car, const Simulation* sim, MetersPerSecond cruise_speed);
 void driving_assistant_configure_follow_mode_thw(DrivingAssistant* das, const Car* car, const Simulation* sim, Seconds follow_mode_thw);
 void driving_assistant_configure_merge_assistance(DrivingAssistant* das, const Car* car, const Simulation* sim, bool merge_assistance);
 void driving_assistant_configure_aeb_assistance(DrivingAssistant* das, const Car* car, const Simulation* sim, bool aeb_assistance);

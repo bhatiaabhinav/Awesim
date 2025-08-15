@@ -1,12 +1,11 @@
 #include "ai.h"
 #include "logging.h"
 
-
-static const double MINIMUM_CRUISE_SPEED_MPH = 0.1; // Minimum cruise speed to avoid unrealistic behavior
 static const double MINIMUM_FOLLOW_MODE_BUFFER_FEET = 1; // Minimum follow mode buffer to avoid unrealistic behavior
-static const Seconds MINIMUM_FOLLOW_MODE_THW = 0.1; // Minimum follow mode time headway to avoid unrealistic behavior
+static const Seconds MINIMUM_FOLLOW_MODE_THW = 0.2; // Minimum follow mode time headway to avoid unrealistic behavior
 static const Seconds MINIMUM_MERGE_MIN_THW = 0.1; // Minimum merge minimum time headway to avoid unrealistic behavior
 static const Seconds MINIMUM_AEB_MIN_THW = 0.1; // Minimum AEB minimum time headway to avoid unrealistic behavior
+static const Seconds MAXIMUM_AEB_MIN_THW = 1.0; // Maximum AEB minimum time headway to avoid unrealistic behavior
 static const Seconds DEFAULT_TIME_HEADWAY = 3.0; // Default time headway for merging and AEB
 
 static const Seconds DEFAULT_AEB_MIN_THW = 0.5; // Default minimum time headway for AEB
@@ -25,11 +24,8 @@ bool driving_assistant_reset_settings(DrivingAssistant* das, Car* car) {
     das->position_error = 0.0;
     das->merge_intent = INDICATOR_NONE;
     das->turn_intent = INDICATOR_NONE;
-    das->cruise_mode = false;
     das->follow_mode = false;
     das->follow_mode_buffer = from_feet(MINIMUM_FOLLOW_MODE_BUFFER_FEET); // Set to a minimum buffer to avoid unrealistic behavior
-    das->cruise_speed = from_mph(MINIMUM_CRUISE_SPEED_MPH); // Set to a minimum cruise speed to avoid unrealistic behavior
-    das->follow_mode_thw = MINIMUM_FOLLOW_MODE_THW; // Set to a minimum time headway to avoid unrealistic behavior
     das->follow_mode_thw = DEFAULT_TIME_HEADWAY;      // Default time headway
     das->merge_assistance = false;   // Default to false
     das->aeb_assistance = false;     // Default to false
@@ -37,6 +33,8 @@ bool driving_assistant_reset_settings(DrivingAssistant* das, Car* car) {
     das->aeb_min_thw = DEFAULT_AEB_MIN_THW;          // Default minimum THW for AEB
     das->feasible_thw = INFINITY;    // Reset feasible THW
     das->aeb_in_progress = false;    // Reset AEB state
+    das->aeb_manually_disengaged = false; // Reset manual disengagement state
+    das->use_preferred_accel_profile = false; // Reset preferred acceleration profile state
 
     LOG_TRACE("Driving assistant settings reset for car %d", car->id);
     return true; // Indicating success
@@ -78,43 +76,95 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
 
     // Car control variables to determine:
 
-    MetersPerSecondSquared accel;
-    CarIndicator lane_indicator;
-    CarIndicator turn_indicator;
-    bool request_lane_change;
-    bool request_turn;
+    MetersPerSecondSquared accel = 0;
+    CarIndicator lane_indicator = INDICATOR_NONE;
+    CarIndicator turn_indicator = INDICATOR_NONE;
+    bool request_lane_change = false;
+    bool request_turn = false;
 
     situational_awareness_build(sim, car->id);  // ensure up-to-date situational awareness
     SituationalAwareness* sa = sim_get_situational_awareness(sim, car_get_id(car));
 
-    if (das->cruise_mode) {
-        const Car* lead_car = sa->lead_vehicle;
-        if (das->follow_mode && lead_car) {
-            accel = car_compute_acceleration_adaptive_cruise(car, sa, das->cruise_speed, das->follow_mode_thw, das->follow_mode_buffer, das->use_preferred_accel_profile);
-        } else {
-            accel = car_compute_acceleration_cruise(car, das->cruise_speed, das->use_preferred_accel_profile);
-        }
-    } else {
-        // If not in cruise mode, use PD control.
-        if (das->PD_mode) {
-            if (fabs(das->position_error) < from_centimeters(1)) {
-                // If position error is negligible, we can use standard speed control
-                LOG_DEBUG("Position error is negligible for car %d. Switching to standard speed control.", car->id);
-                das->PD_mode = false; // Disable PD mode if position error is negligible
-            }
-        }
-        if (das->PD_mode) {
-            // Use PD control to adjust both speed and position
-            Meters position_target = car_get_lane_progress_meters(car) - das->position_error; // Target position is current position minus the position error (which is the error in target position's frame of reference)
-            Meters overshoot_buffer = from_feet(0);
-            MetersPerSecond speed_target = das->speed_target;
-            Meters speed_limit = fmax(das->cruise_speed, fabs(speed_target));
-            accel = car_compute_acceleration_chase_target(car, position_target, speed_target, overshoot_buffer, speed_limit, das->use_preferred_accel_profile);
-        } else {
-            // Use standard speed control
-            accel = car_compute_acceleration_adjust_speed(car, das->speed_target, das->use_preferred_accel_profile);
+
+    // ---------- Verify follow control and PD control requisites ----------------------
+
+    if (das->follow_mode) {
+        if (das->speed_target < 0) {
+            LOG_DEBUG("Disabling follow mode for car %d due to negative speed target.", car->id);
+            das->follow_mode = false;
         }
     }
+    
+    if (das->PD_mode) {
+        if (das->follow_mode) {
+            das->PD_mode = false; // Disable PD mode if follow mode is active. The code should never reach here since it was already ensured in setters that the modes are mutually exclusive.
+        }
+        if (fabs(das->position_error) < from_centimeters(1)) {
+            LOG_DEBUG("Position error is negligible for car %d. Switching to standard speed control.", car->id);
+            das->PD_mode = false; // Disable PD mode if position error is negligible
+            das->position_error = 0.0; // Reset position error
+        }
+    }
+
+
+
+    // ---- AEB logic overrides everything else ----
+
+    das->feasible_thw = _compute_feasible_thw(car, sa);
+
+    // auto engagement conditions
+    bool execute_aeb = false;
+    if (das->aeb_assistance && (das->feasible_thw < das->aeb_min_thw || das->aeb_in_progress)) {
+        // AEB should be engaged if feasible THW is below the threshold or if AEB is already in progress, unless manually disengaged.
+        execute_aeb = !das->aeb_manually_disengaged;
+    }
+
+    // execute AEB
+    if (execute_aeb) {
+        if (!das->aeb_in_progress) {
+            das->aeb_in_progress = true; // Start AEB if not already in progress
+            LOG_DEBUG("AEB engaged for car %d. Feasible THW: %.2f seconds", car->id, das->feasible_thw);
+        }
+        accel = car_compute_acceleration_stop_max_brake(car, das->use_preferred_accel_profile);
+        LOG_TRACE("AEB in progress for car %d. Feasible THW: %.2f seconds", car->id, das->feasible_thw);
+        // NOTE: Forward crash is still possible if the lead vehicle is backing into us, but we don't handle that case here since that is not about emergency braking.
+
+        // If AEB is on, PD mode should be turned off
+        das->PD_mode = false;
+        das->position_error = 0.0; // Reset position error since PD mode is off
+    }
+
+
+
+
+
+    // ----------- Follow mode ----------------------
+    if (das->follow_mode) {
+        const Car* lead_car = sa->lead_vehicle;
+        if (lead_car) { 
+            accel = car_compute_acceleration_adaptive_cruise(car, sa, das->speed_target, das->follow_mode_thw, das->follow_mode_buffer, das->use_preferred_accel_profile);
+        } else {
+            accel = car_compute_acceleration_cruise(car, das->speed_target, das->use_preferred_accel_profile);
+        }
+    }
+
+    // ----------- PD control ------------------------
+    if (das->PD_mode) {
+        // Use PD control to adjust both speed and position
+        Meters position_target = car_get_lane_progress_meters(car) - das->position_error; // Target position is current position minus the position error (which is the error in target position's frame of reference)
+        Meters overshoot_buffer = from_feet(0);
+        MetersPerSecond speed_target = das->speed_target;
+        Meters speed_limit = fabs(speed_target);
+        accel = car_compute_acceleration_chase_target(car, position_target, speed_target, overshoot_buffer, speed_limit, das->use_preferred_accel_profile);
+    }
+
+    // ---------- Standard speed/cruise control ----------------------
+    if (!das->follow_mode && !das->PD_mode && !das->aeb_in_progress) {
+        accel = car_compute_acceleration_adjust_speed(car, das->speed_target, das->use_preferred_accel_profile);
+    }
+
+
+    // ----------- Lane and merge ----------------------
 
     lane_indicator = das->merge_intent;
     request_lane_change = false;
@@ -140,27 +190,7 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
     }
 
 
-    // ---- AEB logic ----
-
-    das->feasible_thw = _compute_feasible_thw(car, sa);
-
-    // auto engagement conditions
-    bool execute_aeb = false;
-    if (das->aeb_assistance && (das->feasible_thw < das->aeb_min_thw || das->aeb_in_progress)) {
-        // AEB should be engaged if feasible THW is below the threshold or if AEB is already in progress, unless manually disengaged.
-        execute_aeb = !das->aeb_manually_disengaged;
-    }
-
-    // execute AEB if in progress
-    if (execute_aeb) {
-        if (!das->aeb_in_progress) {
-            das->aeb_in_progress = true; // Start AEB if not already in progress
-            LOG_DEBUG("AEB engaged for car %d. Feasible THW: %.2f seconds", car->id, das->feasible_thw);
-        }
-        accel = car_compute_acceleration_stop_max_brake(car, das->use_preferred_accel_profile);
-        LOG_TRACE("AEB in progress for car %d. Feasible THW: %.2f seconds", car->id, das->feasible_thw);
-        // NOTE: Forward crash is still possible if the lead vehicle is backing into us, but we don't handle that case here since that is not about emergency braking.
-    }
+    // ---- Apply control commands ----
 
     car_set_acceleration(car, accel);
     car_set_indicator_lane(car, lane_indicator);
@@ -179,8 +209,8 @@ void driving_assistant_post_sim_step(DrivingAssistant* das, Car* car, Simulation
     }
     situational_awareness_build(sim, car_get_id(car)); // Ensure situational awareness is up-to-date
 
-    if (das->cruise_mode) {
-        das->speed_target = car_get_speed(car); // Update speed target to current speed if in cruise mode, so that if cruise is suddenly disengaged, the car will not accelerate or decelerate unexpectedly.
+    if (das->aeb_in_progress && !das->follow_mode) {
+        das->speed_target = car_get_speed(car); // Update speed target to current speed if AEB is in progress, so that once AEB is disengaged (automatic or manual), the car will not accelerate or decelerate unexpectedly.
     }
 
     if (das->PD_mode) {
@@ -189,6 +219,7 @@ void driving_assistant_post_sim_step(DrivingAssistant* das, Car* car, Simulation
             // If position error is negligible, we can use standard speed control
             LOG_DEBUG("Position error is negligible for car %d. Switching to standard speed control.", car->id);
             das->PD_mode = false; // Disable PD mode if position error is negligible
+            das->position_error = 0.0; // Reset position error
         }
     }
 
@@ -196,8 +227,8 @@ void driving_assistant_post_sim_step(DrivingAssistant* das, Car* car, Simulation
 
     // auto disengagement conditions
     bool disengagement_conditions_met = false;
-    if (das->feasible_thw > 1.0) {
-        disengagement_conditions_met = true; // AEB should be disengaged if feasible THW is greater than 1 second.
+    if (das->feasible_thw > 1.1 * das->aeb_min_thw) {
+        disengagement_conditions_met = true; // AEB should be disengaged if feasible THW is 10% above the trigger threshold.
     }
 
     if (disengagement_conditions_met) {
@@ -219,10 +250,8 @@ bool driving_assistant_get_PD_mode(const DrivingAssistant* das) { return das->PD
 Meters driving_assistant_get_position_error(const DrivingAssistant* das) { return das->position_error; }
 CarIndicator driving_assistant_get_merge_intent(const DrivingAssistant* das) { return das->merge_intent; }
 CarIndicator driving_assistant_get_turn_intent(const DrivingAssistant* das) { return das->turn_intent; }
-bool driving_assistant_get_cruise_mode(const DrivingAssistant* das) { return das->cruise_mode; }
 bool driving_assistant_get_follow_mode(const DrivingAssistant* das) { return das->follow_mode; }
 Meters driving_assistant_get_follow_mode_buffer(const DrivingAssistant* das) { return das->follow_mode_buffer; }
-double driving_assistant_get_cruise_speed(const DrivingAssistant* das) { return das->cruise_speed; }
 Seconds driving_assistant_get_follow_mode_thw(const DrivingAssistant* das) { return das->follow_mode_thw; }
 bool driving_assistant_get_merge_assistance(const DrivingAssistant* das) { return das->merge_assistance; }
 bool driving_assistant_get_aeb_assistance(const DrivingAssistant* das) { return das->aeb_assistance; }
@@ -249,6 +278,10 @@ void driving_assistant_configure_speed_target(DrivingAssistant* das, const Car* 
     if (!validate_input(car, das, sim)) {
         return; // Early return if input validation fails
     }
+    if (das->speed_target > car->capabilities.top_speed) {
+        LOG_WARN("Speed target %.2f m/s exceeds car's top speed %.2f m/s for car %d. Setting to top speed.", speed_target, car->capabilities.top_speed, car->id);
+        speed_target = car->capabilities.top_speed; // Ensure speed target does not exceed car's top speed
+    }
     das->speed_target = speed_target;
     das->last_configured_at = sim_get_time(sim);
 }
@@ -259,7 +292,6 @@ void driving_assistant_configure_PD_mode(DrivingAssistant* das, const Car* car, 
     }
     das->PD_mode = PD_mode;
     if (PD_mode) {
-        das->cruise_mode = false; // Disable cruise mode when PD mode is enabled
         das->follow_mode = false; // Disable follow mode when PD mode is enabled
     } else {
         das->position_error = 0.0; // Reset position error when PD mode is disabled
@@ -297,28 +329,17 @@ void driving_assistant_configure_turn_intent(DrivingAssistant* das, const Car* c
     das->last_configured_at = sim_get_time(sim);
 }
 
-void driving_assistant_configure_cruise_mode(DrivingAssistant* das, const Car* car, const Simulation* sim, bool cruise_mode) {
-    if (!validate_input(car, das, sim)) {
-        return;
-    }
-    if (cruise_mode) {
-        das->PD_mode = false; // Disable PD mode when cruise mode is enabled
-        das->position_error = 0.0; // Reset position error when cruise mode is enabled
-    } else {
-        das->follow_mode = false; // Disable follow mode when cruise mode is disabled
-    }
-    das->cruise_mode = cruise_mode;
-    das->last_configured_at = sim_get_time(sim);
-}
-
 void driving_assistant_configure_follow_mode(DrivingAssistant* das, const Car* car, const Simulation* sim, bool follow_mode) {
     if (!validate_input(car, das, sim)) {
         return;
     }
+    if (follow_mode && das->speed_target < 0) {
+        LOG_ERROR("Follow mode cannot be enabled for car %d with negative speed target.", car->id);
+        return;
+    }
     if (follow_mode) {
-        das->cruise_mode = true; // Enable cruise mode when follow mode is enabled
-        das->PD_mode = false; // Disable PD mode when follow mode is enabled
-        das->position_error = 0.0; // Reset position error when follow mode is enabled
+        das->PD_mode = false;       // Disable PD mode when follow mode is enabled
+        das->position_error = 0.0;  // Reset position error when follow mode is enabled
     }
     das->follow_mode = follow_mode;
     das->last_configured_at = sim_get_time(sim);
@@ -328,10 +349,6 @@ void driving_assistant_configure_follow_mode_buffer(DrivingAssistant* das, const
     if (!validate_input(car, das, sim)) {
         return;
     }
-    if (!das->follow_mode) {
-        LOG_WARN("Follow mode buffer can only be configured when follow mode is enabled for car %d", car->id);
-        return; // Follow mode buffer can only be set in follow mode
-    }
     if (follow_mode_buffer < from_feet(MINIMUM_FOLLOW_MODE_BUFFER_FEET)) {
         LOG_WARN("Follow mode buffer too small for car %d. Setting it to a minimum of %.1f feet.", car->id, MINIMUM_FOLLOW_MODE_BUFFER_FEET);
         follow_mode_buffer = from_feet(MINIMUM_FOLLOW_MODE_BUFFER_FEET);
@@ -340,25 +357,9 @@ void driving_assistant_configure_follow_mode_buffer(DrivingAssistant* das, const
     das->last_configured_at = sim_get_time(sim);
 }
 
-void driving_assistant_configure_cruise_speed(DrivingAssistant* das, const Car* car, const Simulation* sim, MetersPerSecond cruise_speed) {
-    if (!validate_input(car, das, sim)) {
-        return;
-    }
-    if (cruise_speed < from_mph(MINIMUM_CRUISE_SPEED_MPH)) {
-        LOG_WARN("Cruise speed too low for car %d. Setting it to a minimum of %.1f mph.", car->id, MINIMUM_CRUISE_SPEED_MPH);
-        cruise_speed = from_mph(MINIMUM_CRUISE_SPEED_MPH); // Set a minimum cruise speed to avoid unrealistic behavior
-    }
-    das->cruise_speed = cruise_speed;
-    das->last_configured_at = sim_get_time(sim);
-}
-
 void driving_assistant_configure_follow_mode_thw(DrivingAssistant* das, const Car* car, const Simulation* sim, Seconds follow_mode_thw) {
     if (!validate_input(car, das, sim)) {
         return;
-    }
-    if (!das->follow_mode) {
-        LOG_WARN("Follow mode THW can only be configured when follow mode is enabled for car %d", car->id);
-        return; // Follow mode THW can only be set in follow mode
     }
     if (follow_mode_thw < MINIMUM_FOLLOW_MODE_THW) {
         LOG_WARN("Follow mode THW too small for car %d. Setting it to a minimum of %.1f seconds.", car->id, MINIMUM_FOLLOW_MODE_THW);
@@ -392,10 +393,6 @@ void driving_assistant_configure_merge_min_thw(DrivingAssistant* das, const Car*
     if (!validate_input(car, das, sim)) {
         return;
     }
-    if (!das->merge_assistance) {
-        LOG_WARN("Merge minimum THW can only be configured when merge assistance is enabled for car %d", car->id);
-        return; // Merge minimum THW can only be set when merge assistance is enabled
-    }
     if (merge_min_thw < MINIMUM_MERGE_MIN_THW) {
         LOG_WARN("Merge minimum THW too small for car %d. Setting it to a minimum of %.1f seconds.", car->id, MINIMUM_MERGE_MIN_THW);
         merge_min_thw = MINIMUM_MERGE_MIN_THW; // Set a minimum THW to avoid unrealistic behavior
@@ -408,13 +405,13 @@ void driving_assistant_configure_aeb_min_thw(DrivingAssistant* das, const Car* c
     if (!validate_input(car, das, sim)) {
         return;
     }
-    if (!das->aeb_assistance) {
-        LOG_WARN("AEB minimum THW can only be configured when AEB assistance is enabled for car %d", car->id);
-        return; // AEB minimum THW can only be set when AEB assistance is enabled
-    }
     if (aeb_min_thw < MINIMUM_AEB_MIN_THW) {
         LOG_WARN("AEB minimum THW too small for car %d. Setting it to a minimum of %.1f seconds.", car->id, MINIMUM_AEB_MIN_THW);
         aeb_min_thw = MINIMUM_AEB_MIN_THW; // Set a minimum THW to avoid unrealistic behavior
+    }
+    if (aeb_min_thw > MAXIMUM_AEB_MIN_THW) {
+        LOG_WARN("AEB minimum THW too large for car %d. Setting it to a maximum of %.1f seconds.", car->id, MAXIMUM_AEB_MIN_THW);
+        aeb_min_thw = MAXIMUM_AEB_MIN_THW; // Set a maximum THW to avoid unrealistic behavior
     }
     das->aeb_min_thw = aeb_min_thw;
     das->last_configured_at = sim_get_time(sim);
