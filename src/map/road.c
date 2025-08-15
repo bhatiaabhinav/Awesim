@@ -271,12 +271,26 @@ Road* straight_road_split_at_and_update_connections(Road* road, Map* map, const 
         LOG_TRACE("Lane no. %d (id=%d) transferred merges (into %d from %.2f to %.2f)",
                   i, lane->id, lane_second->merges_into_id, lane_second->merges_into_start, lane_second->merges_into_end);
         
-        // Update incoming connection of the lane connected to the original segment
+        // Update incoming connections of the lane connected to the original segment
         Lane* lane_next_straight = lane_get_connection_straight(lane, map);
         if (lane_next_straight) {
             lane_set_connection_incoming_straight(lane_next_straight, lane_second);
             LOG_TRACE("Incoming straight lane for lane id %d set to lane no. %d (id=%d)",
                       lane_next_straight->id, i, lane->id);
+        }
+        Lane* lane_next_right = lane_get_connection_right(lane, map);
+        if (lane_next_right) {
+            assert(lane_get_connection_incoming_straight(lane_next_right, map) == lane && "Our assumption that the next right lane's straight incoming connection is the original lane is not valid");
+            lane_set_connection_incoming_straight(lane_next_right, lane_second);
+            LOG_TRACE("Incoming right lane for lane id %d set to lane no. %d (id=%d)",
+                      lane_next_right->id, i, lane->id);
+        }
+        Lane* lane_next_left = lane_get_connection_left(lane, map);
+        if (lane_next_left) {
+            assert(lane_get_connection_incoming_straight(lane_next_left, map) == lane && "Our assumption that the next left lane's straight incoming connection is the original lane is not valid");
+            lane_set_connection_incoming_straight(lane_next_left, lane_second);
+            LOG_TRACE("Incoming left lane for lane id %d set to lane no. %d (id=%d)",
+                      lane_next_left->id, i, lane->id);
         }
 
         lane_set_connection_left(lane, NULL);
