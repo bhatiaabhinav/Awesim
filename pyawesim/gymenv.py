@@ -5,7 +5,7 @@ from gymnasium import spaces
 from bindings import *
 
 class AwesimEnv(gym.Env):
-    def __init__(self, city_width: int = 1000, num_cars: int = 256, decision_interval: float = 0.1, sim_duration: float = 60 * 60, synchronized: bool = False, synchronized_sim_speedup = 1.0, should_render: bool = False, i = 0) -> None:
+    def __init__(self, city_width: int = 1000, num_cars: int = 256, decision_interval: float = 0.1, sim_duration: float = 60 * 60, synchronized: bool = False, synchronized_sim_speedup = 1.0, should_render: bool = False, render_server_ip="127.0.0.1", i = 0) -> None:
         super().__init__()
         self.city_width = city_width
         self.num_cars = num_cars
@@ -14,6 +14,7 @@ class AwesimEnv(gym.Env):
         self.synchronized = synchronized
         self.synchronized_sim_speedup = synchronized_sim_speedup
         self.should_render = should_render
+        self.render_server_ip = render_server_ip
 
         self.sim = sim_malloc()
         seed_rng(i + 1)
@@ -232,7 +233,7 @@ class AwesimEnv(gym.Env):
         if self.synchronized:
             sim_set_synchronized(self.sim, True, self.synchronized_sim_speedup)
         if self.should_render:
-            sim_connect_to_render_server(self.sim, "127.0.0.1", 4242)
+            sim_connect_to_render_server(self.sim, self.render_server_ip, 4242)
 
         sim_set_agent_enabled(self.sim, True)
         sim_set_agent_driving_assistant_enabled(self.sim, True)
