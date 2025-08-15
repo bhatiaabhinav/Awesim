@@ -227,8 +227,8 @@ void driving_assistant_post_sim_step(DrivingAssistant* das, Car* car, Simulation
 
     // auto disengagement conditions
     bool disengagement_conditions_met = false;
-    if (das->feasible_thw > 1.1 * das->aeb_min_thw) {
-        disengagement_conditions_met = true; // AEB should be disengaged if feasible THW is 10% above the trigger threshold.
+    if (das->feasible_thw > 1.5 * das->aeb_min_thw) {
+        disengagement_conditions_met = true; // AEB should be disengaged if feasible THW is 50% above the trigger threshold.
     }
 
     if (disengagement_conditions_met) {

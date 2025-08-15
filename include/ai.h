@@ -371,12 +371,12 @@ typedef struct DrivingAssistant {
 
     // Safety assistants parameters
     Seconds merge_min_thw;          // Minimum THW for both to-be next and to-be rear vehicles, to trigger merge. About ~3 seconds is ideal. ~2 seconds would be aggressive. ~1 is reckless driving.
-    Seconds aeb_min_thw;            // Use AEB to maintain at least this much THW with the next vehicle. ~0.5 seconds.
+    Seconds aeb_min_thw;            // Use AEB to maintain at least this much THW with the next vehicle. ~0.5 seconds is a good number.
 
     // Internal state variables
     Seconds feasible_thw;            // Feasible time headway, i.e., the time headway that can be achieved by applying max braking. This is used to determine if AEB should be triggered.
-    bool aeb_in_progress;           // Disengages automatically once feasible THW > 1 second or manually disengaged.
-    bool aeb_manually_disengaged;   // Once true, will stay until feasible THW is > 1 second, then will be set to false.
+    bool aeb_in_progress;           // Disengages automatically once feasible THW > 50% above aeb_min_thw or manually disengaged.
+    bool aeb_manually_disengaged;   // Once true, will stay until auto-disengagement condition is met. See `aeb_in_progress`.
     
     // Other settings
     bool use_preferred_accel_profile; // Whether to use the car's preferred acceleration profile (if true) to limit acceleration, or use the car's full acceleration and braking capabilities (if false). Preferred profile can be set in car->preferences.
