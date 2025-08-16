@@ -1,13 +1,14 @@
 #include "ai.h"
 #include "logging.h"
+#include <assert.h>
 
 static const double MINIMUM_FOLLOW_MODE_BUFFER_FEET = 1; // Minimum follow mode buffer to avoid unrealistic behavior
 static const Seconds MINIMUM_FOLLOW_MODE_THW = 0.2; // Minimum follow mode time headway to avoid unrealistic behavior
 static const Seconds MINIMUM_MERGE_MIN_THW = 0.1; // Minimum merge minimum time headway to avoid unrealistic behavior
 static const Seconds MINIMUM_AEB_MIN_THW = 0.1; // Minimum AEB minimum time headway to avoid unrealistic behavior
 static const Seconds MAXIMUM_AEB_MIN_THW = 1.0; // Maximum AEB minimum time headway to avoid unrealistic behavior
+static const double DEFAULT_FOLLOW_MODE_BUFFER_FEET = 2; // Default follow mode buffer in feet
 static const Seconds DEFAULT_TIME_HEADWAY = 3.0; // Default time headway for merging and AEB
-
 static const Seconds DEFAULT_AEB_MIN_THW = 0.5; // Default minimum time headway for AEB
 
 
@@ -25,7 +26,7 @@ bool driving_assistant_reset_settings(DrivingAssistant* das, Car* car) {
     das->merge_intent = INDICATOR_NONE;
     das->turn_intent = INDICATOR_NONE;
     das->follow_mode = false;
-    das->follow_mode_buffer = from_feet(MINIMUM_FOLLOW_MODE_BUFFER_FEET); // Set to a minimum buffer to avoid unrealistic behavior
+    das->follow_mode_buffer = from_feet(DEFAULT_FOLLOW_MODE_BUFFER_FEET);
     das->follow_mode_thw = DEFAULT_TIME_HEADWAY;      // Default time headway
     das->merge_assistance = false;   // Default to false
     das->aeb_assistance = false;     // Default to false
@@ -164,31 +165,46 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
     }
 
 
-    // ----------- Lane and merge ----------------------
+    // ----------- Merge ----------------------
 
-    lane_indicator = das->merge_intent;
-    request_lane_change = false;
-    if (das->merge_assistance && lane_indicator != INDICATOR_NONE) {
-        if (car_is_lane_change_dangerous(car, sim, sa, lane_indicator, das->merge_min_thw)) {
-            LOG_TRACE("Waiting for safe lane change for car %d with indicator %d", car->id, lane_indicator);
-            lane_indicator = INDICATOR_NONE; // Disengage lane change if it's dangerous
-        } else {
-            request_lane_change = true; // Safe to change lane
-        }
+
+    // first of all, if merge is not possible, cancel the merge intent and reset current indicator and requests
+    if ((das->merge_intent == INDICATOR_LEFT && !sa->is_lane_change_left_possible) || (das->merge_intent == INDICATOR_RIGHT && !sa->is_lane_change_right_possible)) {
+        LOG_DEBUG("Disabling merge intent for car %d due to impossibility.", car->id);
+        das->merge_intent = INDICATOR_NONE; // Reset merge intent if the lane change is impossible
+        lane_indicator = INDICATOR_NONE; // Reset lane indicator
+        request_lane_change = false; // Reset lane change request
     } else {
-        request_lane_change = (lane_indicator != INDICATOR_NONE);
+        // set it to what merge intent says
+        lane_indicator = das->merge_intent;
+        // if merge assistance is active, issue request only when it is safe, else issue right away
+        if (das->merge_assistance && lane_indicator != INDICATOR_NONE) {
+            if (car_is_lane_change_dangerous(car, sim, sa, lane_indicator, das->merge_min_thw)) {
+                LOG_TRACE("Waiting for safe merge for car %d with indicator %d", car->id, lane_indicator);
+                lane_indicator = INDICATOR_NONE; // Disengage lane change if it's dangerous
+            } else {
+                request_lane_change = true; // Safe to change lane
+            }
+        } else {
+            // Request right away even if unsafe
+            request_lane_change = (lane_indicator != INDICATOR_NONE);
+        }
     }
 
-    turn_indicator = das->turn_intent;
-    request_turn = (turn_indicator != INDICATOR_NONE);
 
-    if (request_lane_change) {
-        das->merge_intent = INDICATOR_NONE; // Reset intent after issuing command
-    }
-    if (request_turn) {
-        das->turn_intent = INDICATOR_NONE; // Reset intent after issuing command
-    }
+    // --------- Turn -------------------
 
+    // First of all, if the turn intent is not feasible, cancel it and reset stuff
+    if ((das->turn_intent == INDICATOR_LEFT && !sa->is_turn_possible[INDICATOR_LEFT]) || (das->turn_intent == INDICATOR_RIGHT && !sa->is_turn_possible[INDICATOR_RIGHT])) {
+        LOG_DEBUG("Disabling turn intent for car %d due to no turn possibility.", car->id);
+        das->turn_intent = INDICATOR_NONE;  // Reset turn intent if impossible
+        turn_indicator = INDICATOR_NONE;    // Reset turn indicator
+        request_turn = false; // Reset turn request
+    } else {
+        // Keep requesting turn in the direction of turn intent. Reset turn intent later once turn successful.
+        turn_indicator = das->turn_intent;
+        request_turn = (turn_indicator != INDICATOR_NONE);
+    }
 
     // ---- Apply control commands ----
 
@@ -197,6 +213,7 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
     car_set_indicator_turn(car, turn_indicator);
     car_set_request_indicated_lane(car, request_lane_change);
     car_set_request_indicated_turn(car, request_turn);
+    car_set_auto_turn_off_indicators(car, true); // Needed to detect successful lane/turn changes
 
     return true; // Indicating successful control without error
 }
@@ -237,6 +254,20 @@ void driving_assistant_post_sim_step(DrivingAssistant* das, Car* car, Simulation
         }
         das->aeb_in_progress = false; // Reset AEB state if auto disengagement conditions are met
         das->aeb_manually_disengaged = false; // Reset manual disengagement state if auto disengagement occurs
+    }
+
+    // reset merge intent once merge successful. Detected by checking mismatch between merge_intent and current lane indicator, assuming car has auto-turn off indicator enabled
+    if (das->merge_intent != car_get_indicator_lane(car)) {
+        assert((car_get_indicator_lane(car) == INDICATOR_NONE && !car_get_request_indicated_lane(car)) && "How did this happen?");
+        das->merge_intent = INDICATOR_NONE; // Reset merge intent
+        LOG_DEBUG("Merge intent reset for car %d after successful merge.", car->id);
+    }
+
+    // reset turn intent once turn successful. Detected by checking mismatch between turn_intent and current turn indicator, assuming car has auto-turn off indicator enabled
+    if (das->turn_intent != car_get_indicator_turn(car)) {
+        assert((car_get_indicator_turn(car) == INDICATOR_NONE && !car_get_request_indicated_turn(car)) && "How did this happen?");
+        das->turn_intent = INDICATOR_NONE; // Reset turn intent
+        LOG_DEBUG("Turn intent reset for car %d after successful turn.", car->id);
     }
 }
 
