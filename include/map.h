@@ -247,6 +247,7 @@ bool road_is_exit_road_available(const Road* self, Map* map, double progress);
 bool road_is_exit_road_eventually_available(const Road* self, Map* map, double progress);
 Road* turn_road_get_from(const Road* self, Map* map);
 Road* turn_road_get_to(const Road* self, Map* map);
+int road_find_index_of_lane(const Road* self, LaneId lane_id);
 
 
 // Road Creaters

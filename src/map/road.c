@@ -115,6 +115,15 @@ Road* turn_road_get_to(const Road* self, Map* map) {
     return map_get_road(map, self->road_to_id);
 }
 
+int road_find_index_of_lane(const Road* self, LaneId lane_id) {
+    for (int i = 0; i < self->num_lanes; i++) {
+        if (self->lane_ids[i] == lane_id) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 
 
 // Road Creaters

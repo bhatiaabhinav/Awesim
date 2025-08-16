@@ -13,9 +13,11 @@ from gymenv import AwesimEnv
 # from bindings import *  # noqa
 
 
-experiment_name = "ppo_vecnorm"
+experiment_name = "ppo"
+notes = "PPO with speed/merge/turn adjustment and AEB."
 
 config = dict(
+    experiment_name=experiment_name,
     n_totalsteps_per_batch=8192,
     ppo_iters=10000,
     normalize=True,
@@ -39,7 +41,7 @@ ppo_config = dict(
     tensorboard_log="./logs/awesim_tensorboard/"
 )
 policy_config = dict(
-    net_arch=[128, 64, 32]
+    net_arch=[512, 256, 128],
 )
 config = dict(**config, **env_config, **vec_env_config, **ppo_config, **policy_config)
 
@@ -57,12 +59,12 @@ if __name__ == "__main__":
         if config["normalize"]:
             vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True, training=True)
         model = PPO("MlpPolicy", vec_env, policy_kwargs=policy_config, **ppo_config)
-        wandb = wandb.init(project="awesim", name=experiment_name, config=config, sync_tensorboard=True, save_code=True)
+        wandb = wandb.init(project="awesim", name=experiment_name, config=config, notes=notes, sync_tensorboard=True, save_code=True)
 
         # Save a checkpoint every 50000 steps
         callbacks = CallbackList([
             CheckpointCallback(
-                save_freq=max(50000 // vec_env_config["n_envs"], 1),
+                save_freq=max(100000 // vec_env_config["n_envs"], 1),
                 save_path="./models/" + experiment_name + "/",
                 name_prefix=experiment_name,
                 save_replay_buffer=False,
