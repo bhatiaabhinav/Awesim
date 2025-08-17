@@ -27,28 +27,10 @@ class AwesimEnv(gym.Env):
 
         A.seed_rng(i + 1)
 
-        # action factors to adjust driving assistant state:
-        # 0. speed_target_adjustment: -1: subtract 10 mph, 1: add 60 mph.
-        # 1. PD toggle
-        # 2. position_error_adjustment
-        # 3. merge_intent adjustment
-        # 4. turn_intent adjustment
-        # 5. cruise_mode toggle
-        # 6. cruise_speed_adjustment
-        # 7. follow_mode toggle
-        # 8. follow_mode_thw_adjustment
-        # 9. follow_mode_buffer_adjustment
-        # 10. merge_assistance toggle
-        # 11. aeb_assistance toggle
-        # 12. merge_min_thw_adjustment
-        # 13. aeb_min_thw_adjustment
-        # 14. aeb manually disengage
-        # 15. use_preferred_acceleration_profile toggle
-
         self.action_space = spaces.Box(
             low=-1.0,
             high=1.0,
-            shape=(3,),
+            shape=(7,),
             dtype=np.float32
         )
 
@@ -314,26 +296,25 @@ class AwesimEnv(gym.Env):
         speed_adjustment = float(action[a_id]) * A.from_mph(10)
         speed_target_new = self.das.speed_target + speed_adjustment
         speed_target_new = np.clip(
-            speed_target_new, A.from_mph(-10), A.from_mph(self.agent.capabilities.top_speed))
+            speed_target_new, A.from_mph(-10), self.agent.capabilities.top_speed)
         # print(f"Setting speed target to {to_mph(speed_target_new)} mph (adjusted by {to_mph(speed_adjustment)} mph)")
         A.driving_assistant_configure_speed_target(
             self.das, self.agent, self.sim, A.mps(speed_target_new))
         a_id += 1
 
-        # PD toggle
-        # pd_toggle_prob = (action[a_id] + 1) / 2
-        # pd_mode = not self.das.PD_mode if self.np_random.random() < pd_toggle_prob else self.das.PD_mode
-        # # print(f"Setting PD mode to {'enabled' if pd_mode else 'disabled'}")
-        # driving_assistant_configure_PD_mode(self.das, self.agent, self.sim, pd_mode)
-        # a_id += 1
+        # PD Switch
+        pd_prob = (action[a_id] + 1) / 2
+        pd_mode = self.np_random.random() < pd_prob
+        A.driving_assistant_configure_PD_mode(self.das, self.agent, self.sim, bool(pd_mode))
+        a_id += 1
 
-        # # position error adjustment
-        # if pd_mode:
-        #     position_error_adjustment = float(action[a_id]) * meters(10)  # Adjust by +/- 10 meters
-        #     new_position_error = self.das.position_error + position_error_adjustment
-        #     # print(f"Setting position error to {new_position_error} m")
-        #     driving_assistant_configure_position_error(self.das, self.agent, self.sim, meters(new_position_error))
-        # a_id += 1
+        # position error adjustment
+        if pd_mode:
+            position_error_adjustment = float(action[a_id]) * A.meters(50)  # Adjust by +/- 50 meters
+            new_position_error = self.das.position_error + position_error_adjustment
+            # print(f"Setting position error to {new_position_error} m")
+            A.driving_assistant_configure_position_error(self.das, self.agent, self.sim, A.meters(new_position_error))
+        a_id += 1
 
         # merge intent adjustment.
         should_indicate = self.np_random.random() < abs(action[a_id])
@@ -351,6 +332,22 @@ class AwesimEnv(gym.Env):
         # print(f"Setting turn intent to {new_turn_intent}")
         A.driving_assistant_configure_turn_intent(
             self.das, self.agent, self.sim, new_turn_intent)
+        a_id += 1
+
+        # Follow mode switch
+        follow_prob = (action[a_id] + 1) / 2
+        follow_mode = self.np_random.random() < follow_prob
+        if follow_mode and speed_target_new < 0:
+            speed_target_new = 0  # Follow mode requires positive speed
+            A.driving_assistant_configure_speed_target(self.das, self.agent, self.sim, A.mps(speed_target_new))
+        A.driving_assistant_configure_follow_mode(self.das, self.agent, self.sim, bool(follow_mode))
+        a_id += 1
+
+        # Follow mode THW adjustment
+        follow_thw_adjustment = float(action[a_id]) * A.seconds(1)  # Adjust by +/- 1 second
+        new_follow_thw = self.das.follow_mode_thw + follow_thw_adjustment
+        new_follow_thw = np.clip(new_follow_thw, 0.2, 5.0)
+        A.driving_assistant_configure_follow_mode_thw(self.das, self.agent, self.sim, A.seconds(new_follow_thw))
         a_id += 1
 
         # TODO: control other DAS parameters

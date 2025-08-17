@@ -13,8 +13,8 @@ from gymenv import AwesimEnv
 # from bindings import *  # noqa
 
 
-experiment_name = "ppo"
-notes = "PPO with speed/merge/turn adjustment and AEB."
+experiment_name = "ppo_speed_PD_merge_turn_followmode"
+notes = "PPO with speed/PD/merge/turn/FollowMode adjustment and (hardcoded 0.5-second) AEB"
 
 config = dict(
     experiment_name=experiment_name,
@@ -32,7 +32,7 @@ vec_env_config = dict(n_envs=16)
 ppo_config = dict(
     n_steps=config["n_totalsteps_per_batch"] // vec_env_config["n_envs"],
     learning_rate=0.0001,
-    ent_coef=0.01,
+    ent_coef=0.0,
     batch_size=64,
     target_kl=0.02,
     gae_lambda=0.95,
