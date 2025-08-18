@@ -30,7 +30,7 @@ class AwesimEnv(gym.Env):
         self.action_space = spaces.Box(
             low=-1.0,
             high=1.0,
-            shape=(7,),
+            shape=(8,),
             dtype=np.float32
         )
 
@@ -44,6 +44,10 @@ class AwesimEnv(gym.Env):
         turn_indicator = indicator_onehot(A.car_get_indicator_turn(agent))
         return np.concatenate((
             np.array([
+                agent.capabilities.top_speed / 10,
+                agent.capabilities.accel_profile.max_acceleration / 10,
+                agent.capabilities.accel_profile.max_acceleration_reverse_gear / 10,
+                agent.capabilities.accel_profile.max_deceleration / 10,
                 A.car_get_speed(agent) / 10,  # speed in m/s, normalized
                 A.car_get_acceleration(agent) / 10,  # acceleration in m/s^2, normalized
                 A.car_get_request_indicated_lane(agent),
@@ -116,8 +120,9 @@ class AwesimEnv(gym.Env):
         aeb_in_progress = das.aeb_in_progress
         aeb_manually_disengaged = das.aeb_manually_disengaged
         use_preferred_acc_profile = das.use_preferred_accel_profile
+        use_linear_speed_control = das.use_linear_speed_control
         return np.concatenate((
-            np.array([speed_target / 10, pd_mode, position_error / 100, follow_mode, follow_mode_thw / 10, follow_mode_buffer, merge_assistance, aeb_assistance, merge_min_thw / 10, aeb_min_thw, feasible_thw / 10, aeb_in_progress, aeb_manually_disengaged, use_preferred_acc_profile], dtype=np.float32),
+            np.array([speed_target / 10, pd_mode, position_error / 100, follow_mode, follow_mode_thw / 10, follow_mode_buffer, merge_assistance, aeb_assistance, merge_min_thw / 10, aeb_min_thw, feasible_thw / 10, aeb_in_progress, aeb_manually_disengaged, use_preferred_acc_profile, use_linear_speed_control], dtype=np.float32),
             das_merge_intent,
             das_turn_intent
         ))
@@ -348,6 +353,12 @@ class AwesimEnv(gym.Env):
         new_follow_thw = self.das.follow_mode_thw + follow_thw_adjustment
         new_follow_thw = np.clip(new_follow_thw, 0.2, 5.0)
         A.driving_assistant_configure_follow_mode_thw(self.das, self.agent, self.sim, A.seconds(new_follow_thw))
+        a_id += 1
+
+        # use linear speed control switch
+        use_linear_speed_control_prob = (action[a_id] + 1) / 2
+        use_linear_speed_control = self.np_random.random() < use_linear_speed_control_prob
+        A.driving_assistant_configure_use_linear_speed_control(self.das, self.agent, self.sim, bool(use_linear_speed_control))
         a_id += 1
 
         # TODO: control other DAS parameters

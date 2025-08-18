@@ -36,6 +36,7 @@ bool driving_assistant_reset_settings(DrivingAssistant* das, Car* car) {
     das->aeb_in_progress = false;    // Reset AEB state
     das->aeb_manually_disengaged = false; // Reset manual disengagement state
     das->use_preferred_accel_profile = false; // Reset preferred acceleration profile state
+    das->use_linear_speed_control = false; // Reset linear speed control state
 
     LOG_TRACE("Driving assistant settings reset for car %d", car->id);
     return true; // Indicating success
@@ -161,7 +162,7 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
 
     // ---------- Standard speed/cruise control ----------------------
     if (!das->follow_mode && !das->PD_mode && !das->aeb_in_progress) {
-        accel = car_compute_acceleration_adjust_speed(car, das->speed_target, das->use_preferred_accel_profile);
+        accel = das->use_linear_speed_control ? car_compute_acceleration_adjust_speed_linear(car, das->speed_target, das->use_preferred_accel_profile) : car_compute_acceleration_adjust_speed(car, das->speed_target, das->use_preferred_accel_profile);
     }
 
 
@@ -292,6 +293,7 @@ Seconds driving_assistant_get_feasible_thw(const DrivingAssistant* das) { return
 bool driving_assistant_get_aeb_in_progress(const DrivingAssistant* das) { return das->aeb_in_progress; }
 bool driving_assistant_get_aeb_manually_disengaged(const DrivingAssistant* das) { return das->aeb_manually_disengaged; }
 bool driving_assistant_get_use_preferred_accel_profile(const DrivingAssistant* das) { return das->use_preferred_accel_profile; }
+bool driving_assistant_get_use_linear_speed_control(const DrivingAssistant* das) { return das->use_linear_speed_control; }
 
 
 // Setters (will update the timestamp)
@@ -453,6 +455,14 @@ void driving_assistant_configure_use_preferred_accel_profile(DrivingAssistant* d
         return;
     }
     das->use_preferred_accel_profile = use_preferred_accel_profile;
+    das->last_configured_at = sim_get_time(sim);
+}
+
+void driving_assistant_configure_use_linear_speed_control(DrivingAssistant* das, const Car* car, const Simulation* sim, bool use_linear_speed_control) {
+    if (!validate_input(car, das, sim)) {
+        return;
+    }
+    das->use_linear_speed_control = use_linear_speed_control;
     das->last_configured_at = sim_get_time(sim);
 }
 

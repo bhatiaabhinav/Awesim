@@ -240,6 +240,51 @@ MetersPerSecondSquared car_compute_acceleration_adjust_speed(const Car* car, Met
     return accel;
 }
 
+MetersPerSecondSquared car_compute_acceleration_adjust_speed_linear(const Car* car, MetersPerSecond speed_target, bool use_preferred_accel_profile) {
+    MetersPerSecond speed_current = car_get_speed(car);
+    MetersPerSecondSquared accel;
+    CarAccelProfile profile = use_preferred_accel_profile ? car_accel_profile_get_effective(car->capabilities.accel_profile, car->preferences.acceleration_profile) : car->capabilities.accel_profile;
+
+    if (speed_target > 0) {
+        if (speed_target < speed_current) {
+            // we are going too fast. Slow down.
+            accel = -profile.max_deceleration;
+        } else if (speed_current < speed_target) {
+            if (speed_current < 0) {
+                // first we need to stop if we are in reverse gear
+                accel = profile.max_deceleration; // braking while reversing = acceleration in positive direction
+            } else {
+                // we are going too slow. Speed up.
+                accel = profile.max_acceleration;
+            }
+        } else {
+            accel = 0; // already at target speed
+        }
+    } else if (speed_target < 0) {
+        if (speed_target < speed_current) {
+            if (speed_current < 0) {
+                // continue to speed up in reverse gear
+                accel = -profile.max_acceleration_reverse_gear;
+            } else {
+                // first, we need to stop if we are in forward gear
+                accel = -profile.max_deceleration;
+            }
+        } else if (speed_current < speed_target) {
+            // brake to slow down in reverse gear
+            accel = profile.max_deceleration;
+        } else {
+            accel = 0; // already at target speed
+        }
+    } else {
+        if (speed_current == 0) {
+            accel = 0; // already at target speed
+        } else {
+            accel = speed_current > 0 ? -profile.max_deceleration : profile.max_deceleration; // brake to stop
+        }
+    }
+    return accel;
+}
+
 MetersPerSecondSquared car_compute_acceleration_cruise(const Car* car, MetersPerSecond speed_target, bool use_preferred_accel_profile) {
     if (speed_target < 0) {
         fprintf(stderr, "Error: speed_target must be non-negative\n");

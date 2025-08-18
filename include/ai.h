@@ -183,6 +183,9 @@ MetersPerSecondSquared car_compute_acceleration_chase_target(const Car* car, Met
 // Compute the acceleration required to adjust the car's speed to a target speed using a proportional controller, limited by either the car's capabilities (if use_preferred_accel_profile is false) or the car's preferred acceleration profile (if use_preferred_accel_profile is true).
 MetersPerSecondSquared car_compute_acceleration_adjust_speed(const Car* car, MetersPerSecond speed_target, bool use_preferred_accel_profile);
 
+// Applies constant acceleration to adjust the car's speed linearly to a target speed, with acceleration limited by either the car's capabilities (if use_preferred_accel_profile is false) or the car's preferred acceleration profile (if use_preferred_accel_profile is true).
+MetersPerSecondSquared car_compute_acceleration_adjust_speed_linear(const Car* car, MetersPerSecond speed_target, bool use_preferred_accel_profile);
+
 // Alias for car_compute_acceleration_adjust_speed with a non-negative speed_target.
 MetersPerSecondSquared car_compute_acceleration_cruise(const Car* car, MetersPerSecond speed_target, bool use_preferred_accel_profile);
 
@@ -379,7 +382,8 @@ typedef struct DrivingAssistant {
     bool aeb_manually_disengaged;   // Once true, will stay until auto-disengagement condition is met. See `aeb_in_progress`.
     
     // Other settings
-    bool use_preferred_accel_profile; // Whether to use the car's preferred acceleration profile (if true) to limit acceleration, or use the car's full acceleration and braking capabilities (if false). Preferred profile can be set in car->preferences.
+    bool use_preferred_accel_profile; // In control modes other than AEB, whether to use the car's preferred acceleration profile (if true) to limit acceleration, or use the car's full acceleration and braking capabilities (if false). Preferred profile can be set in car->preferences.
+    bool use_linear_speed_control;  // In control speed-only mode (i.e., non-PD, non-follow mode), whether to apply constant acceleration to adjust speed linearly to the target speed, with acceleration limited by either the car's capabilities (if use_preferred_accel_profile is false) or the car's preferred acceleration profile (if use_preferred_accel_profile is true).
 } DrivingAssistant;
 
 // Set the car's control variables. Returns false if there is an error, true otherwise.
@@ -411,6 +415,7 @@ Seconds driving_assistant_get_feasible_thw(const DrivingAssistant* das);
 bool driving_assistant_get_aeb_in_progress(const DrivingAssistant* das);
 bool driving_assistant_get_aeb_manually_disengaged(const DrivingAssistant* das);
 bool driving_assistant_get_use_preferred_accel_profile(const DrivingAssistant* das);
+bool driving_assistant_get_use_linear_speed_control(const DrivingAssistant* das);
 
 
 // Setters (will update the timestamp)
@@ -428,6 +433,7 @@ void driving_assistant_configure_aeb_assistance(DrivingAssistant* das, const Car
 void driving_assistant_configure_merge_min_thw(DrivingAssistant* das, const Car* car, const Simulation* sim, Seconds merge_min_thw);
 void driving_assistant_configure_aeb_min_thw(DrivingAssistant* das, const Car* car, const Simulation* sim, Seconds aeb_min_thw);
 void driving_assistant_configure_use_preferred_accel_profile(DrivingAssistant* das, const Car* car, const Simulation* sim, bool use_preferred_accel_profile);
+void driving_assistant_configure_use_linear_speed_control(DrivingAssistant* das, const Car* car, const Simulation* sim, bool use_linear_speed_control);
 
 // Manually disengage AEB. This will stay true until feasible THW > 1 second, then will be set to false.
 void driving_assistant_aeb_manually_disengage(DrivingAssistant* das, const Car* car, const Simulation* sim);

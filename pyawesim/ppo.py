@@ -13,8 +13,8 @@ from gymenv import AwesimEnv
 # from bindings import *  # noqa
 
 
-experiment_name = "ppo_speed_PD_merge_turn_followmode"
-notes = "PPO with speed/PD/merge/turn/FollowMode adjustment and (hardcoded 0.5-second) AEB"
+experiment_name = "ppo"
+notes = "PPO with speed/PDflag/PDerror/merge/turn/FMflag/FMTHW/LinearSpeedFlag adjustment and (hardcoded 0.5-second) AEB. Total 8 action components."
 
 config = dict(
     experiment_name=experiment_name,
@@ -61,10 +61,10 @@ if __name__ == "__main__":
         model = PPO("MlpPolicy", vec_env, policy_kwargs=policy_config, **ppo_config)
         wandb = wandb.init(project="awesim", name=experiment_name, config=config, notes=notes, sync_tensorboard=True, save_code=True)
 
-        # Save a checkpoint every 50000 steps
+        # Save a checkpoint every 500000 steps
         callbacks = CallbackList([
             CheckpointCallback(
-                save_freq=max(100000 // vec_env_config["n_envs"], 1),
+                save_freq=max(500000 // vec_env_config["n_envs"], 1),
                 save_path="./models/" + experiment_name + "/",
                 name_prefix=experiment_name,
                 save_replay_buffer=False,
