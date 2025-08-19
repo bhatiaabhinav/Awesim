@@ -13,7 +13,7 @@ from gymenv import AwesimEnv
 # from bindings import *  # noqa
 
 
-experiment_name = "ppo"
+experiment_name = "ppo_canonical"
 notes = "New canonical set: Gym env with speed(+/-10mps)/PDflag/PDerror(+/-50m)/merge/turn/FMflag/FMTHW/LinearSpeedFlag adjustment and (hardcoded 0.5-second) AEB. Total 8 action components. PPO 32k steps per batch with 64 parallel envs, 256 minibatch size, lr 0.0001. Big network [1024,512,256]. No entropy bonus. Kl target = 0.02. Obs & rew normalization."
 
 config = dict(
@@ -21,6 +21,8 @@ config = dict(
     n_totalsteps_per_batch=32768,
     ppo_iters=10000,
     normalize=True,
+    norm_obs=True,
+    norm_reward=True,
 )
 env_config = dict(
     city_width=1000,
@@ -57,7 +59,7 @@ if __name__ == "__main__":
     if not eval_mode:
         vec_env = make_vec_env(make_env, **vec_env_config, vec_env_cls=SubprocVecEnv)
         if config["normalize"]:
-            vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True, training=True)
+            vec_env = VecNormalize(vec_env, norm_obs=config["norm_obs"], norm_reward=config["norm_reward"], training=True)
         model = PPO("MlpPolicy", vec_env, policy_kwargs=policy_config, **ppo_config)
         wandb = wandb.init(project="awesim", name=experiment_name, config=config, notes=notes, sync_tensorboard=True, save_code=True)
 
