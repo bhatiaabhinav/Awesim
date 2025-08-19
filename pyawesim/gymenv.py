@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Optional
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
@@ -7,8 +7,9 @@ from gymenv_utils import direction_onehot, indicator_onehot
 
 
 class AwesimEnv(gym.Env):
-    def __init__(self, city_width: int = 1000, num_cars: int = 256, decision_interval: float = 0.1, sim_duration: float = 60 * 60, synchronized: bool = False, synchronized_sim_speedup=1.0, should_render: bool = False, render_server_ip="127.0.0.1", i=0) -> None:
+    def __init__(self, city_width: int = 1000, goal_lane: Optional[int] = None, num_cars: int = 256, decision_interval: float = 0.1, sim_duration: float = 60 * 60, synchronized: bool = False, synchronized_sim_speedup=1.0, should_render: bool = False, render_server_ip="127.0.0.1", i=0) -> None:
         super().__init__()
+        self.goal_lane = goal_lane
         self.city_width = city_width
         self.num_cars = num_cars
         self.decision_interval = decision_interval
@@ -256,8 +257,14 @@ class AwesimEnv(gym.Env):
                 return True
         return False
 
+    def _reached_destination(self):
+        if self.goal_lane is None:
+            return False
+        progress = A.car_get_lane_progress(self.agent)
+        return A.car_get_lane_id(self.agent) == 84 and 0.4 < progress and progress < 0.6  # Lane 84 is the destination lane in the canonical map and you have to get to the middle of it
+
     def _should_terminate(self):
-        return self._crashed()
+        return self._crashed() or self._reached_destination()
 
     def _should_truncate(self):
         # truncate if simulation time exceeds sim_duration
@@ -266,7 +273,14 @@ class AwesimEnv(gym.Env):
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
         super().reset(seed=seed, options=options)
         A.sim_disconnect_from_render_server(self.sim)
-        A.awesim_setup(self.sim, self.city_width, self.num_cars, 0.02, A.clock_reading(0, 8, 0, 0), A.WEATHER_SUNNY)
+        if self.goal_lane is None:
+            A.awesim_setup(self.sim, self.city_width, self.num_cars, 0.02, A.clock_reading(0, 8, 0, 0), A.WEATHER_SUNNY)
+        else:
+            first_reset_done = False
+            while not first_reset_done or A.car_get_lane_id(A.sim_get_car(self.sim, 0)) == self.goal_lane:
+                A.awesim_setup(self.sim, self.city_width, self.num_cars, 0.02, A.clock_reading(0, 8, 0, 0), A.WEATHER_SUNNY)
+                first_reset_done = True
+
         if self.synchronized:
             A.sim_set_synchronized(self.sim, True, self.synchronized_sim_speedup)
         if self.should_render:
@@ -365,8 +379,13 @@ class AwesimEnv(gym.Env):
 
         # simulate for a while. das will operate for us during this time
         done = False
+        crashed = False
+        reached_goal = False
         t = 0
-        r = 0  # distance moved forward minus heat loss penalty
+        if self.goal_lane is not None:
+            r = 0  # time loss and heat loss penalty
+        else:
+            r = 0  # distance moved forward minus heat loss penalty
         # Check for termination conditions every 0.1 seconds
         termination_check_interval = 0.1
         while not done and t < self.decision_interval:
@@ -375,24 +394,30 @@ class AwesimEnv(gym.Env):
             t += termination_check_interval
             # Update situational awareness after simulation step
             A.situational_awareness_build(self.sim, self.agent.id)
-            # integrate speed over time to get displacement
-            r += self._get_reward() * termination_check_interval
+            if self.goal_lane is None:
+                # integrate speed over time to get displacement
+                r += self._get_reward() * termination_check_interval
+            else:
+                r -= termination_check_interval  # time penalty
             # integrate braking power over time to get energy lost
             r -= 0.01 * self._power_applied_by_brakes() * termination_check_interval
-            done = self._should_terminate() or self._should_truncate()
+            crashed = self._crashed()
+            reached_goal = self._reached_destination()
+            done = crashed or reached_goal or self._should_truncate()
 
         # crashed = self._crashed()
         # if self._crashed():
         #     r -= 0.5 * car_get_speed(self.agent) ** 2   # All kinetic energy lost
 
         reward = r
-        terminated = self._should_terminate()
+        terminated = crashed or reached_goal
         truncated = self._should_truncate()
         obs = self._get_observation()
 
         obs = self._get_observation()
         info = {"time": A.sim_get_time(self.sim)}
-        info["is_success"] = not terminated
+        info["is_success"] = not crashed if self.goal_lane is None else reached_goal
+        info["crashed"] = crashed
         return obs, reward, terminated, truncated, info
 
     def close(self) -> None:

@@ -13,18 +13,19 @@ from gymenv import AwesimEnv
 # from bindings import *  # noqa
 
 
-experiment_name = "ppo_canonical"
-notes = "New canonical set: Gym env with speed(+/-10mps)/PDflag/PDerror(+/-50m)/merge/turn/FMflag/FMTHW/LinearSpeedFlag adjustment and (hardcoded 0.5-second) AEB. Total 8 action components. PPO 32k steps per batch with 64 parallel envs, 256 minibatch size, lr 0.0001. Big network [1024,512,256]. No entropy bonus. Kl target = 0.02. Obs & rew normalization."
+experiment_name = "ppo Goal84"
+notes = "New canonical set: Gym env with speed(+/-10mps)/PDflag/PDerror(+/-50m)/merge/turn/FMflag/FMTHW/LinearSpeedFlag adjustment and (hardcoded 0.5-second) AEB. Total 8 action components. Rew (but no obs) normalization."
 
 config = dict(
     experiment_name=experiment_name,
     n_totalsteps_per_batch=32768,
     ppo_iters=10000,
     normalize=True,
-    norm_obs=True,
+    norm_obs=False,
     norm_reward=True,
 )
 env_config = dict(
+    goal_lane=84,
     city_width=1000,
     num_cars=256,
     decision_interval=1,
@@ -39,11 +40,11 @@ ppo_config = dict(
     target_kl=0.02,
     gae_lambda=0.95,
     verbose=1,
-    device="cpu",
+    device="cuda",
     tensorboard_log="./logs/awesim_tensorboard/"
 )
 policy_config = dict(
-    net_arch=[512, 256, 128],
+    net_arch=[1024, 512, 256],
 )
 config = dict(**config, **env_config, **vec_env_config, **ppo_config, **policy_config)
 
