@@ -383,7 +383,7 @@ class AwesimEnv(gym.Env):
         reached_goal = False
         t = 0
         if self.goal_lane is not None:
-            r = 0  # time loss and heat loss penalty
+            r = 0  # time loss and heat loss penalty, and big bonus for reaching destination
         else:
             r = 0  # distance moved forward minus heat loss penalty
         # Check for termination conditions every 0.1 seconds
@@ -398,7 +398,7 @@ class AwesimEnv(gym.Env):
                 # integrate speed over time to get displacement
                 r += self._get_reward() * termination_check_interval
             else:
-                r -= termination_check_interval  # time penalty
+                r -= 0.1 * termination_check_interval  # time penalty (0.1 per second)
             # integrate braking power over time to get energy lost
             r -= 0.01 * self._power_applied_by_brakes() * termination_check_interval
             crashed = self._crashed()
@@ -408,6 +408,9 @@ class AwesimEnv(gym.Env):
         # crashed = self._crashed()
         # if self._crashed():
         #     r -= 0.5 * car_get_speed(self.agent) ** 2   # All kinetic energy lost
+
+        if self.goal_lane is not None:
+            r += 100
 
         reward = r
         terminated = crashed or reached_goal
