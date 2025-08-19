@@ -14,11 +14,11 @@ from gymenv import AwesimEnv
 
 
 experiment_name = "ppo"
-notes = "PPO with speed/PDflag/PDerror/merge/turn/FMflag/FMTHW/LinearSpeedFlag adjustment and (hardcoded 0.5-second) AEB. Total 8 action components."
+notes = "New canonical set: Gym env with speed(+/-10mps)/PDflag/PDerror(+/-50m)/merge/turn/FMflag/FMTHW/LinearSpeedFlag adjustment and (hardcoded 0.5-second) AEB. Total 8 action components. PPO 32k steps per batch with 64 parallel envs, 256 minibatch size, lr 0.0001. Big network [1024,512,256]. No entropy bonus. Kl target = 0.02. Obs & rew normalization."
 
 config = dict(
     experiment_name=experiment_name,
-    n_totalsteps_per_batch=8192,
+    n_totalsteps_per_batch=32768,
     ppo_iters=10000,
     normalize=True,
 )
@@ -28,12 +28,12 @@ env_config = dict(
     decision_interval=1,
     sim_duration=60 * 5
 )
-vec_env_config = dict(n_envs=16)
+vec_env_config = dict(n_envs=64)
 ppo_config = dict(
     n_steps=config["n_totalsteps_per_batch"] // vec_env_config["n_envs"],
     learning_rate=0.0001,
     ent_coef=0.0,
-    batch_size=64,
+    batch_size=256,
     target_kl=0.02,
     gae_lambda=0.95,
     verbose=1,

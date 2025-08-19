@@ -297,8 +297,8 @@ class AwesimEnv(gym.Env):
 
         a_id = 0
 
-        # speed adjustment. +/- 10 mph
-        speed_adjustment = float(action[a_id]) * A.from_mph(10)
+        # speed adjustment. +/- 10 mps
+        speed_adjustment = float(action[a_id]) * A.mps(10)
         speed_target_new = self.das.speed_target + speed_adjustment
         speed_target_new = np.clip(
             speed_target_new, A.from_mph(-10), self.agent.capabilities.top_speed)
