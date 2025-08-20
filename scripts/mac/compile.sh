@@ -41,7 +41,7 @@ fi
 
 gcc \
     -Iinclude \
-    src/render_server.c src/render/*.c src/utils/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/procedures/*.c src/logging/*.c \
+    src/render_server.c src/render/*.c src/utils/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c \
     -o ./bin/awesim_render_server \
     `sdl2-config --cflags --libs` \
     `pkg-config --cflags --libs sdl2_ttf` \

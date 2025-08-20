@@ -11,7 +11,6 @@ c_sources = (
     glob.glob('../src/awesim/*.c') +
     glob.glob('../src/car/*.c') +
     glob.glob('../src/ai/*.c') +
-    glob.glob('../src/procedures/*.c') +
     glob.glob('../src/logging/*.c')
 )
 

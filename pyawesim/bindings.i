@@ -46,8 +46,6 @@
 #include "../include/map.h"
 #include "../include/car.h"
 #include "../include/ai.h"
-#include "../include/actions.h"
-#include "../include/procedures.h"
 #include "../include/sim.h"
 #include "../include/awesim.h"
 %}
@@ -58,7 +56,5 @@
 %include "../include/map.h"
 %include "../include/car.h"
 %include "../include/ai.h"
-%include "../include/actions.h"
-%include "../include/procedures.h"
 %include "../include/sim.h"
 %include "../include/awesim.h"

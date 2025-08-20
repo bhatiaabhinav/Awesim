@@ -10,7 +10,7 @@ windres scripts/windows/resource.rc -O coff -o scripts/windows/resource.o
 gcc ^
     -Iinclude ^
     -D_WIN32_WINNT=0x0A00 ^
-    src/main.c src/utils/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/procedures/*.c src/logging/*.c ^
+    src/main.c src/utils/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c ^
     scripts/windows/resource.o ^
     -o .\bin\awesim.exe ^
     -lm -lws2_32 ^

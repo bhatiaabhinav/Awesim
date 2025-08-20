@@ -5,7 +5,6 @@
 #include "car.h"
 #include "map.h"
 #include "ai.h"
-#include "procedures.h"
 
 #define MAX_CARS_IN_SIMULATION 1024 // Maximum number of cars in the simulation
 #define MAX_NUM_HAZARDS_EACH_TYPE 1024 // Maximum number of hazards of each type
