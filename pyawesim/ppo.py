@@ -11,17 +11,18 @@ from wandb.integration.sb3 import WandbCallback
 
 from gymenv import AwesimEnv
 # from bindings import *  # noqa
+from entdecay import EntropyDecayCallback
 
 
-experiment_name = "ppo Goal84"
-notes = "New canonical set: Gym env with speed(+/-10mps)/PDflag/PDerror(+/-50m)/merge/turn/FMflag/FMTHW/LinearSpeedFlag adjustment and (hardcoded 0.5-second) AEB. Total 8 action components. Rew (but no obs) normalization."
+experiment_name = "ppo_newAEB_fulladas_speedadjust10mph_goal84_rew-100crash-0.1alltimes+100goal"
+notes = "Gym env with full ADAS speed(+/-10mph)/merge/turn/FMTHW adjustment and new AEB params 2mph/0.01mph/3ft/6ft. Total 4 action components. Ent decay 0.01 to 0.001 over 10% of training."
 
 config = dict(
     experiment_name=experiment_name,
     n_totalsteps_per_batch=32768,
     ppo_iters=10000,
     normalize=True,
-    norm_obs=False,
+    norm_obs=True,
     norm_reward=True,
 )
 env_config = dict(
@@ -62,10 +63,16 @@ if __name__ == "__main__":
         if config["normalize"]:
             vec_env = VecNormalize(vec_env, norm_obs=config["norm_obs"], norm_reward=config["norm_reward"], training=True)
         model = PPO("MlpPolicy", vec_env, policy_kwargs=policy_config, **ppo_config)
-        wandb = wandb.init(project="awesim", name=experiment_name, config=config, notes=notes, sync_tensorboard=True, save_code=True)
+        project = "awesim" if env_config["goal_lane"] is None else "awesim_goal"
+        wandb = wandb.init(project=project, name=experiment_name, config=config, notes=notes, sync_tensorboard=True, save_code=True)
 
         # Save a checkpoint every 500000 steps
         callbacks = CallbackList([
+            EntropyDecayCallback(
+                start=0.01,
+                end=0.001,
+                end_fraction=0.9
+            ),
             CheckpointCallback(
                 save_freq=max(500000 // vec_env_config["n_envs"], 1),
                 save_path="./models/" + experiment_name + "/",
@@ -108,7 +115,7 @@ if __name__ == "__main__":
         vec_env = VecNormalize.load(vec_stats_path, vec_env)
         vec_env.training = False  # Disable training mode for evaluation
     obs = vec_env.reset()
-    for i in range(1000):
+    for i in range(10000):
         action, _state = model.predict(obs, deterministic=True)  # type: ignore
         obs, reward, done, info = vec_env.step(action)
         # VecEnv resets automatically when done
