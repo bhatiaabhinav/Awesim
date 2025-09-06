@@ -117,7 +117,7 @@ bool merge(Car *self, Simulation *sim, const char *direction, double duration) {
     }
 
     /* Safety check – wait if dangerous. */
-    if (car_is_lane_change_dangerous(self, sim, s, ind, self->preferences.time_headway)) {
+    if (car_is_lane_change_dangerous(self, sim, s, ind, self->preferences.time_headway, from_feet(3))) {
         car_set_indicator_lane(self, ind);     // keep signalling
         car_set_request_indicated_lane(self, false); // don't request lane change yet
         return false;                          // still waiting

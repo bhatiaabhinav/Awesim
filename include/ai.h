@@ -173,7 +173,7 @@ CarIndicator lane_change_sample_possible(const SituationalAwareness* situation);
 // If you were to change lanes (or merge or exit), what would be the hypothetical position on the target lane? Assuming the target_lane is either an adjacent lane or a merge/exit lane adjacent to the current lane.
 Meters calculate_hypothetical_position_on_lane_change(const Car* car, const Lane* lane, const Lane* lane_target, Map* map);
 
-bool car_is_lane_change_dangerous(Car* car, Simulation* sim, const SituationalAwareness* situation, CarIndicator lane_change_indicator, Seconds time_headway_threshold);
+bool car_is_lane_change_dangerous(Car* car, Simulation* sim, const SituationalAwareness* situation, CarIndicator lane_change_indicator, Seconds time_headway_threshold, Meters buffer);
 
 
 
@@ -346,8 +346,10 @@ MetersPerSecondSquared control_compute_bounded_accel(ControlError error, MetersP
 //   then follows exponential convergence once |Δv| ≤ max_speed / 4
 MetersPerSecondSquared control_speed_compute_bounded_accel(ControlError error, MetersPerSecondSquared max_accel, MetersPerSecond max_speed);
 
-
-
+#define AEB_ENGAGE_MIN_SPEED_MPS 0.89408                // AEB engages only if ego speed exceeds 0.89408 m/s (≈ 2 mph)
+#define AEB_DISENGAGE_MAX_SPEED_MPS 0.0045              // AEB disengages when ego speed falls below 0.0045 m/s (≈ 0.01 mph)
+#define AEB_ENGAGE_BEST_CASE_BRAKING_GAP_M 0.9144       // AEB engages if best-case gap under maximum braking is less than 0.9144 m (≈ 3 ft)
+#define AEB_DISENGAGE_BEST_CASE_BRAKING_GAP_M 1.8288    // AEB disengages if best-case gap under maximum braking exceeds 1.8288 m (≈ 6 ft)
 
 typedef struct DrivingAssistant {
     Seconds last_configured_at;                  // Timestamp of the driving assistant's last settings update
@@ -369,16 +371,11 @@ typedef struct DrivingAssistant {
     Meters follow_mode_buffer;              // Buffer distance to maintain from the next vehicle, in addition to the follow_mode_thw distance. You can also think of this as the distance to maintain in stopped traffic.
 
     // Safety assistants
-    bool merge_assistance;          // Whether indicated lane change happens only when it is safe to merge.
-    bool aeb_assistance;            // Auto-Emergency-Braking (AEB). Whether to apply max braking if in the frame of reference of the target car, our car is closing in quickly and can barely avoid colliding even if it applied max braking, i.e., To be precise, it is triggered when the feasible THW is below a safe threshold aeb_min_thw. When AEB is triggered, PD_mode is turned off, and if follow mode is not on, the speed_target is reduced with the current speed so that speed control resumes to hold the speed when AEB is disengaged (automatic or manual).
-
-    // Safety assistants parameters
-    Seconds merge_min_thw;          // Minimum THW for both to-be next and to-be rear vehicles, to trigger merge. About ~3 seconds is ideal. ~2 seconds would be aggressive. ~1 is reckless driving.
-    Seconds aeb_min_thw;            // Use AEB to maintain at least this much THW with the next vehicle. ~0.5 seconds is a good number.
+    bool merge_assistance;          // Whether indicated lane change happens only when it is safe to merge, which is when post merging, the distance from the lead car and the following car is geq follow_mode_thw
+    bool aeb_assistance;            // Auto-Emergency-Braking (AEB). Whether to apply max braking if our car is projected to be dangerously close, even after max braking, to the lead car (with lead's acceleration accounted). Precisely, it is triggered when this best case braking gap <= AEB_ENGAGE_BEST_CASE_BRAKING_GAP. Moreover, ego vehicle speed must be equal or above AEB_ENGAGE_MIN_SPEED.
 
     // Internal state variables
-    Seconds feasible_thw;            // Feasible time headway, i.e., the time headway that can be achieved by applying max braking. This is used to determine if AEB should be triggered.
-    bool aeb_in_progress;           // Disengages automatically once feasible THW > 50% above aeb_min_thw or manually disengaged.
+    bool aeb_in_progress;           // Disengages automatically once the best case braking gap > AEB_DISENGAGE_BEST_CASE_BRAKING_GAP, or the ego stops, or manually disengaged.
     bool aeb_manually_disengaged;   // Once true, will stay until auto-disengagement condition is met. See `aeb_in_progress`.
     
     // Other settings
@@ -409,9 +406,6 @@ Meters driving_assistant_get_follow_mode_buffer(const DrivingAssistant* das);
 Seconds driving_assistant_get_follow_mode_thw(const DrivingAssistant* das);
 bool driving_assistant_get_merge_assistance(const DrivingAssistant* das);
 bool driving_assistant_get_aeb_assistance(const DrivingAssistant* das);
-Seconds driving_assistant_get_merge_min_thw(const DrivingAssistant* das);
-Seconds driving_assistant_get_aeb_min_thw(const DrivingAssistant* das);
-Seconds driving_assistant_get_feasible_thw(const DrivingAssistant* das);
 bool driving_assistant_get_aeb_in_progress(const DrivingAssistant* das);
 bool driving_assistant_get_aeb_manually_disengaged(const DrivingAssistant* das);
 bool driving_assistant_get_use_preferred_accel_profile(const DrivingAssistant* das);
@@ -430,10 +424,8 @@ void driving_assistant_configure_follow_mode_buffer(DrivingAssistant* das, const
 void driving_assistant_configure_follow_mode_thw(DrivingAssistant* das, const Car* car, const Simulation* sim, Seconds follow_mode_thw);
 void driving_assistant_configure_merge_assistance(DrivingAssistant* das, const Car* car, const Simulation* sim, bool merge_assistance);
 void driving_assistant_configure_aeb_assistance(DrivingAssistant* das, const Car* car, const Simulation* sim, bool aeb_assistance);
-void driving_assistant_configure_merge_min_thw(DrivingAssistant* das, const Car* car, const Simulation* sim, Seconds merge_min_thw);
-void driving_assistant_configure_aeb_min_thw(DrivingAssistant* das, const Car* car, const Simulation* sim, Seconds aeb_min_thw);
 void driving_assistant_configure_use_preferred_accel_profile(DrivingAssistant* das, const Car* car, const Simulation* sim, bool use_preferred_accel_profile);
 void driving_assistant_configure_use_linear_speed_control(DrivingAssistant* das, const Car* car, const Simulation* sim, bool use_linear_speed_control);
 
-// Manually disengage AEB. This will stay true until feasible THW > 1 second, then will be set to false.
+// Manually disengage AEB. `aeb_manually_disengaged` flag will stay true and won't reset until standard disengagement conditions are also met
 void driving_assistant_aeb_manually_disengage(DrivingAssistant* das, const Car* car, const Simulation* sim);

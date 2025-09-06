@@ -79,6 +79,7 @@ class AwesimEnv(gym.Env):
         is_left_turn = lane.direction == A.DIRECTION_CCW
         is_right_turn = lane.direction == A.DIRECTION_CW
         exit_available = sit.is_exit_available  # whether rightmost lane of this road provides opportunity to exit
+        exit_available_eventually = sit.is_exit_available_eventually    # whether exit will be available in the future on this road
         merge_available = sit.is_on_entry_ramp  # whether leftmost lane of this road provides opportunity to merge
         approaching_dead_end = sit.is_approaching_dead_end
         approaching_intersection = sit.is_an_intersection_upcoming
@@ -99,7 +100,7 @@ class AwesimEnv(gym.Env):
         progress = A.car_get_lane_progress(self.agent)
         distance_to_end_of_lane_from_leading_edge = sit.distance_to_end_of_lane_from_leading_edge  # accounts for the car's length. More meaningful than pointing to the center of the car.
         return np.concatenate((
-            np.array([is_on_intersection, center_x / 1000, center_y / 1000, is_straight, is_left_turn, is_right_turn, exit_available, merge_available, approaching_dead_end, approaching_intersection, num_lanes / 10, lane_number_normalized_from_left, lane_number_normalized_from_right, progress, distance_to_end_of_lane_from_leading_edge / 100], dtype=np.float32),
+            np.array([is_on_intersection, center_x / 1000, center_y / 1000, is_straight, is_left_turn, is_right_turn, exit_available, exit_available_eventually, merge_available, approaching_dead_end, approaching_intersection, num_lanes / 10, lane_number_normalized_from_left, lane_number_normalized_from_right, progress, distance_to_end_of_lane_from_leading_edge / 100], dtype=np.float32),
             direction_from, direction_to
         ))
 
@@ -115,15 +116,12 @@ class AwesimEnv(gym.Env):
         follow_mode_buffer = das.follow_mode_buffer
         merge_assistance = das.merge_assistance
         aeb_assistance = das.aeb_assistance
-        merge_min_thw = das.merge_min_thw
-        aeb_min_thw = das.aeb_min_thw
-        feasible_thw = np.clip(das.feasible_thw, 0.0, 100.0)
         aeb_in_progress = das.aeb_in_progress
         aeb_manually_disengaged = das.aeb_manually_disengaged
         use_preferred_acc_profile = das.use_preferred_accel_profile
         use_linear_speed_control = das.use_linear_speed_control
         return np.concatenate((
-            np.array([speed_target / 10, pd_mode, position_error / 100, follow_mode, follow_mode_thw / 10, follow_mode_buffer, merge_assistance, aeb_assistance, merge_min_thw / 10, aeb_min_thw, feasible_thw / 10, aeb_in_progress, aeb_manually_disengaged, use_preferred_acc_profile, use_linear_speed_control], dtype=np.float32),
+            np.array([speed_target / 10, pd_mode, position_error / 100, follow_mode, follow_mode_thw / 10, follow_mode_buffer, merge_assistance, aeb_assistance, aeb_in_progress, aeb_manually_disengaged, use_preferred_acc_profile, use_linear_speed_control], dtype=np.float32),
             das_merge_intent,
             das_turn_intent
         ))
@@ -261,7 +259,7 @@ class AwesimEnv(gym.Env):
         if self.goal_lane is None:
             return False
         progress = A.car_get_lane_progress(self.agent)
-        return A.car_get_lane_id(self.agent) == 84 and 0.4 < progress and progress < 0.6  # Lane 84 is the destination lane in the canonical map and you have to get to the middle of it
+        return A.car_get_lane_id(self.agent) == 84 and 0.1 < progress and progress < 0.9  # Lane 84 is the destination lane in the canonical map and you have to get to the middle of it
 
     def _should_terminate(self):
         return self._crashed() or self._reached_destination()
@@ -292,12 +290,16 @@ class AwesimEnv(gym.Env):
         self.das = A.sim_get_driving_assistant(self.sim, self.agent.id)
         A.driving_assistant_reset_settings(self.das, self.agent)
 
-        # ----------- AEB enabled with hardcoded parameters ---------------------------- TODO: Make this adjustable in action space.
+        # ----------- AEB enabled ----------------------------
         A.driving_assistant_configure_aeb_assistance(
             self.das, self.agent, self.sim, True)
-        A.driving_assistant_configure_aeb_min_thw(
-            self.das, self.agent, self.sim, 0.5)
         # ------------------------------------------------------------------------------
+        # ------------- Follow mode (adaptive cruise) always enabled -----------------------
+        A.driving_assistant_configure_follow_mode(self.das, self.agent, self.sim, True)
+        # ----------------------------------------------------------------------------------
+        # -------------- Merge assistance always enabled -----------------------------------
+        A.driving_assistant_configure_merge_assistance(self.das, self.agent, self.sim, True)
+        # ----------------------------------------------------------------------------------
 
         A.situational_awareness_build(self.sim, self.agent.id)
         obs = self._get_observation()
@@ -311,8 +313,58 @@ class AwesimEnv(gym.Env):
 
         a_id = 0
 
-        # speed adjustment. +/- 10 mps
-        speed_adjustment = float(action[a_id]) * A.mps(10)
+        # cur_speed = A.car_get_speed(self.agent)
+        # x = float(action[a_id])
+
+        # car_almost_stopped = cur_speed < 1e-2
+        # almost_no_input = np.abs(x) < 1e-2
+
+        # if car_almost_stopped and almost_no_input:
+        #     delta = -cur_speed / self.decision_interval  # if the car is almost stopped and no input, we just let it coast to a stop
+        #     speed_range = (0, 0)
+        # elif almost_no_input:
+        #     delta = 0
+        #     speed_range = (cur_speed, cur_speed)
+        # else:
+        #     if cur_speed >= 0:
+        #         if x >= 0:
+        #             # full acc (x = 1) should imply max capable acceleration
+        #             delta = x * self.agent.capabilities.accel_profile.max_acceleration
+        #             speed_range = (0, self.agent.capabilities.top_speed)
+        #         else:
+        #             if car_almost_stopped:
+        #                 # consider this as reverse gear
+        #                 delta = x * self.agent.capabilities.accel_profile.max_acceleration_reverse_gear
+        #                 speed_range = (-self.agent.capabilities.top_speed, 0)
+        #             else:
+        #                 # full braking (x = -1) should imply max capable braking
+        #                 delta = x * self.agent.capabilities.accel_profile.max_deceleration
+        #                 speed_range = (0, self.agent.capabilities.top_speed)
+        #     else:
+        #         if x <= 0:
+        #             # full acc (x = -1) should imply max capable acc in reverse gear
+        #             delta = x * self.agent.capabilities.accel_profile.max_acceleration_reverse_gear
+        #             speed_range = (-self.agent.capabilities.top_speed, 0)
+        #         else:
+        #             if car_almost_stopped:
+        #                 # consider this as forward gear
+        #                 delta = x * self.agent.capabilities.accel_profile.max_acceleration
+        #                 speed_range = (0, self.agent.capabilities.top_speed)
+        #             else:
+        #                 # full braking (x = 1) should imply max capable braking
+        #                 delta = x * self.agent.capabilities.accel_profile.max_deceleration
+        #                 speed_range = (-self.agent.capabilities.top_speed, 0)
+        # speed_adjustment = delta * self.decision_interval  # m/s
+        # speed_target_new = cur_speed + speed_adjustment
+        # speed_target_new = np.clip(
+        #     speed_target_new, speed_range[0], speed_range[1])
+        # # print(f"Setting speed target to {to_mph(speed_target_new)} mph (adjusted by {to_mph(speed_adjustment)} mph)")
+        # A.driving_assistant_configure_speed_target(
+        #     self.das, self.agent, self.sim, A.mps(speed_target_new))
+        # a_id += 1
+
+        # speed adjustment. +/- 10 mph
+        speed_adjustment = float(action[a_id]) * A.from_mph(10)
         speed_target_new = self.das.speed_target + speed_adjustment
         speed_target_new = np.clip(
             speed_target_new, A.from_mph(-10), self.agent.capabilities.top_speed)
@@ -322,18 +374,18 @@ class AwesimEnv(gym.Env):
         a_id += 1
 
         # PD Switch
-        pd_prob = (action[a_id] + 1) / 2
-        pd_mode = self.np_random.random() < pd_prob
-        A.driving_assistant_configure_PD_mode(self.das, self.agent, self.sim, bool(pd_mode))
-        a_id += 1
+        # pd_prob = (action[a_id] + 1) / 2
+        # pd_mode = self.np_random.random() < pd_prob
+        # A.driving_assistant_configure_PD_mode(self.das, self.agent, self.sim, bool(pd_mode))
+        # a_id += 1
 
         # position error adjustment
-        if pd_mode:
-            position_error_adjustment = float(action[a_id]) * A.meters(50)  # Adjust by +/- 50 meters
-            new_position_error = self.das.position_error + position_error_adjustment
-            # print(f"Setting position error to {new_position_error} m")
-            A.driving_assistant_configure_position_error(self.das, self.agent, self.sim, A.meters(new_position_error))
-        a_id += 1
+        # if pd_mode:
+        #     position_error_adjustment = float(action[a_id]) * A.meters(50)  # Adjust by +/- 50 meters
+        #     new_position_error = self.das.position_error + position_error_adjustment
+        #     # print(f"Setting position error to {new_position_error} m")
+        #     A.driving_assistant_configure_position_error(self.das, self.agent, self.sim, A.meters(new_position_error))
+        # a_id += 1
 
         # merge intent adjustment.
         should_indicate = self.np_random.random() < abs(action[a_id])
@@ -354,13 +406,17 @@ class AwesimEnv(gym.Env):
         a_id += 1
 
         # Follow mode switch
-        follow_prob = (action[a_id] + 1) / 2
-        follow_mode = self.np_random.random() < follow_prob
-        if follow_mode and speed_target_new < 0:
+        # follow_prob = (action[a_id] + 1) / 2
+        # follow_mode = self.np_random.random() < follow_prob
+        # if follow_mode and speed_target_new < 0:
+        #     speed_target_new = 0  # Follow mode requires positive speed
+        #     A.driving_assistant_configure_speed_target(self.das, self.agent, self.sim, A.mps(speed_target_new))
+        # A.driving_assistant_configure_follow_mode(self.das, self.agent, self.sim, bool(follow_mode))
+        # a_id += 1
+
+        if self.das.follow_mode and speed_target_new < 0:
             speed_target_new = 0  # Follow mode requires positive speed
             A.driving_assistant_configure_speed_target(self.das, self.agent, self.sim, A.mps(speed_target_new))
-        A.driving_assistant_configure_follow_mode(self.das, self.agent, self.sim, bool(follow_mode))
-        a_id += 1
 
         # Follow mode THW adjustment
         follow_thw_adjustment = float(action[a_id]) * A.seconds(1)  # Adjust by +/- 1 second
@@ -370,10 +426,10 @@ class AwesimEnv(gym.Env):
         a_id += 1
 
         # use linear speed control switch
-        use_linear_speed_control_prob = (action[a_id] + 1) / 2
-        use_linear_speed_control = self.np_random.random() < use_linear_speed_control_prob
-        A.driving_assistant_configure_use_linear_speed_control(self.das, self.agent, self.sim, bool(use_linear_speed_control))
-        a_id += 1
+        # use_linear_speed_control_prob = (action[a_id] + 1) / 2
+        # use_linear_speed_control = self.np_random.random() < use_linear_speed_control_prob
+        # A.driving_assistant_configure_use_linear_speed_control(self.das, self.agent, self.sim, bool(use_linear_speed_control))
+        # a_id += 1
 
         # TODO: control other DAS parameters
 
@@ -397,10 +453,10 @@ class AwesimEnv(gym.Env):
             if self.goal_lane is None:
                 # integrate speed over time to get displacement
                 r += self._get_reward() * termination_check_interval
+                # integrate braking power over time to get energy lost
+                r -= 0.01 * self._power_applied_by_brakes() * termination_check_interval
             else:
-                r -= 0.01 * termination_check_interval  # time penalty (0.01 per second)
-            # integrate braking power over time to get energy lost
-            r -= 0.01 * self._power_applied_by_brakes() * termination_check_interval
+                r -= 0.1 * termination_check_interval  # time penalty (0.1 per second)
             crashed = self._crashed()
             reached_goal = self._reached_destination()
             done = crashed or reached_goal or self._should_truncate()
@@ -409,8 +465,11 @@ class AwesimEnv(gym.Env):
         # if self._crashed():
         #     r -= 0.5 * car_get_speed(self.agent) ** 2   # All kinetic energy lost
 
-        if self.goal_lane is not None and reached_goal:
-            r += 100
+        if self.goal_lane is not None:
+            if reached_goal:
+                r += 100
+            if crashed:
+                r -= 100
 
         reward = r
         terminated = crashed or reached_goal

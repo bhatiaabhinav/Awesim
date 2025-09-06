@@ -99,7 +99,7 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
     }
 
     // cancel lane change if it is dangerous
-    if (car_is_lane_change_dangerous(self, sim, situation, lane_change_indicator, self->preferences.time_headway)) {
+    if (car_is_lane_change_dangerous(self, sim, situation, lane_change_indicator, self->preferences.time_headway, from_feet(3))) {
         indicate_only = true; // we will just indicate the lane change, but not request it
         // keep the indicator as it is, but do not request the lane change
         // printf("Lane change is dangerous.\n");

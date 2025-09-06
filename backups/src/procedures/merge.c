@@ -120,7 +120,7 @@ ProcedureStatusCode procedure_merge_step(Simulation* sim, Car* car, Procedure* p
     }
 
     // check safety
-    if (car_is_lane_change_dangerous(car, sim, situation, ind, follow_distance_in_seconds)) {
+    if (car_is_lane_change_dangerous(car, sim, situation, ind, follow_distance_in_seconds, from_feet(3))) {
         LOG_TRACE("Car %d: merge procedure is dangerous, waiting for safe conditions.", car->id);
         car_set_indicator_lane(car, ind);  // keep signaling intent
         car_set_request_indicated_lane(car, false); // don't request lane change yet
