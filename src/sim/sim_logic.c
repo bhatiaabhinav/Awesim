@@ -110,18 +110,36 @@ void sim_integrate(Simulation* self, Seconds time_period) {
             // v = lane->speed_limit;
 
             // handle top speed contraint
-            if (v + a * dt > car->capabilities.top_speed) {
-                a = (car->capabilities.top_speed - v) / dt;
-                LOG_TRACE("Handling top speed constraint for car %d: adjusted a = %.2f, v = %.2f", car->id, a, v);
-            }
-            
-            // update speed and position
+            MetersPerSecond _v = v; // v before applying acceleration
             MetersPerSecond dv = a * dt;
-            Meters ds = v * dt + 0.5 * a * dt * dt;
-            v += dv;
+            v = _v + dv;
+            // handle top speed constraint
+            if (v > car->capabilities.top_speed) {
+                a = (car->capabilities.top_speed - _v) / dt;
+                v = car->capabilities.top_speed;
+                dv = v - _v;
+                LOG_TRACE("Handling top speed constraint for car %d: adjusted a = %.2f, adjusted v = %.2f", car->id, a, v);
+                car_set_acceleration(car, a);
+            }
+            // handle case where a car is applying brakes and should not reverse speed sign in the same frame
+            if (_v > 0 && v < 0) {
+                a = -_v / dt;
+                v = 0;
+                dv = v - _v;
+                car_set_acceleration(car, a);
+            }
+            if (_v < 0 && v > 0) {
+                a = -_v / dt;
+                v = -0;
+                dv = v - _v;
+                car_set_acceleration(car, a);
+            }
+
+            Meters ds = _v * dt + 0.5 * a * dt * dt;
+            
             Meters s_initial = s; // Save initial position
             s += ds;    // May cause overshooting end of lane.
-            progress = s / lane->length;    // progress after accounting for motion and maybe a lange change. Maybe greater than 1.
+            progress = s / lane->length;    // progress after accounting for motion and maybe a lane change. Maybe greater than 1.
             if (progress < 0.0) {
                 LOG_TRACE("Car %d: Progress %.4f (s = %.2f) on lane %d has become negative. Maybe it reversed (speed = %.2f) too much? Clamping progress and speed to 0.0. The sim is yet to support backing on to a previous lane.", car->id, progress, s, lane->id, v);
                 progress = 0.0; // Clamp progress to 0 if it goes negative.
