@@ -8,6 +8,7 @@
 
 SDL_Texture* car_id_texture_cache[MAX_CARS_IN_SIMULATION][MAX_FONT_SIZE] = {{NULL}};
 NearbyVehiclesFlattened HIGHLIGHTED_NEARBY_VEHICLES;
+bool HIGHLIGHTED_CAR_AEB_ENGAGED;
 
 static bool should_highlight_car(const Car* car) {
     // Check if the car ID is in the highlighted cars array
@@ -25,6 +26,14 @@ static bool should_highlight_as_a_nearby_vehicle(const Car* car) {
         if (HIGHLIGHTED_NEARBY_VEHICLES.car_ids[i] == car->id) {
             return true;
         }
+    }
+    return false;
+}
+
+static bool should_highlight_as_a_forward_vehicle_when_aeb_engaged(const Car* car) {
+    // Check if it is HIGHLIGHTED_NEARBY_VEHICLES.car_ids[1] since index 1 is the forward vehicle
+    if (HIGHLIGHTED_NEARBY_VEHICLES.car_ids[1] == car->id) {
+        return HIGHLIGHTED_CAR_AEB_ENGAGED; // return true if AEB is engaged
     }
     return false;
 }
@@ -220,7 +229,19 @@ void render_car(SDL_Renderer* renderer, const Car* car, Map* map, const bool pai
     if (should_highlight_car(car)) {
         car_color = HIGHLIGHTED_CAR_COLOR;
     } else if (should_highlight_as_a_nearby_vehicle(car)) {
-        car_color = HIGHLIGHTED_NEARBY_VEHICLES_COLOR;
+        if (should_highlight_as_a_forward_vehicle_when_aeb_engaged(car)) {
+            // Blinking logic: 100ms on, 100ms off (200ms period. Flash 5 times per second.)
+            const Uint32 blink_period = 200; // 0.2 seconds
+            const Uint32 blink_on_duration = 100; // 0.1 seconds
+            Uint32 current_time = SDL_GetTicks();
+            if ((current_time % blink_period) > blink_on_duration) {
+                car_color = HIGHLIGHTED_FORWARD_VEHICLE_COLOR_AEB_ENGAGED;
+            } else {
+                car_color = HIGHLIGHTED_NEARBY_VEHICLES_COLOR;
+            }
+        } else {
+            car_color = HIGHLIGHTED_NEARBY_VEHICLES_COLOR;
+        }
     }
     filledPolygonRGBA_ignore_if_outside_screen(renderer, vx, vy, 4, car_color.r, car_color.g, car_color.b, car_color.a);
     polygonRGBA_ignore_if_outside_screen(renderer, vx, vy, 4, car_color.r, car_color.g, car_color.b, 255);

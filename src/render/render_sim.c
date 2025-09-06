@@ -182,6 +182,7 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
 
         // for the first highlighted car, extract its nearby vehicles
         HIGHLIGHTED_NEARBY_VEHICLES.count = 0; // by default, no nearby vehicles
+        HIGHLIGHTED_CAR_AEB_ENGAGED = false;
         if (HIGHLIGHTED_CARS[0] != -1) {
             Car *highlighted_car = sim_get_car(sim, HIGHLIGHTED_CARS[0]);
             if (highlighted_car) {
@@ -190,6 +191,12 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
                     situation->is_valid = false; // situational awareness has lots of pointers inside, which cannot be copied across processes (remember rendering happens in a separate process than the simulation and the sim state is communicated over tcp), so we need to rebuild it.
                     situational_awareness_build(sim, highlighted_car->id);
                     nearby_vehicles_flatten(&situation->nearby_vehicles, &HIGHLIGHTED_NEARBY_VEHICLES, true);
+                }
+                if (sim->is_agent_driving_assistant_enabled) {
+                    DrivingAssistant* das = sim_get_driving_assistant(sim, highlighted_car->id);
+                    if (das) {
+                        HIGHLIGHTED_CAR_AEB_ENGAGED = das->aeb_in_progress;
+                    }
                 }
             }
         }
