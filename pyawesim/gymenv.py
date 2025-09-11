@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any, Optional, Tuple, Dict
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
@@ -7,278 +7,495 @@ from gymenv_utils import direction_onehot, indicator_onehot
 
 
 class AwesimEnv(gym.Env):
-    def __init__(self, city_width: int = 1000, goal_lane: Optional[int] = None, num_cars: int = 256, decision_interval: float = 0.1, sim_duration: float = 60 * 60, synchronized: bool = False, synchronized_sim_speedup=1.0, should_render: bool = False, render_server_ip="127.0.0.1", i=0) -> None:
+    """
+    A Gym environment simulating an autonomous vehicle with an Advanced Driver Assistance System (ADAS).
+    The agent controls the vehicle to navigate a city environment, aiming to reach a specified goal lane
+    or drive safely without crashing. The environment uses a custom simulation backend (`bindings`) and
+    provides observations of the vehicle's state, ADAS settings, location, nearby vehicles, and traffic conditions.
+    Actions control speed, turn/merge signals, and follow distance. The environment supports rendering and
+    synchronized simulation for visualization.
+
+    Key Features:
+    - Action space: Continuous 3D Box for speed adjustment (±10 mph), turn/merge signal, and follow distance (±1s).
+    - Observation space: 149-dimensional vector capturing vehicle state, ADAS settings, location, nearby vehicles,
+      and traffic conditions, normalized to [-10, 10].
+    - Reward: -0.2 per second (time penalty), +100 for reaching goal lane, -100 for crashing, and speed-based reward
+      if no goal is specified.
+    - Termination: Episode ends on crash, reaching goal, or exceeding simulation duration (default 1 hour).
+    """
+
+    # Constants
+    DEFAULT_CITY_WIDTH = 1000  # City width in meters
+    DEFAULT_NUM_CARS = 256  # Number of vehicles in the simulation
+    DEFAULT_DECISION_INTERVAL = 0.1  # Time between agent decisions (seconds)
+    DEFAULT_SIM_DURATION = 60 * 60  # Simulation duration (seconds, default 1 hour)
+    DEFAULT_TIME_PENALTY = 0.2  # Penalty per second for time spent
+    DEFAULT_GOAL_REWARD = 100.0  # Reward for reaching the goal lane
+    DEFAULT_CRASH_PENALTY = 100.0  # Penalty for crashing
+    DEFAULT_RENDER_IP = "127.0.0.1"  # Default IP for rendering server
+    TERMINATION_CHECK_INTERVAL = 0.1  # Interval for checking termination conditions (seconds)
+    SPEED_ADJUSTMENT_MPH = 10  # Max speed adjustment per action (±10 mph)
+    FOLLOW_THW_ADJUSTMENT_SECONDS = 1  # Max follow time-headway adjustment (±1 second)
+    MIN_FOLLOW_THW = 0.2  # Minimum follow time-headway (seconds)
+    MAX_FOLLOW_THW = 5.0  # Maximum follow time-headway (seconds)
+    MAX_DISTANCE = 1000.0  # Maximum distance for nearby vehicles (meters)
+    MAX_TTC = 10.0  # Maximum time-to-collision (seconds)
+    MAX_THW = 10.0  # Maximum time-headway (seconds)
+    OBSERVATION_NORMALIZATION = {
+        "speed": 10,  # Normalize speeds by 10 m/s
+        "acceleration": 10,  # Normalize accelerations by 10 m/s²
+        "distance": 100,  # Normalize distances by 100 meters
+        "center": 1000,  # Normalize coordinates by 1000 meters
+        "lanes": 10,  # Normalize lane counts by 10
+        "countdown": 60,  # Normalize traffic light countdown by 60 seconds
+    }
+
+    def __init__(
+        self,
+        city_width: int = DEFAULT_CITY_WIDTH,
+        goal_lane: Optional[int] = None,
+        num_cars: int = DEFAULT_NUM_CARS,
+        decision_interval: float = DEFAULT_DECISION_INTERVAL,
+        sim_duration: float = DEFAULT_SIM_DURATION,
+        time_penalty_per_second: float = DEFAULT_TIME_PENALTY,
+        goal_reward: float = DEFAULT_GOAL_REWARD,
+        crash_penalty: float = DEFAULT_CRASH_PENALTY,
+        synchronized: bool = False,
+        synchronized_sim_speedup: float = 1.0,
+        should_render: bool = False,
+        render_server_ip: str = DEFAULT_RENDER_IP,
+        env_index: int = 0,
+        verbose: bool = False,
+    ) -> None:
+        """
+        Initialize the AwesimEnv with simulation and agent configuration.
+
+        Args:
+            city_width (int): Width of the city map in meters.
+            goal_lane (Optional[int]): Target lane ID to reach, or None for general driving.
+            num_cars (int): Number of vehicles in the simulation.
+            decision_interval (float): Time interval between agent actions (seconds).
+            sim_duration (float): Maximum duration of an episode (seconds).
+            time_penalty_per_second (float): Penalty per second for time spent.
+            goal_reward (float): Reward for reaching the goal lane.
+            crash_penalty (float): Penalty for crashing.
+            synchronized (bool): If True, synchronize simulation for rendering.
+            synchronized_sim_speedup (float): Speedup factor for synchronized simulation.
+            should_render (bool): If True, connect to rendering server.
+            render_server_ip (str): IP address of the rendering server.
+            env_index (int): Index for environment instance (used for seeding).
+            verbose (bool): If True, print action and event information.
+        """
         super().__init__()
+        if decision_interval <= 0:
+            raise ValueError("decision_interval must be positive")
+
+        # Environment configuration
         self.goal_lane = goal_lane
         self.city_width = city_width
         self.num_cars = num_cars
         self.decision_interval = decision_interval
+        self.time_penalty_per_second = time_penalty_per_second
+        self.goal_reward = goal_reward
+        self.crash_penalty = crash_penalty
         self.sim_duration = sim_duration
         self.synchronized = synchronized
         self.synchronized_sim_speedup = synchronized_sim_speedup
         self.should_render = should_render
         self.render_server_ip = render_server_ip
+        self.verbose = verbose
 
-        self.sim = A.sim_malloc()
-        A.awesim_setup(self.sim, self.city_width, self.num_cars, 0.02, A.clock_reading(0, 8, 0, 0), A.WEATHER_SUNNY)
-        A.sim_set_agent_enabled(self.sim, True)
-        A.sim_set_agent_driving_assistant_enabled(self.sim, True)
-        self.agent = A.sim_get_agent_car(self.sim)
-        print(f"Agent car ID: {self.agent.id}")
+        # Initialize simulation
+        self.sim = A.sim_malloc()  # Allocate simulation instance
+        A.awesim_setup(
+            self.sim, self.city_width, self.num_cars, 0.02, A.clock_reading(0, 8, 0, 0), A.WEATHER_SUNNY
+        )  # Set up city with fixed time (8 AM) and sunny weather
+        A.sim_set_agent_enabled(self.sim, True)  # Enable agent control
+        A.sim_set_agent_driving_assistant_enabled(self.sim, True)  # Enable ADAS
+        self.agent = A.sim_get_agent_car(self.sim)  # Get agent vehicle
+        if self.verbose:
+            print(f"Agent car ID: {self.agent.id}")
 
-        A.seed_rng(i + 1)
+        A.seed_rng(env_index + 1)  # Seed random number generator for reproducibility
 
+        # Define action and observation spaces
         self.action_space = spaces.Box(
-            low=-1.0,
-            high=1.0,
-            shape=(8,),
-            dtype=np.float32
-        )
-
+            low=-1.0, high=1.0, shape=(3,), dtype=np.float32
+        )  # 3D continuous actions: speed, turn/merge, follow distance
         n_state_factors = len(self._get_observation())
         self.observation_space = spaces.Box(
-            low=-10, high=10, shape=(n_state_factors,), dtype=np.float32)
+            low=-10, high=10, shape=(n_state_factors,), dtype=np.float32
+        )  # Normalized observation space
 
-    def _construct_car_state_observation(self):
+    def _construct_car_state_observation(self) -> np.ndarray:
+        """
+        Construct observation for the agent's vehicle state.
+
+        Returns:
+            np.ndarray: Concatenated array of vehicle capabilities, current speed,
+            acceleration, lane/turn indicators, and one-hot encoded signals.
+        """
         agent = self.agent
         lane_indicator = indicator_onehot(A.car_get_indicator_lane(agent))
         turn_indicator = indicator_onehot(A.car_get_indicator_turn(agent))
-        return np.concatenate((
-            np.array([
-                agent.capabilities.top_speed / 10,
-                agent.capabilities.accel_profile.max_acceleration / 10,
-                agent.capabilities.accel_profile.max_acceleration_reverse_gear / 10,
-                agent.capabilities.accel_profile.max_deceleration / 10,
-                A.car_get_speed(agent) / 10,  # speed in m/s, normalized
-                A.car_get_acceleration(agent) / 10,  # acceleration in m/s^2, normalized
-                A.car_get_request_indicated_lane(agent),
-                A.car_get_request_indicated_turn(agent)
-            ], dtype=np.float32),
-            lane_indicator,
-            turn_indicator
-        ))
+        return np.concatenate(
+            (
+                np.array(
+                    [
+                        agent.capabilities.top_speed / self.OBSERVATION_NORMALIZATION["speed"],
+                        agent.capabilities.accel_profile.max_acceleration / self.OBSERVATION_NORMALIZATION["acceleration"],
+                        agent.capabilities.accel_profile.max_acceleration_reverse_gear / self.OBSERVATION_NORMALIZATION["acceleration"],
+                        agent.capabilities.accel_profile.max_deceleration / self.OBSERVATION_NORMALIZATION["acceleration"],
+                        A.car_get_speed(agent) / self.OBSERVATION_NORMALIZATION["speed"],
+                        A.car_get_acceleration(agent) / self.OBSERVATION_NORMALIZATION["acceleration"],
+                        A.car_get_request_indicated_lane(agent),
+                        A.car_get_request_indicated_turn(agent),
+                    ],
+                    dtype=np.float32,
+                ),
+                lane_indicator,
+                turn_indicator,
+            )
+        )
 
-    def _construct_location_observation(self):
-        """Pinpoints the exact lane using meaningful attributes, and the vehicle's position within it."""
+    def _construct_location_observation(self) -> np.ndarray:
+        """
+        Construct observation for the vehicle's location and lane attributes.
+
+        Returns:
+            np.ndarray: Concatenated array of intersection/road position, lane properties,
+            and directional information.
+        """
         map = A.sim_get_map(self.sim)
         sit = A.sim_get_situational_awareness(self.sim, 0)
         is_on_intersection = sit.is_on_intersection
         center = sit.intersection.center if is_on_intersection else sit.road.mid_point
-        center_x, center_y = center.x, center.y
         lane = sit.lane
-        direction = lane.direction
+
+        # Determine lane direction for straight or turn lanes
         if lane.type == A.LINEAR_LANE:
-            direction_from = direction_onehot(direction)
-            direction_to = direction_from
+            direction_from = direction_to = direction_onehot(lane.direction)
         else:
             lane_prev = A.lane_get_connection_incoming_straight(lane, map)
             lane_next = A.lane_get_connection_straight(lane, map)
             direction_from = direction_onehot(lane_prev.direction)
             direction_to = direction_onehot(lane_next.direction)
+
         is_straight = lane.type == A.LINEAR_LANE
         is_left_turn = lane.direction == A.DIRECTION_CCW
         is_right_turn = lane.direction == A.DIRECTION_CW
-        exit_available = sit.is_exit_available  # whether rightmost lane of this road provides opportunity to exit
-        exit_available_eventually = sit.is_exit_available_eventually    # whether exit will be available in the future on this road
-        merge_available = sit.is_on_entry_ramp  # whether leftmost lane of this road provides opportunity to merge
-        approaching_dead_end = sit.is_approaching_dead_end
-        approaching_intersection = sit.is_an_intersection_upcoming
+
+        # Determine lane number and count based on intersection or road
         if is_on_intersection:
-            if lane.type == A.LINEAR_LANE:  # straight through lane. Number of parallel lanes depends on the roads it connects
+            if lane.type == A.LINEAR_LANE:
                 prev_lane = A.lane_get_connection_incoming_straight(lane, map)
                 prev_road = A.lane_get_road(prev_lane, map)
                 num_lanes = prev_road.num_lanes
                 lane_number = A.road_find_index_of_lane(prev_road, prev_lane.id)
-            else:   # turn lane. Doesn't have any parallel lanes
-                num_lanes = 1
-                lane_number = 1
+            else:
+                num_lanes = lane_number = 1
         else:
             num_lanes = sit.road.num_lanes
             lane_number = A.road_find_index_of_lane(sit.road, lane.id)
-        lane_number_normalized_from_left = lane_number / num_lanes
-        lane_number_normalized_from_right = (num_lanes - 1 - lane_number) / num_lanes
-        progress = A.car_get_lane_progress(self.agent)
-        distance_to_end_of_lane_from_leading_edge = sit.distance_to_end_of_lane_from_leading_edge  # accounts for the car's length. More meaningful than pointing to the center of the car.
-        return np.concatenate((
-            np.array([is_on_intersection, center_x / 1000, center_y / 1000, is_straight, is_left_turn, is_right_turn, exit_available, exit_available_eventually, merge_available, approaching_dead_end, approaching_intersection, num_lanes / 10, lane_number_normalized_from_left, lane_number_normalized_from_right, progress, distance_to_end_of_lane_from_leading_edge / 100], dtype=np.float32),
-            direction_from, direction_to
-        ))
 
-    def _construct_driving_assistant_observation(self):
+        return np.concatenate(
+            (
+                np.array(
+                    [
+                        is_on_intersection,
+                        center.x / self.OBSERVATION_NORMALIZATION["center"],
+                        center.y / self.OBSERVATION_NORMALIZATION["center"],
+                        is_straight,
+                        is_left_turn,
+                        is_right_turn,
+                        sit.is_exit_available,
+                        sit.is_exit_available_eventually,
+                        sit.is_on_entry_ramp,
+                        sit.is_approaching_dead_end,
+                        sit.is_an_intersection_upcoming,
+                        num_lanes / self.OBSERVATION_NORMALIZATION["lanes"],
+                        lane_number / num_lanes,
+                        (num_lanes - 1 - lane_number) / num_lanes,
+                        A.car_get_lane_progress(self.agent),
+                        sit.distance_to_end_of_lane_from_leading_edge / self.OBSERVATION_NORMALIZATION["distance"],
+                    ],
+                    dtype=np.float32,
+                ),
+                direction_from,
+                direction_to,
+            )
+        )
+
+    def _construct_driving_assistant_observation(self) -> np.ndarray:
+        """
+        Construct observation for the ADAS settings.
+
+        Returns:
+            np.ndarray: Concatenated array of ADAS parameters and one-hot encoded intents.
+        """
         das = A.sim_get_driving_assistant(self.sim, 0)
-        speed_target = das.speed_target
-        pd_mode = das.PD_mode
-        position_error = das.position_error
-        das_merge_intent = indicator_onehot(das.merge_intent)
-        das_turn_intent = indicator_onehot(das.turn_intent)
-        follow_mode = das.follow_mode
-        follow_mode_thw = das.follow_mode_thw
-        follow_mode_buffer = das.follow_mode_buffer
-        merge_assistance = das.merge_assistance
-        aeb_assistance = das.aeb_assistance
-        aeb_in_progress = das.aeb_in_progress
-        aeb_manually_disengaged = das.aeb_manually_disengaged
-        use_preferred_acc_profile = das.use_preferred_accel_profile
-        use_linear_speed_control = das.use_linear_speed_control
-        return np.concatenate((
-            np.array([speed_target / 10, pd_mode, position_error / 100, follow_mode, follow_mode_thw / 10, follow_mode_buffer, merge_assistance, aeb_assistance, aeb_in_progress, aeb_manually_disengaged, use_preferred_acc_profile, use_linear_speed_control], dtype=np.float32),
-            das_merge_intent,
-            das_turn_intent
-        ))
+        return np.concatenate(
+            (
+                np.array(
+                    [
+                        das.speed_target / self.OBSERVATION_NORMALIZATION["speed"],
+                        das.PD_mode,
+                        das.position_error / self.OBSERVATION_NORMALIZATION["distance"],
+                        das.follow_mode,
+                        das.follow_mode_thw / self.OBSERVATION_NORMALIZATION["speed"],
+                        das.follow_mode_buffer,
+                        das.merge_assistance,
+                        das.aeb_assistance,
+                        das.aeb_in_progress,
+                        das.aeb_manually_disengaged,
+                        das.use_preferred_accel_profile,
+                        das.use_linear_speed_control,
+                    ],
+                    dtype=np.float32,
+                ),
+                indicator_onehot(das.merge_intent),
+                indicator_onehot(das.turn_intent),
+            )
+        )
 
-    def _construct_nearby_vehicles_observation(self):
-        sim = self.sim
-        agent = self.agent
-        speed = A.car_get_speed(agent)
-        acc = A.car_get_acceleration(agent)
-        situation = A.sim_get_situational_awareness(sim, 0)
+    def _construct_nearby_vehicles_observation(self) -> np.ndarray:
+        """
+        Construct observation for nearby vehicles' states.
 
+        Returns:
+            np.ndarray: Concatenated array of lead/following vehicle states and nearby vehicle metrics.
+        """
+        situation = A.sim_get_situational_awareness(self.sim, 0)
+        agent_speed = A.car_get_speed(self.agent)
+        agent_acc = A.car_get_acceleration(self.agent)
+
+        # Lead vehicle observation
         lead_exists = situation.is_vehicle_ahead
-        lead_distance = situation.distance_to_lead_vehicle - (A.car_get_length(self.agent) / 2 + A.car_get_length(situation.lead_vehicle) / 2) if lead_exists else 1000
-        lead_rel_speed = A.car_get_speed(situation.lead_vehicle) - speed if lead_exists else 0
-        lead_rel_acc = A.car_get_acceleration(situation.lead_vehicle) - acc if lead_exists else 0
+        lead_distance = (
+            situation.distance_to_lead_vehicle - (A.car_get_length(self.agent) / 2 + A.car_get_length(situation.lead_vehicle) / 2)
+            if lead_exists
+            else self.MAX_DISTANCE
+        )
+        lead_rel_speed = A.car_get_speed(situation.lead_vehicle) - agent_speed if lead_exists else 0
+        lead_rel_acc = A.car_get_acceleration(situation.lead_vehicle) - agent_acc if lead_exists else 0
+
+        # Following vehicle observation
         behind_exists = situation.is_vehicle_behind
-        behind_distance = situation.distance_to_following_vehicle - (A.car_get_length(self.agent) / 2 + A.car_get_length(situation.following_vehicle) / 2) if behind_exists else 1000
-        behind_rel_speed = A.car_get_speed(situation.following_vehicle) - speed if behind_exists else 0
-        behind_rel_acc = A.car_get_acceleration(situation.following_vehicle) - acc if behind_exists else 0
+        behind_distance = (
+            situation.distance_to_following_vehicle - (A.car_get_length(self.agent) / 2 + A.car_get_length(situation.following_vehicle) / 2)
+            if behind_exists
+            else self.MAX_DISTANCE
+        )
+        behind_rel_speed = A.car_get_speed(situation.following_vehicle) - agent_speed if behind_exists else 0
+        behind_rel_acc = A.car_get_acceleration(situation.following_vehicle) - agent_acc if behind_exists else 0
 
+        # Nearby vehicles observation
         nearby_flattened = A.NearbyVehiclesFlattened()
-        A.nearby_vehicles_flatten(
-            situation.nearby_vehicles, nearby_flattened, True)
+        A.nearby_vehicles_flatten(situation.nearby_vehicles, nearby_flattened, True)
         flattened_count = A.nearby_vehicles_flattened_get_count(nearby_flattened)
-        nearby_exists_flags = np.array([A.nearby_vehicles_flattened_get_car_id(
-            nearby_flattened, i) != -1 for i in range(flattened_count)], dtype=np.float32)
-        nearby_distances = np.array([A.nearby_vehicles_flattened_get_distance(nearby_flattened, i) for i in range(
-            flattened_count)], dtype=np.float32).clip(0, 1000.0)  # Clip distances to [0, 1000] meters
-        nearby_ttcs = np.array([A.nearby_vehicles_flattened_get_time_to_collision(nearby_flattened, i) for i in range(
-            flattened_count)], dtype=np.float32).clip(0, 10.0)  # Clip TTC to [0, 10] seconds
-        nearby_thws = np.array([A.nearby_vehicles_flattened_get_time_headway(nearby_flattened, i) for i in range(
-            flattened_count)], dtype=np.float32).clip(0, 10.0)  # Clip THW to [0, 10] seconds
-        nearby_speeds_relative = np.array([(A.car_get_speed(A.sim_get_car(sim, A.nearby_vehicles_flattened_get_car_id(
-            nearby_flattened, i))) - speed) if nearby_exists_flags[i] else 0 for i in range(flattened_count)], dtype=np.float32)
-        nearby_acc_relative = np.array([(A.car_get_acceleration(A.sim_get_car(sim, A.nearby_vehicles_flattened_get_car_id(
-            nearby_flattened, i))) - acc) if nearby_exists_flags[i] else 0 for i in range(flattened_count)], dtype=np.float32)
-        return np.concatenate((np.array([lead_exists, lead_distance / 100, lead_rel_speed / 10, lead_rel_acc / 10, behind_exists, behind_distance / 100, behind_rel_speed / 10, behind_rel_acc / 10]), nearby_distances / 100, nearby_ttcs / 10, nearby_thws / 10, nearby_speeds_relative / 10, nearby_acc_relative / 10))
-        # todo: observe attributes like indicators and braking capabilities of the nearby vehicles
+        nearby_exists_flags = np.array(
+            [A.nearby_vehicles_flattened_get_car_id(nearby_flattened, i) != -1 for i in range(flattened_count)],
+            dtype=np.float32,
+        )
+        nearby_distances = np.array(
+            [A.nearby_vehicles_flattened_get_distance(nearby_flattened, i) for i in range(flattened_count)],
+            dtype=np.float32,
+        ).clip(0, self.MAX_DISTANCE)
+        nearby_ttcs = np.array(
+            [A.nearby_vehicles_flattened_get_time_to_collision(nearby_flattened, i) for i in range(flattened_count)],
+            dtype=np.float32,
+        ).clip(0, self.MAX_TTC)
+        nearby_thws = np.array(
+            [A.nearby_vehicles_flattened_get_time_headway(nearby_flattened, i) for i in range(flattened_count)],
+            dtype=np.float32,
+        ).clip(0, self.MAX_THW)
+        nearby_speeds_relative = np.array(
+            [
+                (A.car_get_speed(A.sim_get_car(self.sim, A.nearby_vehicles_flattened_get_car_id(nearby_flattened, i))) - agent_speed)
+                if nearby_exists_flags[i]
+                else 0
+                for i in range(flattened_count)
+            ],
+            dtype=np.float32,
+        )
+        nearby_acc_relative = np.array(
+            [
+                (A.car_get_acceleration(A.sim_get_car(self.sim, A.nearby_vehicles_flattened_get_car_id(nearby_flattened, i))) - agent_acc)
+                if nearby_exists_flags[i]
+                else 0
+                for i in range(flattened_count)
+            ],
+            dtype=np.float32,
+        )
 
-    def _construct_environment_conditions_observation(self):
+        return np.concatenate(
+            (
+                np.array(
+                    [
+                        lead_exists,
+                        lead_distance / self.OBSERVATION_NORMALIZATION["distance"],
+                        lead_rel_speed / self.OBSERVATION_NORMALIZATION["speed"],
+                        lead_rel_acc / self.OBSERVATION_NORMALIZATION["acceleration"],
+                        behind_exists,
+                        behind_distance / self.OBSERVATION_NORMALIZATION["distance"],
+                        behind_rel_speed / self.OBSERVATION_NORMALIZATION["speed"],
+                        behind_rel_acc / self.OBSERVATION_NORMALIZATION["acceleration"],
+                    ]
+                ),
+                nearby_distances / self.OBSERVATION_NORMALIZATION["distance"],
+                nearby_ttcs / self.OBSERVATION_NORMALIZATION["speed"],
+                nearby_thws / self.OBSERVATION_NORMALIZATION["speed"],
+                nearby_speeds_relative / self.OBSERVATION_NORMALIZATION["speed"],
+                nearby_acc_relative / self.OBSERVATION_NORMALIZATION["acceleration"],
+            )
+        )
+
+    def _construct_environment_conditions_observation(self) -> np.ndarray:
+        """
+        Construct observation for environmental conditions.
+
+        Returns:
+            np.ndarray: Array containing the current lane's speed limit.
+        """
         sit = A.sim_get_situational_awareness(self.sim, 0)
-        speed_limit = sit.lane.speed_limit
-        return np.array([speed_limit / 10], dtype=np.float32)
+        return np.array([sit.lane.speed_limit / self.OBSERVATION_NORMALIZATION["speed"]], dtype=np.float32)
 
-    def _construct_turn_relevant_observations(self):
+    def _construct_turn_relevant_observations(self) -> np.ndarray:
+        """
+        Construct observation for turn-related traffic conditions.
+
+        Returns:
+            np.ndarray: Array of turn availability and traffic light states.
+        """
         sit = A.sim_get_situational_awareness(self.sim, 0)
         lane = sit.lane
         map = A.sim_get_map(self.sim)
         left_turn_available = A.lane_get_connection_left_id(lane) != A.ID_NULL
         straight_available = A.lane_get_connection_straight_id(lane) != A.ID_NULL
         right_turn_available = A.lane_get_connection_right_id(lane) != A.ID_NULL
-        is_green = False
-        is_yellow = False
-        is_red = False
-        all_red = False
-        is_fourway_stop = False
+
+        is_green = is_yellow = is_red = all_red = is_fourway_stop = False
         countdown = 0
-        intersection = sit.intersection
-        if intersection:
+        if intersection := sit.intersection:
             is_fourway_stop = intersection.state == A.FOUR_WAY_STOP
             if not is_fourway_stop:
-                direction = A.lane_get_connection_incoming_straight(lane, map).direction if sit.is_on_intersection else lane.direction
-                is_EW = direction in (A.DIRECTION_EAST, A.DIRECTION_WEST)
-                is_NS = not is_EW
-                is_green = (is_EW and intersection.state == A.NS_RED_EW_GREEN) or (is_NS and intersection.state == A.NS_GREEN_EW_RED)
-                is_yellow = (is_EW and intersection.state == A.EW_YELLOW_NS_RED) or (is_NS and intersection.state == A.NS_YELLOW_EW_RED)
-                is_red = not is_green and not is_yellow
+                direction = (
+                    A.lane_get_connection_incoming_straight(lane, map).direction
+                    if sit.is_on_intersection
+                    else lane.direction
+                )
+                is_ew = direction in (A.DIRECTION_EAST, A.DIRECTION_WEST)
+                is_ns = not is_ew
+                is_green = (is_ew and intersection.state == A.NS_RED_EW_GREEN) or (
+                    is_ns and intersection.state == A.NS_GREEN_EW_RED
+                )
+                is_yellow = (is_ew and intersection.state == A.EW_YELLOW_NS_RED) or (
+                    is_ns and intersection.state == A.NS_YELLOW_EW_RED
+                )
+                is_red = not (is_green or is_yellow)
                 all_red = intersection.state in (A.ALL_RED_BEFORE_EW_GREEN, A.ALL_RED_BEFORE_NS_GREEN)
                 countdown = intersection.countdown
             else:
-                all_red = True
-                is_red = True
+                all_red = is_red = True
 
-        return np.array([left_turn_available, straight_available, right_turn_available, is_green, is_yellow, is_red, all_red, is_fourway_stop, countdown / 60], dtype=np.float32)
+        return np.array(
+            [
+                left_turn_available,
+                straight_available,
+                right_turn_available,
+                is_green,
+                is_yellow,
+                is_red,
+                all_red,
+                is_fourway_stop,
+                countdown / self.OBSERVATION_NORMALIZATION["countdown"],
+            ],
+            dtype=np.float32,
+        )
 
-    def _get_observation(self):
+    def _get_observation(self) -> np.ndarray:
+        """
+        Build the complete observation vector from all components.
+
+        Returns:
+            np.ndarray: Concatenated observation of car state, ADAS, location, nearby vehicles,
+            turn conditions, and environment.
+        """
         A.situational_awareness_build(self.sim, self.agent.id)
-        return np.concatenate((
-            self._construct_car_state_observation(),
-            self._construct_driving_assistant_observation(),
-            self._construct_location_observation(),
-            self._construct_nearby_vehicles_observation(),
-            self._construct_turn_relevant_observations(),
-            self._construct_environment_conditions_observation(),
-        ))
+        return np.concatenate(
+            (
+                self._construct_car_state_observation(),
+                self._construct_driving_assistant_observation(),
+                self._construct_location_observation(),
+                self._construct_nearby_vehicles_observation(),
+                self._construct_turn_relevant_observations(),
+                self._construct_environment_conditions_observation(),
+            )
+        )
 
-    def _power_applied_by_wheels_to_accelerate(self):
-        # Calculate the power applied by all wheels based on the current speed and acceleration
-        my_speed = A.car_get_speed(self.agent)
-        acceleration = A.car_get_acceleration(self.agent)
-        if (my_speed > 0 and my_speed * acceleration > 0):  # speeding up
-            return my_speed * acceleration  # W/Kg
-        return 0    # braking or reversing
+    def _get_reward(self) -> float:
+        """
+        Calculate reward based on vehicle speed (used when no goal lane is specified).
 
-    def _power_applied_by_wheels_to_reverse(self):
-        # Calculate the power applied by all wheels based on the current speed and acceleration
-        my_speed = A.car_get_speed(self.agent)
-        acceleration = A.car_get_acceleration(self.agent)
-        if (my_speed < 0 and my_speed * acceleration > 0):  # reversing
-            return my_speed * acceleration  # W/Kg
-        return 0    # braking or reversing
-
-    def _power_applied_by_brakes(self):
-        # Calculate the power applied by the brakes based on the current speed and braking force
-        my_speed = A.car_get_speed(self.agent)
-        acceleration = A.car_get_acceleration(self.agent)
-        if (my_speed * acceleration < 0):  # braking
-            return -my_speed * acceleration  # W/Kg
-        return 0
-
-    def _get_reward(self):
-        # encourage moving forward
+        Returns:
+            float: Reward proportional to speed in mph, scaled by 1/100.
+        """
         return A.to_mph(A.car_get_speed(self.agent)) / 100
 
-    def _crashed(self):
-        # detect crash with lead vehicle
+    def _crashed(self) -> bool:
+        """
+        Check if the agent has collided with lead or following vehicle.
+
+        Returns:
+            bool: True if a collision occurred, False otherwise.
+        """
         situation = A.sim_get_situational_awareness(self.sim, 0)
-        if situation.is_vehicle_ahead:
-            distance_center_to_center = situation.distance_to_lead_vehicle
-            distance_bumper_to_tail = distance_center_to_center - \
-                (A.car_get_length(self.agent) / 2 + A.car_get_length(situation.lead_vehicle) / 2)
-            if distance_bumper_to_tail <= 0:
-                # print(f"Agent {self.agent.id} crashed into lead vehicle #{situation.lead_vehicle.id} at distance {distance_bumper_to_tail}.")
-                return True
-        # detect crash with following vehicle
-        if situation.is_vehicle_behind:
-            distance_center_to_center = situation.distance_to_following_vehicle
-            distance_bumper_to_tail = distance_center_to_center - (A.car_get_length(self.agent) / 2 + A.car_get_length(situation.following_vehicle) / 2)
-            if distance_bumper_to_tail <= 0:
-                # print(f"Agent {self.agent.id} crashed into following vehicle #{situation.following_vehicle.id} at distance {distance_bumper_to_tail}.")
+        for vehicle, distance in [
+            (situation.lead_vehicle, situation.distance_to_lead_vehicle),
+            (situation.following_vehicle, situation.distance_to_following_vehicle),
+        ]:
+            if vehicle and distance - (A.car_get_length(self.agent) / 2 + A.car_get_length(vehicle) / 2) <= 0:
                 return True
         return False
 
-    def _reached_destination(self):
+    def _reached_destination(self) -> bool:
+        """
+        Check if the agent has reached the goal lane with sufficient progress.
+
+        Returns:
+            bool: True if the agent is in the goal lane and has progressed at least 10%, False otherwise.
+        """
         if self.goal_lane is None:
             return False
-        progress = A.car_get_lane_progress(self.agent)
-        return A.car_get_lane_id(self.agent) == 84 and 0.1 < progress and progress < 0.9  # Lane 84 is the destination lane in the canonical map and you have to get to the middle of it
+        return A.car_get_lane_id(self.agent) == self.goal_lane and A.car_get_lane_progress(self.agent) > 0.1
 
-    def _should_terminate(self):
-        return self._crashed() or self._reached_destination()
+    def reset(self, *, seed: Optional[int] = None, options: Optional[Dict[str, Any]] = None) -> Tuple[np.ndarray, Dict[str, Any]]:
+        """
+        Reset the environment to start a new episode.
 
-    def _should_truncate(self):
-        # truncate if simulation time exceeds sim_duration
-        return A.sim_get_time(self.sim) >= self.sim_duration
+        Ensures the agent does not start in the goal lane (if specified). Initializes the simulation,
+        connects to the rendering server if needed, and configures ADAS features (AEB, follow mode,
+        merge assistance).
 
-    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
+        Args:
+            seed (Optional[int]): Seed for random number generator.
+            options (Optional[Dict[str, Any]]): Additional options (unused).
+
+        Returns:
+            Tuple[np.ndarray, Dict[str, Any]]: Initial observation and empty info dictionary.
+        """
         super().reset(seed=seed, options=options)
         A.sim_disconnect_from_render_server(self.sim)
-        if self.goal_lane is None:
-            A.awesim_setup(self.sim, self.city_width, self.num_cars, 0.02, A.clock_reading(0, 8, 0, 0), A.WEATHER_SUNNY)
-        else:
-            first_reset_done = False
-            while not first_reset_done or A.car_get_lane_id(A.sim_get_car(self.sim, 0)) == self.goal_lane:
-                A.awesim_setup(self.sim, self.city_width, self.num_cars, 0.02, A.clock_reading(0, 8, 0, 0), A.WEATHER_SUNNY)
-                first_reset_done = True
 
+        # Reset until agent is not in goal lane (if goal is specified)
+        first_reset_done = False
+        while not first_reset_done or (self.goal_lane is not None and A.car_get_lane_id(A.sim_get_car(self.sim, 0)) == self.goal_lane):
+            A.awesim_setup(
+                self.sim, self.city_width, self.num_cars, 0.02, A.clock_reading(0, 8, 0, 0), A.WEATHER_SUNNY
+            )
+            first_reset_done = True
+
+        # Configure simulation settings
         if self.synchronized:
             A.sim_set_synchronized(self.sim, True, self.synchronized_sim_speedup)
         if self.should_render:
@@ -290,248 +507,132 @@ class AwesimEnv(gym.Env):
         self.das = A.sim_get_driving_assistant(self.sim, self.agent.id)
         A.driving_assistant_reset_settings(self.das, self.agent)
 
-        # ----------- AEB enabled ----------------------------
-        A.driving_assistant_configure_aeb_assistance(
-            self.das, self.agent, self.sim, True)
-        # ------------------------------------------------------------------------------
-        # ------------- Follow mode (adaptive cruise) always enabled -----------------------
+        # Configure ADAS features
+        A.driving_assistant_configure_aeb_assistance(self.das, self.agent, self.sim, True)
         A.driving_assistant_configure_follow_mode(self.das, self.agent, self.sim, True)
-        # ----------------------------------------------------------------------------------
-        # -------------- Merge assistance always enabled -----------------------------------
         A.driving_assistant_configure_merge_assistance(self.das, self.agent, self.sim, True)
-        # ----------------------------------------------------------------------------------
 
+        return self._get_observation(), {}
+
+    def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
+        """
+        Execute one step in the environment based on the provided action.
+
+        The action controls:
+        1. Speed adjustment (±10 mph).
+        2. Turn or merge intent (left/right/none, with contextual validation).
+        3. Follow time-headway adjustment (±1 second).
+
+        The simulation advances in sub-steps to check for crashes, goal achievement, or timeout.
+        Rewards include time penalty, crash penalty, goal reward, and speed-based reward (if no goal).
+
+        Args:
+            action (np.ndarray): 3D array for speed, turn/merge, and follow time-headway adjustments.
+
+        Returns:
+            Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]: Observation, reward, terminated flag,
+            truncated flag, and info dictionary (time, success, crash status).
+        """
         A.situational_awareness_build(self.sim, self.agent.id)
-        obs = self._get_observation()
-        info = {}
-        return obs, info
+        sit = A.sim_get_situational_awareness(self.sim, self.agent.id)
 
-    def step(self, action: Any) -> tuple[Any, float, bool, bool, dict[str, Any]]:
-        # configure das based on action
+        # Speed adjustment
+        speed_adjustment = float(action[0]) * A.from_mph(self.SPEED_ADJUSTMENT_MPH)
+        speed_target = np.clip(
+            self.das.speed_target + speed_adjustment,
+            A.from_mph(-10),
+            self.agent.capabilities.top_speed,
+        )
+        if self.das.follow_mode and speed_target < 0:
+            speed_target = 0  # Follow mode requires non-negative speed
+        A.driving_assistant_configure_speed_target(self.das, self.agent, self.sim, A.mps(speed_target))
 
-        # print(f"Action received: {action}")
-
-        a_id = 0
-
-        # cur_speed = A.car_get_speed(self.agent)
-        # x = float(action[a_id])
-
-        # car_almost_stopped = cur_speed < 1e-2
-        # almost_no_input = np.abs(x) < 1e-2
-
-        # if car_almost_stopped and almost_no_input:
-        #     delta = -cur_speed / self.decision_interval  # if the car is almost stopped and no input, we just let it coast to a stop
-        #     speed_range = (0, 0)
-        # elif almost_no_input:
-        #     delta = 0
-        #     speed_range = (cur_speed, cur_speed)
-        # else:
-        #     if cur_speed >= 0:
-        #         if x >= 0:
-        #             # full acc (x = 1) should imply max capable acceleration
-        #             delta = x * self.agent.capabilities.accel_profile.max_acceleration
-        #             speed_range = (0, self.agent.capabilities.top_speed)
-        #         else:
-        #             if car_almost_stopped:
-        #                 # consider this as reverse gear
-        #                 delta = x * self.agent.capabilities.accel_profile.max_acceleration_reverse_gear
-        #                 speed_range = (-self.agent.capabilities.top_speed, 0)
-        #             else:
-        #                 # full braking (x = -1) should imply max capable braking
-        #                 delta = x * self.agent.capabilities.accel_profile.max_deceleration
-        #                 speed_range = (0, self.agent.capabilities.top_speed)
-        #     else:
-        #         if x <= 0:
-        #             # full acc (x = -1) should imply max capable acc in reverse gear
-        #             delta = x * self.agent.capabilities.accel_profile.max_acceleration_reverse_gear
-        #             speed_range = (-self.agent.capabilities.top_speed, 0)
-        #         else:
-        #             if car_almost_stopped:
-        #                 # consider this as forward gear
-        #                 delta = x * self.agent.capabilities.accel_profile.max_acceleration
-        #                 speed_range = (0, self.agent.capabilities.top_speed)
-        #             else:
-        #                 # full braking (x = 1) should imply max capable braking
-        #                 delta = x * self.agent.capabilities.accel_profile.max_deceleration
-        #                 speed_range = (-self.agent.capabilities.top_speed, 0)
-        # speed_adjustment = delta * self.decision_interval  # m/s
-        # speed_target_new = cur_speed + speed_adjustment
-        # speed_target_new = np.clip(
-        #     speed_target_new, speed_range[0], speed_range[1])
-        # # print(f"Setting speed target to {to_mph(speed_target_new)} mph (adjusted by {to_mph(speed_adjustment)} mph)")
-        # A.driving_assistant_configure_speed_target(
-        #     self.das, self.agent, self.sim, A.mps(speed_target_new))
-        # a_id += 1
-
-        # speed adjustment. +/- 10 mph
-        speed_adjustment = float(action[a_id]) * A.from_mph(10)
-        speed_target_new = self.das.speed_target + speed_adjustment
-        speed_target_new = np.clip(
-            speed_target_new, A.from_mph(-10), self.agent.capabilities.top_speed)
-        # print(f"Setting speed target to {to_mph(speed_target_new)} mph (adjusted by {to_mph(speed_adjustment)} mph)")
-        A.driving_assistant_configure_speed_target(
-            self.das, self.agent, self.sim, A.mps(speed_target_new))
-        a_id += 1
-
-        # PD Switch
-        # pd_prob = (action[a_id] + 1) / 2
-        # pd_mode = self.np_random.random() < pd_prob
-        # A.driving_assistant_configure_PD_mode(self.das, self.agent, self.sim, bool(pd_mode))
-        # a_id += 1
-
-        # position error adjustment
-        # if pd_mode:
-        #     position_error_adjustment = float(action[a_id]) * A.meters(50)  # Adjust by +/- 50 meters
-        #     new_position_error = self.das.position_error + position_error_adjustment
-        #     # print(f"Setting position error to {new_position_error} m")
-        #     A.driving_assistant_configure_position_error(self.das, self.agent, self.sim, A.meters(new_position_error))
-        # a_id += 1
-
-        # merge intent adjustment.
-        should_indicate = self.np_random.random() < abs(action[a_id])
-        new_merge_intent = (
-            A.INDICATOR_LEFT if action[a_id] < 0 else A.INDICATOR_RIGHT) if should_indicate else A.INDICATOR_NONE
-        # print(f"Setting merge intent to {new_merge_intent}")
-        A.driving_assistant_configure_merge_intent(
-            self.das, self.agent, self.sim, new_merge_intent)
-        a_id += 1
-
-        # turn intent adjustment:
-        should_indicate = self.np_random.random() < abs(action[a_id])
-        new_turn_intent = (
-            A.INDICATOR_LEFT if action[a_id] < 0 else A.INDICATOR_RIGHT) if should_indicate else A.INDICATOR_NONE
-        # print(f"Setting turn intent to {new_turn_intent}")
-        A.driving_assistant_configure_turn_intent(
-            self.das, self.agent, self.sim, new_turn_intent)
-        a_id += 1
-
-        # Follow mode switch
-        # follow_prob = (action[a_id] + 1) / 2
-        # follow_mode = self.np_random.random() < follow_prob
-        # if follow_mode and speed_target_new < 0:
-        #     speed_target_new = 0  # Follow mode requires positive speed
-        #     A.driving_assistant_configure_speed_target(self.das, self.agent, self.sim, A.mps(speed_target_new))
-        # A.driving_assistant_configure_follow_mode(self.das, self.agent, self.sim, bool(follow_mode))
-        # a_id += 1
-
-        if self.das.follow_mode and speed_target_new < 0:
-            speed_target_new = 0  # Follow mode requires positive speed
-            A.driving_assistant_configure_speed_target(self.das, self.agent, self.sim, A.mps(speed_target_new))
-
-        # Follow mode THW adjustment
-        follow_thw_adjustment = float(action[a_id]) * A.seconds(1)  # Adjust by +/- 1 second
-        new_follow_thw = self.das.follow_mode_thw + follow_thw_adjustment
-        new_follow_thw = np.clip(new_follow_thw, 0.2, 5.0)
-        A.driving_assistant_configure_follow_mode_thw(self.das, self.agent, self.sim, A.seconds(new_follow_thw))
-        a_id += 1
-
-        # use linear speed control switch
-        # use_linear_speed_control_prob = (action[a_id] + 1) / 2
-        # use_linear_speed_control = self.np_random.random() < use_linear_speed_control_prob
-        # A.driving_assistant_configure_use_linear_speed_control(self.das, self.agent, self.sim, bool(use_linear_speed_control))
-        # a_id += 1
-
-        # TODO: control other DAS parameters
-
-        # simulate for a while. das will operate for us during this time
-        done = False
-        crashed = False
-        reached_goal = False
-        t = 0
-        if self.goal_lane is not None:
-            r = 0  # time loss and heat loss penalty, and big bonus for reaching destination
-        else:
-            r = 0  # distance moved forward minus heat loss penalty
-        # Check for termination conditions every 0.1 seconds
-        termination_check_interval = 0.1
-        while not done and t < self.decision_interval:
-            # We are breaking the decision_interval into smaller steps to check for termination or truncation conditions more frequently
-            A.simulate(self.sim, termination_check_interval)
-            t += termination_check_interval
-            # Update situational awareness after simulation step
-            A.situational_awareness_build(self.sim, self.agent.id)
-            if self.goal_lane is None:
-                # integrate speed over time to get displacement
-                r += self._get_reward() * termination_check_interval
-                # integrate braking power over time to get energy lost
-                r -= 0.01 * self._power_applied_by_brakes() * termination_check_interval
+        # Merge/turn intent
+        should_indicate = self.np_random.random() < abs(action[1])
+        indicator_direction = (
+            A.INDICATOR_LEFT if action[1] < 0 else A.INDICATOR_RIGHT if should_indicate else A.INDICATOR_NONE
+        )
+        new_merge_intent = new_turn_intent = A.INDICATOR_NONE
+        if indicator_direction != A.INDICATOR_NONE:
+            turn_makes_sense = (
+                indicator_direction == A.INDICATOR_LEFT and A.lane_get_connection_left_id(sit.lane) != A.ID_NULL
+            ) or (indicator_direction == A.INDICATOR_RIGHT and A.lane_get_connection_right_id(sit.lane) != A.ID_NULL)
+            merge_makes_sense = (
+                indicator_direction == A.INDICATOR_LEFT and sit.is_lane_change_left_possible
+            ) or (
+                indicator_direction == A.INDICATOR_RIGHT
+                and (sit.is_lane_change_right_possible or sit.is_exit_available_eventually)
+            )
+            if turn_makes_sense and not merge_makes_sense:
+                new_turn_intent = indicator_direction
+            elif merge_makes_sense and not turn_makes_sense:
+                new_merge_intent = indicator_direction
+                if (
+                    sit.is_an_intersection_upcoming
+                    and sit.distance_to_end_of_lane_from_leading_edge < A.meters(10)
+                    and A.car_get_speed(self.agent) > A.from_mph(5)
+                ):
+                    new_merge_intent = A.INDICATOR_NONE  # Prevent last-moment lane changes near intersections
+            elif merge_makes_sense and not sit.is_approaching_end_of_lane:
+                new_merge_intent = indicator_direction
             else:
-                r -= 0.1 * termination_check_interval  # time penalty (0.1 per second)
+                new_turn_intent = indicator_direction
+        A.driving_assistant_configure_merge_intent(self.das, self.agent, self.sim, new_merge_intent)
+        A.driving_assistant_configure_turn_intent(self.das, self.agent, self.sim, new_turn_intent)
+
+        # Follow mode time-headway adjustment
+        new_follow_thw = np.clip(
+            self.das.follow_mode_thw + float(action[2]) * A.seconds(self.FOLLOW_THW_ADJUSTMENT_SECONDS),
+            self.MIN_FOLLOW_THW,
+            self.MAX_FOLLOW_THW,
+        )
+        A.driving_assistant_configure_follow_mode_thw(self.das, self.agent, self.sim, A.seconds(new_follow_thw))
+
+        if self.verbose:
+            print(
+                f"Action: Speed cap: {A.to_mph(speed_target):.1f} mph, "
+                f"{'Merge' if new_merge_intent != A.INDICATOR_NONE else 'Turn' if new_turn_intent != A.INDICATOR_NONE else 'No'} "
+                f"{'Left' if new_merge_intent == A.INDICATOR_LEFT or new_turn_intent == A.INDICATOR_LEFT else 'Right' if new_merge_intent == A.INDICATOR_RIGHT or new_turn_intent == A.INDICATOR_RIGHT else ''}, "
+                f"Follow THW: {new_follow_thw:.1f} sec"
+            )
+
+        # Simulate and compute reward
+        reward = 0.0
+        elapsed_time = 0.0
+        crashed = reached_goal = truncated = False
+        while not (crashed or reached_goal or truncated) and elapsed_time < self.decision_interval:
+            A.simulate(self.sim, self.TERMINATION_CHECK_INTERVAL)  # Advance simulation
+            elapsed_time += self.TERMINATION_CHECK_INTERVAL
+            A.situational_awareness_build(self.sim, self.agent.id)
+            reward -= self.time_penalty_per_second * self.TERMINATION_CHECK_INTERVAL  # Apply time penalty
+            if self.goal_lane is None:
+                reward += A.car_get_speed(self.agent) * self.TERMINATION_CHECK_INTERVAL  # Reward for speed
             crashed = self._crashed()
             reached_goal = self._reached_destination()
-            done = crashed or reached_goal or self._should_truncate()
-
-        # crashed = self._crashed()
-        # if self._crashed():
-        #     r -= 0.5 * car_get_speed(self.agent) ** 2   # All kinetic energy lost
-
-        if self.goal_lane is not None:
-            if reached_goal:
-                r += 100
+            truncated = A.sim_get_time(self.sim) >= self.sim_duration
             if crashed:
-                r -= 100
+                reward -= self.crash_penalty
+            if reached_goal:
+                reward += self.goal_reward
 
-        reward = r
-        terminated = crashed or reached_goal
-        truncated = self._should_truncate()
-        obs = self._get_observation()
+        if self.verbose:
+            if crashed:
+                print("Crashed!")
+            if reached_goal:
+                print("Reached goal!")
 
         obs = self._get_observation()
-        info = {"time": A.sim_get_time(self.sim)}
-        info["is_success"] = not crashed if self.goal_lane is None else reached_goal
-        info["crashed"] = crashed
-        return obs, reward, terminated, truncated, info
+        info = {
+            "time": A.sim_get_time(self.sim),
+            "is_success": not crashed if self.goal_lane is None else reached_goal,
+            "crashed": crashed,
+        }
+        return obs, reward, crashed or reached_goal, truncated, info
 
     def close(self) -> None:
+        """
+        Clean up simulation resources and disconnect from the rendering server.
+        """
         A.sim_disconnect_from_render_server(self.sim)
         A.sim_free(self.sim)
         super().close()
-
-
-# Example usage
-if __name__ == "__main__":
-    # Create environment
-    env = AwesimEnv(
-        city_width=1000,
-        num_cars=256,
-        decision_interval=0.1,
-        sim_duration=60.0 * 10,
-        synchronized=True,  # Set to True if you want synchronized simulation
-        should_render=False  # Set to True if you want to connect to the render server
-    )
-
-    print("Created Awesim Gymnasium environment")
-    print(f"Action space: {env.action_space}")
-    print(f"Observation space: {env.observation_space}")
-
-    # Run a simple episode
-    observation, info = env.reset()
-    print(f"Initial observation: {observation}")
-
-    total_reward = 0
-    step_count = 0
-
-    try:
-        while True:
-            # Random action for demonstration
-            action = env.action_space.sample()
-
-            # Take step
-            observation, reward, terminated, truncated, info = env.step(action)
-            total_reward += reward
-            step_count += 1
-            # break
-
-            print(f"Step {step_count}: reward={reward:.3f}, total_reward={total_reward:.3f}")
-
-            if terminated or truncated:
-                print(f"Episode finished after {step_count} steps")
-                print(f"Reason: {'Terminated' if terminated else 'Truncated'}")
-                break
-
-    except KeyboardInterrupt:
-        print("Interrupted by user")
-
-    finally:
-        env.close()
-        print("Environment closed")

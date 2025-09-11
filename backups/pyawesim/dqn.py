@@ -22,7 +22,7 @@
 import gymnasium as gym
 
 # from stable_baselines3 import DQN
-from sb3_ddqn_impl import DoubleDQN
+from backups.pyawesim.sb3_ddqn_impl import DoubleDQN
 
 from gymenv import AwesimEnv
 from bindings import *

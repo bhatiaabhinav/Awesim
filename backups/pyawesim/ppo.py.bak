@@ -6,16 +6,18 @@ from stable_baselines3.common.callbacks import CheckpointCallback, CallbackList
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.vec_env.vec_normalize import VecNormalize
+from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
+import torch
 import wandb
 from wandb.integration.sb3 import WandbCallback
 
 from gymenv import AwesimEnv
 # from bindings import *  # noqa
-from entdecay import EntropyDecayCallback
+from gymenv_utils import EntropyDecayCallback
 
 
-experiment_name = "ppo_newAEB_fulladas_speedadjust10mph_goal84_rew-100crash-0.1alltimes+100goal"
-notes = "Gym env with full ADAS speed(+/-10mph)/merge/turn/FMTHW adjustment and new AEB params 2mph/0.01mph/3ft/6ft. Total 4 action components. Ent decay 0.01 to 0.001 over 10% of training."
+experiment_name = "PPO_Lane84_ADAS_3Actions_LayerNorm_Gamma0.999"
+notes = """Trains a PPO policy in a gym environment where an agent controls a vehicle using ADAS with 3 actionable parameters, updated every second: cruise speed (±10 mph), turn/safe-merge signal, and follow distance (±1s time-headway). Automatic Emergency Braking is always active with fixed parameters (2 mph, 0.01 mph, 3 ft, 6 ft; see ai.h). The goal is to reach lane #84 (2nd Ave N, between 1st St and S-2) from a random start without crashing, with episodes truncated after 10 minutes. Reward: -0.2/s, +100 for goal, -100 for crash (terminates episode). Observation includes 149 variables: vehicle state/capabilities (varies per episode), ADAS state, map awareness, nearby vehicles, intersection state, road/environment factors. Key hyperparameters: LayerNorm after each hidden layer in a [149, 1024, 512, 256, value/policy] architecture, gamma=0.999."""
 
 config = dict(
     experiment_name=experiment_name,
@@ -30,7 +32,7 @@ env_config = dict(
     city_width=1000,
     num_cars=256,
     decision_interval=1,
-    sim_duration=60 * 5
+    sim_duration=60 * 10
 )
 vec_env_config = dict(n_envs=64)
 ppo_config = dict(
@@ -40,12 +42,40 @@ ppo_config = dict(
     batch_size=256,
     target_kl=0.02,
     gae_lambda=0.95,
+    gamma=0.999,
     verbose=1,
-    device="cuda",
+    device="cpu",
     tensorboard_log="./logs/awesim_tensorboard/"
 )
+
+
+class MlpWithLayerNorm(BaseFeaturesExtractor):
+    def __init__(self, observation_space, features_dim=256, net_arch=None, final_norm_and_act=True):
+        super(MlpWithLayerNorm, self).__init__(observation_space, features_dim)
+        if net_arch is None:
+            net_arch = [features_dim * 4, features_dim * 2]
+        n_input = observation_space.shape[0]
+        layers = []
+        current_dim = n_input
+        for hidden_dim in net_arch:
+            layers.append(torch.nn.Linear(current_dim, hidden_dim))
+            layers.append(torch.nn.LayerNorm(hidden_dim))
+            layers.append(torch.nn.ReLU())
+            current_dim = hidden_dim
+        layers.append(torch.nn.Linear(current_dim, features_dim))
+        if final_norm_and_act:
+            layers.append(torch.nn.LayerNorm(features_dim))
+            layers.append(torch.nn.ReLU())
+        self.net = torch.nn.Sequential(*layers)
+
+    def forward(self, observations):
+        return self.net(observations)
+
+
 policy_config = dict(
-    net_arch=[1024, 512, 256],
+    net_arch=[],
+    features_extractor_class=MlpWithLayerNorm,
+    features_extractor_kwargs=dict(net_arch=[1024, 512], features_dim=256),
 )
 config = dict(**config, **env_config, **vec_env_config, **ppo_config, **policy_config)
 
@@ -61,7 +91,7 @@ if __name__ == "__main__":
     if not eval_mode:
         vec_env = make_vec_env(make_env, **vec_env_config, vec_env_cls=SubprocVecEnv)
         if config["normalize"]:
-            vec_env = VecNormalize(vec_env, norm_obs=config["norm_obs"], norm_reward=config["norm_reward"], training=True)
+            vec_env = VecNormalize(vec_env, norm_obs=config["norm_obs"], norm_reward=config["norm_reward"], training=True, gamma=config["gamma"])  # type: ignore
         model = PPO("MlpPolicy", vec_env, policy_kwargs=policy_config, **ppo_config)
         project = "awesim" if env_config["goal_lane"] is None else "awesim_goal"
         wandb = wandb.init(project=project, name=experiment_name, config=config, notes=notes, sync_tensorboard=True, save_code=True)
@@ -107,13 +137,18 @@ if __name__ == "__main__":
     env.synchronized_sim_speedup = 16.0
     env.render_server_ip = "127.0.0.1"
 
-    print(f"Loading model from {model_path}")
-    model = PPO.load(model_path, device=config["device"])
     vec_env = make_vec_env(lambda: env)
+
+    print(f"Loading model from {model_path}")
+    model = PPO("MlpPolicy", vec_env, policy_kwargs=policy_config, **ppo_config)
+    model.set_parameters(model_path)
+    print("Model loaded")
+
     if config["normalize"]:
         print(f"Loading VecNormalize stats from {vec_stats_path}")
         vec_env = VecNormalize.load(vec_stats_path, vec_env)
         vec_env.training = False  # Disable training mode for evaluation
+        print("VecNormalize stats loaded")
     obs = vec_env.reset()
     for i in range(10000):
         action, _state = model.predict(obs, deterministic=True)  # type: ignore
