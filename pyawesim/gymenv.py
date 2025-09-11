@@ -573,10 +573,14 @@ class AwesimEnv(gym.Env):
                     and A.car_get_speed(self.agent) > A.from_mph(5)
                 ):
                     new_merge_intent = A.INDICATOR_NONE  # Prevent last-moment lane changes near intersections
-            elif merge_makes_sense and not sit.is_approaching_end_of_lane:
-                new_merge_intent = indicator_direction
-            else:
+            elif not (turn_makes_sense or merge_makes_sense):
+                new_merge_intent = A.INDICATOR_NONE
+                new_turn_intent  = A.INDICATOR_NONE
+            elif sit.is_approaching_end_of_lane:
                 new_turn_intent = indicator_direction
+            else:
+                new_merge_intent = indicator_direction
+
         A.driving_assistant_configure_merge_intent(self.das, self.agent, self.sim, new_merge_intent)
         A.driving_assistant_configure_turn_intent(self.das, self.agent, self.sim, new_turn_intent)
 
