@@ -26,7 +26,7 @@ def gaussian_entropy(logstd: Tensor) -> Tensor:
 
 
 class Actor(nn.Module):
-    def __init__(self, mean_model, action_space: Box, deterministic: bool = False, device='cpu'):
+    def __init__(self, mean_model, action_space: Box, deterministic: bool = False, device='cpu', norm_obs: bool = False):
         super(Actor, self).__init__()
         assert np.all(np.isfinite(action_space.low)) and np.all(np.isfinite(action_space.high))
         self.mean_model = mean_model.to(device)
@@ -34,8 +34,31 @@ class Actor(nn.Module):
         self.shift = nn.Parameter(torch.tensor(action_space.low + action_space.high, dtype=torch.float32, device=device) / 2.0, requires_grad=False)
         self.scale = nn.Parameter(torch.tensor((action_space.high - action_space.low) / 2.0, dtype=torch.float32, device=device), requires_grad=False)
         self.deterministic = deterministic
+        self.norm_obs = norm_obs
+        if self.norm_obs:
+            obs_dim = self.mean_model[0].in_features
+            self.obs_mean = nn.Parameter(torch.zeros(obs_dim, dtype=torch.float32, device=device), requires_grad=False)
+            self.obs_var = nn.Parameter(torch.ones(obs_dim, dtype=torch.float32, device=device), requires_grad=False)
+            self.obs_count = nn.Parameter(torch.tensor(0., dtype=torch.float32, device=device), requires_grad=False)
 
     def get_mean_logstd(self, x: Tensor) -> Tuple[Tensor, Tensor]:
+        if self.norm_obs and self.training:
+            batch_mean = x.mean(dim=0)
+            batch_var = x.var(dim=0, unbiased=False)
+            batch_count = x.shape[0]
+            delta = batch_mean - self.obs_mean
+            tot_count = self.obs_count + batch_count
+            new_mean = self.obs_mean + delta * batch_count / tot_count
+            m_a = self.obs_var * self.obs_count
+            m_b = batch_var * batch_count
+            m_2 = m_a + m_b + torch.square(delta) * (self.obs_count * batch_count / tot_count)
+            new_var = m_2 / tot_count
+            new_count = tot_count
+            self.obs_mean.data.copy_(new_mean)
+            self.obs_var.data.copy_(new_var)
+            self.obs_count.data.copy_(new_count)
+        if self.norm_obs:
+            x = (x - self.obs_mean) / torch.sqrt(self.obs_var + 1e-8)
         mean = self.mean_model(x)
         logstd = self.logstd
         if self.deterministic:
@@ -135,15 +158,41 @@ class Actor(nn.Module):
 
 
 class Critic(nn.Module):
-    def __init__(self, model, device='cpu'):
+    def __init__(self, model, device='cpu', norm_obs: bool = False):
         super(Critic, self).__init__()
         self.model = model
+        self.norm_obs = norm_obs
+        if self.norm_obs:
+            obs_dim = self.model[0].in_features
+            self.obs_mean = nn.Parameter(torch.zeros(obs_dim, dtype=torch.float32, device=device), requires_grad=False)
+            self.obs_var = nn.Parameter(torch.ones(obs_dim, dtype=torch.float32, device=device), requires_grad=False)
+            self.obs_count = nn.Parameter(torch.tensor(0., dtype=torch.float32, device=device), requires_grad=False)
         self.to(device)
 
     def get_loss(self, states, old_values, advantages):
         values = (old_values + advantages).detach()
-        values_pred = self.model(states)
+        values_pred = self.get_value(states)
         return F.mse_loss(values_pred, values)
+
+    def get_value(self, x: Tensor) -> Tensor:
+        if self.norm_obs and self.training:
+            batch_mean = x.mean(dim=0)
+            batch_var = x.var(dim=0, unbiased=False)
+            batch_count = x.shape[0]
+            delta = batch_mean - self.obs_mean
+            tot_count = self.obs_count + batch_count
+            new_mean = self.obs_mean + delta * batch_count / tot_count
+            m_a = self.obs_var * self.obs_count
+            m_b = batch_var * batch_count
+            m_2 = m_a + m_b + torch.square(delta) * (self.obs_count * batch_count / tot_count)
+            new_var = m_2 / tot_count
+            new_count = tot_count
+            self.obs_mean.data.copy_(new_mean)
+            self.obs_var.data.copy_(new_var)
+            self.obs_count.data.copy_(new_count)
+        if self.norm_obs:
+            x = (x - self.obs_mean) / torch.sqrt(self.obs_var + 1e-8)
+        return self.model(x)
 
     def forward(self, x):
 
@@ -157,7 +206,7 @@ class Critic(nn.Module):
             x = x.unsqueeze(0)
 
         # get value
-        value = self.model(x)
+        value = self.get_value(x)
 
         # if input was unbatched, remove the batch dimension
         if input_is_unbatched:
@@ -190,6 +239,7 @@ class PPO:
                  decay_entropy_coef: bool = False,
                  normalize_advantages: bool = True,
                  clipnorm: float = 0.5,
+                 norm_rewards: bool = False,
                  adam_weight_decay: float = 0.0,
                  adam_epsilon: float = 1e-7,
                  inference_device: str = 'cpu',
@@ -219,6 +269,7 @@ class PPO:
         self.decay_entropy_coef = decay_entropy_coef
         self.normalize_advantages = normalize_advantages
         self.clipnorm = clipnorm
+        self.norm_rewards = norm_rewards
         self.inference_device = inference_device
         self.training_device = training_device
 
@@ -239,9 +290,11 @@ class PPO:
             'critic_lrs': [],           # adjusted per iteration
             'entropy_coefs': [],        # adjusted per iteration
             'returns': [],              # return of each trajectory collected so far
+            'discounted_returns': [],   # discounted return of each trajectory collected so far
             'lengths': [],              # length of each trajectory collected so far
             'successes': [],            # success of each trajectory collected so far (if env provides this info)
             'mean_returns': [],         # mean return of latest 100 trajectories after each iteration
+            'mean_discounted_returns': [],  # mean discounted return of latest 100 trajectories after each iteration
             'mean_lengths': [],         # mean length of latest 100 trajectories after each iteration
             'mean_successes': [],       # mean success of latest 100 trajectories after each iteration (if env provides this info)
         }
@@ -279,6 +332,7 @@ class PPO:
             self.truncateds_buf_inference = self.truncateds_buf
 
         self.returns_buffer = np.zeros((N,), dtype=np.float32)
+        self.discounted_returns_buffer = np.zeros((N,), dtype=np.float32)
         self.lengths_buffer = np.zeros((N,), dtype=np.int32)
 
         # actor for inference, if using a different device for inference
@@ -316,15 +370,18 @@ class PPO:
                 self.obs.data.copy_(torch.tensor(obs_next_potentially_resetted, device=self.inference_device), non_blocking=True)
 
                 # update returns and lengths
+                self.discounted_returns_buffer += r_t * np.power(self.gamma, self.lengths_buffer)
                 self.returns_buffer += r_t
                 self.lengths_buffer += 1
                 for i in range(self.envs.num_envs):
                     if terminated_t[i] or truncated_t[i]:
                         self.stats['returns'].append(self.returns_buffer[i])
+                        self.stats['discounted_returns'].append(self.discounted_returns_buffer[i])
                         self.stats['lengths'].append(self.lengths_buffer[i])
                         if 'is_success' in infos['final_info']:
                             self.stats['successes'].append(infos['final_info']['is_success'][i])  # type: ignore
                         self.returns_buffer[i] = 0.0
+                        self.discounted_returns_buffer[i] = 0.0
                         self.lengths_buffer[i] = 0
                         self.stats['total_episodes'] += 1
 
@@ -345,9 +402,11 @@ class PPO:
         # update stats
         self.stats['total_timesteps'] += self.nsteps * self.envs.num_envs
         mean_return = np.mean(self.stats['returns'][-100:]) if len(self.stats['returns']) > 0 else 0.0
+        mean_discounted_return = np.mean(self.stats['discounted_returns'][-100:]) if len(self.stats['discounted_returns']) > 0 else 0.0
         mean_length = np.mean(self.stats['lengths'][-100:]) if len(self.stats['lengths']) > 0 else 0.0
         mean_success = np.mean(self.stats['successes'][-100:]) if len(self.stats['successes']) > 0 else 0.0
         self.stats['mean_returns'].append(mean_return)
+        self.stats['mean_discounted_returns'].append(mean_discounted_return)
         self.stats['mean_lengths'].append(mean_length)
         self.stats['mean_successes'].append(mean_success)
 
@@ -383,6 +442,10 @@ class PPO:
 
     def train_one_iteration(self):
         self.collect_trajectories()
+        if self.norm_rewards and len(self.stats['discounted_returns']) > 1:
+            reward_std = np.std(self.stats['discounted_returns'])
+            if reward_std > 1e-8:
+                self.rewards_buf /= reward_std  # type: ignore
         self.compute_values_advantages()
         stop_actor_training = False
         entropy_coef = self.entropy_coef
@@ -514,11 +577,11 @@ if __name__ == "__main__":   # example usage
         nn.Linear(64, 1)
     )
 
-    actor = Actor(actor_model, env.action_space, deterministic=False)  # type: ignore
-    critic = Critic(critic_model)  # type: ignore
+    actor = Actor(actor_model, env.action_space, deterministic=False, norm_obs=True)  # type: ignore
+    critic = Critic(critic_model, norm_obs=True)  # type: ignore
 
     envs = SyncVectorEnv([lambda: make(envname) for _ in range(4)], autoreset_mode=AutoresetMode.SAME_STEP)
-    ppo = PPO(envs, actor, critic, 100, nsteps=256, batch_size=64, target_kl=0.01, inference_device='cpu', training_device='cuda' if torch.cuda.is_available() else 'cpu')
+    ppo = PPO(envs, actor, critic, 100, nsteps=256, batch_size=64, target_kl=0.01, actor_lr=0.0001, critic_lr=0.0003, inference_device='cpu', training_device='cuda' if torch.cuda.is_available() else 'cpu')
 
     ppo.train(ppo.iters)
     envs.close()
