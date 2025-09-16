@@ -537,12 +537,19 @@ class AwesimEnv(gym.Env):
         sit = A.sim_get_situational_awareness(self.sim, self.agent.id)
 
         # Speed adjustment
-        speed_adjustment = float(action[0]) * A.from_mph(self.SPEED_ADJUSTMENT_MPH)
+        # speed_adjustment = float(action[0]) * A.from_mph(self.SPEED_ADJUSTMENT_MPH)
+        # speed_target = np.clip(
+        #     self.das.speed_target + speed_adjustment,
+        #     A.from_mph(-10),
+        #     self.agent.capabilities.top_speed,
+        # )
+        # directly set speed target based on action
         speed_target = np.clip(
-            self.das.speed_target + speed_adjustment,
-            A.from_mph(-10),
+            (float(action[0]) + 1) / 2 * self.agent.capabilities.top_speed,
+            A.from_mph(0),
             self.agent.capabilities.top_speed,
         )
+        speed_target = 0.9 * speed_target + 0.1 * self.das.speed_target  # Smooth changes
         if self.das.follow_mode and speed_target < 0:
             speed_target = 0  # Follow mode requires non-negative speed
         A.driving_assistant_configure_speed_target(self.das, self.agent, self.sim, A.mps(speed_target))
@@ -585,11 +592,18 @@ class AwesimEnv(gym.Env):
         A.driving_assistant_configure_turn_intent(self.das, self.agent, self.sim, new_turn_intent)
 
         # Follow mode time-headway adjustment
+        # new_follow_thw = np.clip(
+        #     self.das.follow_mode_thw + float(action[2]) * A.seconds(self.FOLLOW_THW_ADJUSTMENT_SECONDS),
+        #     self.MIN_FOLLOW_THW,
+        #     self.MAX_FOLLOW_THW,
+        # )
+        # directly set follow thw based on action, between min and max
         new_follow_thw = np.clip(
-            self.das.follow_mode_thw + float(action[2]) * A.seconds(self.FOLLOW_THW_ADJUSTMENT_SECONDS),
+            (float(action[2]) + 1) / 2 * self.MAX_FOLLOW_THW,
             self.MIN_FOLLOW_THW,
             self.MAX_FOLLOW_THW,
         )
+        new_follow_thw = 0.9 * new_follow_thw + 0.1 * self.das.follow_mode_thw  # Smooth changes
         A.driving_assistant_configure_follow_mode_thw(self.das, self.agent, self.sim, A.seconds(new_follow_thw))
 
         if self.verbose:
