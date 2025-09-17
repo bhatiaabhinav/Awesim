@@ -482,11 +482,11 @@ class PPO:
                 mb_loss.backward()
                 # update actor
                 if not stop_actor_training:
-                    if self.clipnorm > 0:
+                    if self.clipnorm < np.inf:
                         torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.clipnorm)
                     self.actor_optimizer.step()
                 # update critic
-                if self.clipnorm > 0:
+                if self.clipnorm < np.inf:
                     torch.nn.utils.clip_grad_norm_(self.critic.parameters(), self.clipnorm)
                 self.critic_optimizer.step()
             epochs += 1

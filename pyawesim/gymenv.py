@@ -41,6 +41,9 @@ class AwesimEnv(gym.Env):
     MAX_DISTANCE = 1000.0  # Maximum distance for nearby vehicles (meters)
     MAX_TTC = 10.0  # Maximum time-to-collision (seconds)
     MAX_THW = 10.0  # Maximum time-headway (seconds)
+    COST_GAS_PER_MILE = 0.13  # Average cost of gas per mile ($) in US
+    COST_LOST_WAGE_PER_HOUR = 30.0  # Average wages per hour ($) in US
+    COST_CAR = 35000.0  # Average new car cost ($) in US. This is the cost for total loss in a crash.
     OBSERVATION_NORMALIZATION = {
         "speed": 10,  # Normalize speeds by 10 m/s
         "acceleration": 10,  # Normalize accelerations by 10 m/s²
@@ -48,6 +51,7 @@ class AwesimEnv(gym.Env):
         "center": 1000,  # Normalize coordinates by 1000 meters
         "lanes": 10,  # Normalize lane counts by 10
         "countdown": 60,  # Normalize traffic light countdown by 60 seconds
+        'time': 3600,  # Normalize time by 3600 seconds (1 hour)
     }
 
     def __init__(
@@ -57,6 +61,7 @@ class AwesimEnv(gym.Env):
         num_cars: int = DEFAULT_NUM_CARS,
         decision_interval: float = DEFAULT_DECISION_INTERVAL,
         sim_duration: float = DEFAULT_SIM_DURATION,
+        deadline_mode: bool = False,    # if true, the episode is terminated and not truncated when sim_duration is reached
         time_penalty_per_second: float = DEFAULT_TIME_PENALTY,
         goal_reward: float = DEFAULT_GOAL_REWARD,
         crash_penalty: float = DEFAULT_CRASH_PENALTY,
@@ -76,6 +81,7 @@ class AwesimEnv(gym.Env):
             num_cars (int): Number of vehicles in the simulation.
             decision_interval (float): Time interval between agent actions (seconds).
             sim_duration (float): Maximum duration of an episode (seconds).
+            deadline_mode (bool): If true, the episode is terminated and not truncated when sim_duration is reached.
             time_penalty_per_second (float): Penalty per second for time spent.
             goal_reward (float): Reward for reaching the goal lane.
             crash_penalty (float): Penalty for crashing.
@@ -99,6 +105,7 @@ class AwesimEnv(gym.Env):
         self.goal_reward = goal_reward
         self.crash_penalty = crash_penalty
         self.sim_duration = sim_duration
+        self.deadline_mode = deadline_mode
         self.synchronized = synchronized
         self.synchronized_sim_speedup = synchronized_sim_speedup
         self.should_render = should_render
@@ -358,7 +365,8 @@ class AwesimEnv(gym.Env):
             np.ndarray: Array containing the current lane's speed limit.
         """
         sit = A.sim_get_situational_awareness(self.sim, 0)
-        return np.array([sit.lane.speed_limit / self.OBSERVATION_NORMALIZATION["speed"]], dtype=np.float32)
+        t = A.sim_get_time(self.sim)
+        return np.array([sit.lane.speed_limit / self.OBSERVATION_NORMALIZATION["speed"], t / self.OBSERVATION_NORMALIZATION["time"]], dtype=np.float32)
 
     def _construct_turn_relevant_observations(self) -> np.ndarray:
         """
@@ -537,13 +545,6 @@ class AwesimEnv(gym.Env):
         sit = A.sim_get_situational_awareness(self.sim, self.agent.id)
 
         # Speed adjustment
-        # speed_adjustment = float(action[0]) * A.from_mph(self.SPEED_ADJUSTMENT_MPH)
-        # speed_target = np.clip(
-        #     self.das.speed_target + speed_adjustment,
-        #     A.from_mph(-10),
-        #     self.agent.capabilities.top_speed,
-        # )
-        # directly set speed target based on action
         speed_target = np.clip(
             (float(action[0]) + 1) / 2 * self.agent.capabilities.top_speed,
             A.from_mph(0),
@@ -592,12 +593,6 @@ class AwesimEnv(gym.Env):
         A.driving_assistant_configure_turn_intent(self.das, self.agent, self.sim, new_turn_intent)
 
         # Follow mode time-headway adjustment
-        # new_follow_thw = np.clip(
-        #     self.das.follow_mode_thw + float(action[2]) * A.seconds(self.FOLLOW_THW_ADJUSTMENT_SECONDS),
-        #     self.MIN_FOLLOW_THW,
-        #     self.MAX_FOLLOW_THW,
-        # )
-        # directly set follow thw based on action, between min and max
         new_follow_thw = np.clip(
             (float(action[2]) + 1) / 2 * self.MAX_FOLLOW_THW,
             self.MIN_FOLLOW_THW,
@@ -617,8 +612,8 @@ class AwesimEnv(gym.Env):
         # Simulate and compute reward
         reward = 0.0
         elapsed_time = 0.0
-        crashed = reached_goal = truncated = False
-        while not (crashed or reached_goal or truncated) and elapsed_time < self.decision_interval:
+        crashed = reached_goal = deadline_reached = False
+        while not (crashed or reached_goal or deadline_reached) and elapsed_time < self.decision_interval:
             A.simulate(self.sim, self.TERMINATION_CHECK_INTERVAL)  # Advance simulation
             elapsed_time += self.TERMINATION_CHECK_INTERVAL
             A.situational_awareness_build(self.sim, self.agent.id)
@@ -627,7 +622,7 @@ class AwesimEnv(gym.Env):
                 reward += A.car_get_speed(self.agent) * self.TERMINATION_CHECK_INTERVAL  # Reward for speed
             crashed = self._crashed()
             reached_goal = self._reached_destination()
-            truncated = A.sim_get_time(self.sim) >= self.sim_duration
+            deadline_reached = A.sim_get_time(self.sim) >= self.sim_duration
             if crashed:
                 reward -= self.crash_penalty
             if reached_goal:
@@ -645,6 +640,9 @@ class AwesimEnv(gym.Env):
             "is_success": not crashed if self.goal_lane is None else reached_goal,
             "crashed": crashed,
         }
+
+        terminated = crashed or reached_goal or (self.deadline_mode and deadline_reached)
+        truncated = (not self.deadline_mode) and deadline_reached
         return obs, reward, crashed or reached_goal, truncated, info
 
     def close(self) -> None:

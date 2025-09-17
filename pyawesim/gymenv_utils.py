@@ -47,3 +47,21 @@ def make_mlp_with_layernorm(input_dim, hidden_units, output_dim):
     layers.append(nn.Linear(prev_dim, output_dim))
 
     return nn.Sequential(*layers)
+
+
+def make_mlp(input_dim, hidden_units, output_dim, layernorm=False):
+    if layernorm:
+        return make_mlp_with_layernorm(input_dim, hidden_units, output_dim)
+    layers = []
+    prev_dim = input_dim
+
+    for units in hidden_units:
+        layers.extend([
+            nn.Linear(prev_dim, units),
+            nn.ReLU()
+        ])
+        prev_dim = units
+
+    layers.append(nn.Linear(prev_dim, output_dim))
+
+    return nn.Sequential(*layers)

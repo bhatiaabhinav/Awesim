@@ -6,37 +6,35 @@ import numpy as np
 import torch
 import wandb
 from gymenv import AwesimEnv
-from gymenv_utils import make_mlp_with_layernorm
+from gymenv_utils import make_mlp
 from gymnasium.vector import AsyncVectorEnv, AutoresetMode, VectorEnv
 from ppo import Actor, Critic, PPO
 
 
 # Experiment metadata
-EXPERIMENT_NAME = "PPO-CustomImpl-BigNet"
-NOTES = """Trains a PPO policy with a custom PPO implementation in a gym environment where an agent controls a vehicle using ADAS with 3 actionable parameters, updated every second: cruise speed = action[0] * top_speed (with 0.9 smoothing step size from old target), turn/safe-merge signal, and follow distance = action[2] * 5s (with 0.9 smoothing step size from old value). Automatic Emergency Braking is always active with fixed parameters (2 mph, 0.01 mph, 3 ft, 6 ft; see ai.h). The goal is to reach lane #84 (2nd Ave N, between 1st St and S-2) from a random start without crashing, with episodes truncated after 10 minutes. Reward: -0.2/s, +100 for goal, -100 for crash (terminates episode). Observation includes 149 variables: vehicle state/capabilities (varies per episode), ADAS state, map awareness, nearby vehicles, intersection state, road/environment factors. Key hyperparameters: LayerNorm after each hidden layer in a [149, 1024, 512, 256, value/policy] architecture, gamma=0.999, NO normalize obs/rewards."""
+EXPERIMENT_NAME = "Deadline-20mins"
+NOTES = """Trains a PPO policy with a custom PPO implementation in a gym environment where an agent controls a vehicle using ADAS with 3 actionable parameters, updated every second: cruise speed = action[0] * top_speed (with 0.9 smoothing step size from old target), turn/safe-merge signal, and follow distance = action[2] * 5s (with 0.9 smoothing step size from old value). Automatic Emergency Braking is always active with fixed parameters (2 mph, 0.01 mph, 3 ft, 6 ft; see ai.h). The goal is to reach lane #84 (2nd Ave N, between 1st St and S-2) from a random start without crashing, with episodes terminated (not truncated) after 20 minutes. Reward: +1 for goal, 0 otherwise. Crashing also terminates episode. Observation includes 149 variables: vehicle state/capabilities (varies per episode), ADAS state, map awareness, nearby vehicles, intersection state, road/environment factors and TIME. Key hyperparameters: [150, 128, 128, 128, value/policy] architecture, gamma=0.999, custom impl of normalize obs/rewards."""
 
 # Configuration dictionaries
 CONFIG = {
     "experiment_name": EXPERIMENT_NAME,
-    "n_totalsteps_per_batch": 32768,
-    # "n_totalsteps_per_batch": 1024, # For smaller machines
-    "ppo_iters": 100,
-    "normalize": False,  # TODO: not supported yet
-    "norm_obs": False,
-    "norm_reward": False,
+    "n_totalsteps_per_batch": 8192,
+    "ppo_iters": 10000,
+    "norm_obs": True,
+    "norm_reward": True,
 }
 ENV_CONFIG = {
     "goal_lane": 84,
     "city_width": 1000,
     "num_cars": 256,
     "decision_interval": 1,
-    "sim_duration": 60 * 10,
-    "goal_reward": 100.0,
-    "crash_penalty": 100.0,
-    "time_penalty_per_second": 0.2,
+    "sim_duration": 60 * 20,
+    "deadline_mode": True,
+    "goal_reward": 1.0,
+    "crash_penalty": 0.0,
+    "time_penalty_per_second": 0.0,
 }
 VEC_ENV_CONFIG = {"n_envs": 64}
-# VEC_ENV_CONFIG = {"n_envs": 8}   # For smaller machines
 PPO_CONFIG = {
     "iters": CONFIG["ppo_iters"],
     "nsteps": CONFIG["n_totalsteps_per_batch"] // VEC_ENV_CONFIG["n_envs"],
@@ -44,17 +42,19 @@ PPO_CONFIG = {
     "critic_lr": 0.0001,
     "decay_lr": False,
     "entropy_coef": 0.0,
-    "batch_size": 256,
-    # "batch_size": 64, # For smaller machines
+    "batch_size": 64,  # For smaller machines
     "target_kl": 0.01,
     "lam": 0.95,
     "gamma": 0.999,
+    "clipnorm": 0.5,
+    "norm_rewards": CONFIG["norm_reward"],
     # "verbose": 1,
-    "training_device": "cpu",
-    "inference_device": "cpu",
+    "training_device": "cuda" if torch.cuda.is_available() else "cpu",
+    "inference_device": "cuda" if torch.cuda.is_available() else "cpu",
 }
 POLICY_CONFIG = {
-    "net_arch": [1024, 512, 256],
+    "net_arch": [128, 128, 128],
+    "layernorm": False,
 }
 # Combined configuration for logging
 FULL_CONFIG = {**CONFIG, **ENV_CONFIG, **VEC_ENV_CONFIG, **PPO_CONFIG, **POLICY_CONFIG}
@@ -66,7 +66,7 @@ def make_env(env_index: int = 0) -> AwesimEnv:
 
 
 def setup_training_env() -> VectorEnv:
-    return AsyncVectorEnv([lambda: make_env(i + 1) for i in range(VEC_ENV_CONFIG["n_envs"])], autoreset_mode=AutoresetMode.SAME_STEP)
+    return AsyncVectorEnv([lambda: make_env(i + 1) for i in range(VEC_ENV_CONFIG["n_envs"])], copy=False, autoreset_mode=AutoresetMode.SAME_STEP)
 
 
 def train_model(no_wandb=False) -> Tuple[Actor, Critic, PPO]:
@@ -74,7 +74,7 @@ def train_model(no_wandb=False) -> Tuple[Actor, Critic, PPO]:
 
     vec_env = setup_training_env()
 
-    project = "awesim" if ENV_CONFIG["goal_lane"] is None else "awesim_goal"
+    project = "awesim" if ENV_CONFIG["goal_lane"] is None else ("awesim_goal_deadline" if ENV_CONFIG["deadline_mode"] else "awesim_goal")
     if not no_wandb:
         wandb.init(
             project=project,
@@ -87,11 +87,12 @@ def train_model(no_wandb=False) -> Tuple[Actor, Critic, PPO]:
 
     obs_dim = vec_env.single_observation_space.shape[0]   # type: ignore
     action_dim = vec_env.single_action_space.shape[0]     # type: ignore
+    print(f"Observation space dim: {obs_dim}, Action space dim: {action_dim}")
 
-    actor_model = make_mlp_with_layernorm(obs_dim, POLICY_CONFIG["net_arch"], action_dim)
-    critic_model = make_mlp_with_layernorm(obs_dim, POLICY_CONFIG["net_arch"], 1)
-    actor = Actor(actor_model, vec_env.single_action_space)    # type: ignore
-    critic = Critic(critic_model)
+    actor_model = make_mlp(obs_dim, POLICY_CONFIG["net_arch"], action_dim, layernorm=POLICY_CONFIG["layernorm"])
+    critic_model = make_mlp(obs_dim, POLICY_CONFIG["net_arch"], 1, layernorm=POLICY_CONFIG["layernorm"])
+    actor = Actor(actor_model, vec_env.single_action_space, norm_obs=CONFIG["norm_obs"])    # type: ignore
+    critic = Critic(critic_model, norm_obs=CONFIG["norm_obs"])
 
     ppo = PPO(vec_env, actor, critic, **PPO_CONFIG)
 
