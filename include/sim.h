@@ -153,6 +153,9 @@ bool sim_is_night(Simulation* self);
 // Returns sunlight intensity (0–1) based on time of day
 double sunlight_intensity(Simulation* self);
 
+// Compute average fuel consumption for a car over a small time interval, with typical car and environment parameters.
+Liters fuel_consumption_compute_typical(MetersPerSecond initial_velocity, MetersPerSecondSquared accel, Seconds delta_time);
+
 // Integrate the simulation for a given duration in (simulated) seconds with dt resolution, causing sim_duration / dt transition updates. This will advance the simulation `time` by `sim_duration` seconds.
 void sim_integrate(Simulation* self, Seconds sim_duration);
 

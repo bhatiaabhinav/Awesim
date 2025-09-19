@@ -1,12 +1,14 @@
 #include "utils.h"
 #include "car.h"
 #include "logging.h"
+#include "math.h"
 #include <stdlib.h>
 #include <stdio.h>
 
 
-void car_init(Car* car, Dimensions dimensions, CarCapabilities capabilities, CarPersonality preferences) {
+void car_init(Car* car, Dimensions dimensions, CarCapabilities capabilities, Liters fuel_tank_capacity, CarPersonality preferences) {
     car->dimensions = dimensions;
+    car->fuel_tank_capacity = fuel_tank_capacity;
     car->capabilities = capabilities;
     car->preferences = preferences;
     car->lane_id = ID_NULL;
@@ -15,6 +17,7 @@ void car_init(Car* car, Dimensions dimensions, CarCapabilities capabilities, Car
     car->lane_rank = -1;
     car->speed = 0.0;
     car->damage = 0.0;
+    car->fuel_level = fuel_tank_capacity; // Start with a full tank
     car->acceleration = 0.0;
     car->indicator_turn = INDICATOR_NONE;
     car->indicator_lane = INDICATOR_NONE;
@@ -35,6 +38,7 @@ CarId car_get_id(const Car* self) { return self->id; }
 Dimensions car_get_dimensions(const Car* self) { return self->dimensions; }
 Meters car_get_length(const Car* self) { return self->dimensions.y; }
 Meters car_get_width(const Car* self) { return self->dimensions.x; }
+Liters car_get_fuel_tank_capacity(const Car* self) { return self->fuel_tank_capacity; }
 CarCapabilities car_get_capabilities(const Car* self) { return self->capabilities; }
 CarPersonality car_get_preferences(const Car* self) { return self->preferences; }
 LaneId car_get_lane_id(const Car* self) { return self->lane_id; }
@@ -51,11 +55,26 @@ int car_get_lane_rank(const Car* self) { return self->lane_rank; }
 MetersPerSecond car_get_speed(const Car* self) { return self->speed; }
 double car_get_damage(const Car* self) { return self->damage; }
 MetersPerSecondSquared car_get_acceleration(const Car* self) { return self->acceleration; }
+Liters car_get_fuel_level(const Car* self) { return self->fuel_level; }
 CarIndicator car_get_indicator_turn(const Car* self) { return self->indicator_turn; }
 CarIndicator car_get_indicator_lane(const Car* self) { return self->indicator_lane; }
 bool car_get_request_indicated_lane(const Car* self) { return self->request_indicated_lane; }
 bool car_get_request_indicated_turn(const Car* self) { return self->request_indicated_turn; }
 bool car_get_auto_turn_off_indicators(const Car* self) { return self->auto_turn_off_indicators; }
+
+
+void car_set_fuel_tank_capacity(Car* self, Liters capacity) {
+    if (capacity <= 0.0) {
+        LOG_WARN("Fuel tank capacity must be positive. You are trying to set it to %f. Ignoring.", capacity);
+        return;
+    }
+    self->fuel_tank_capacity = capacity;
+    // If the current fuel level exceeds the new capacity, clip it.
+    if (self->fuel_level > capacity) {
+        LOG_WARN("Current fuel level (%f liters) exceeds new fuel tank capacity (%f liters). Clipping fuel level.", self->fuel_level, capacity);
+        self->fuel_level = capacity;
+    }
+}
 
 void car_set_lane(Car* self, const Lane* lane) {
     self->prev_lane_id = self->lane_id; // Store the lane ID at the previous timestep
@@ -105,6 +124,16 @@ void car_set_damage(Car* self, const double damage) {
         LOG_WARN("Damage must be between 0.0 and 1.0. You are trying to set it to %f. Clipping.", damage);
     }
     self->damage = fclamp(damage, 0.0, 1.0);
+}
+
+void car_set_fuel_level(Car* self, Liters fuel_level) {
+    if (fuel_level < 0.0) {
+        LOG_WARN("Fuel level cannot be negative. You are trying to set it to %f. Clipping.", fuel_level);
+    }
+    if (fuel_level > self->fuel_tank_capacity) {
+        LOG_WARN("Fuel level cannot exceed fuel tank capacity (%f liters). You are trying to set it to %f. Clipping.", self->fuel_tank_capacity, fuel_level);
+    }
+    self->fuel_level = fclamp(fuel_level, 0.0, self->fuel_tank_capacity);
 }
 
 void car_set_indicator_turn(Car* self, CarIndicator indicator) {

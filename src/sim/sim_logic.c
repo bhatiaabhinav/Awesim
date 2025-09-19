@@ -32,6 +32,9 @@ void sim_integrate(Simulation* self, Seconds time_period) {
     Seconds t0 = self->time;
     Seconds dt = self->dt;
     Map* map = sim_get_map(self);
+    if (t0 + time_period < t0) {
+        return;
+    }
     LOG_TRACE("Simulating from time %.2f to %.2f with dt = %.2f", t0, t0 + time_period, dt);
     while (self->time < t0 + time_period) {
 
@@ -79,6 +82,25 @@ void sim_integrate(Simulation* self, Seconds time_period) {
             MetersPerSecond v = car_get_speed(car);
             bool lane_changed = false;
             bool turned = false;
+
+            LOG_TRACE("Car %d fuel level: %.2f liters", car->id, car_get_fuel_level(car));
+            // If fuel is zero, simulate coasting to a stop in 1 minute using a speed-proportional controller (a = -√k ⋅ v). The settling time is 4 / √k => k = (4 / settling_time)^2 = (4/60)^2. If the car is applying brakes, add that effect as well.
+            if (car_get_fuel_level(car) <= 1e-10) {
+                double sqrt_k = 4.0 / 60.0;
+                double a_coast = -sqrt_k * v;
+                double a_brake = 0;
+                // now check if brakes are being applied.
+                if (v * a < 0) {
+                    // brakes are being applied, so add that effect as well.
+                    a_brake = a + a_coast; // a and a_coast are aligned.
+                } else {
+                    // no brakes, so use coasting deceleration
+                    a_brake = a_coast;
+                }
+                a = a_brake;
+                car_set_acceleration(car, a);
+                LOG_TRACE("Car %d is out of fuel and is coasting to a stop with acceleration %.2f", car->id, a);
+            }
 
             LOG_TRACE("T=%.2f: Processing car %d on lane %d with progress %.5f (s = %.5f), v = %.2f, a = %.2f, lane_change_requested = %d, turn_requested = %d", self->time, car->id, lane->id, progress, s, v, a, lane_change_requested, turn_requested);
 
@@ -149,6 +171,8 @@ void sim_integrate(Simulation* self, Seconds time_period) {
             }
             Meters net_forward_movement_meters = s - s_initial; // Calculate net movement in meters.
             LOG_TRACE("Car %d: Updated speed = %.2f, position s = %.2f, Net forward movement = %.2f, progress = %.5f", car->id, v, s, net_forward_movement_meters, progress);
+            Liters fuel_consumed = fuel_consumption_compute_typical(_v, a, dt);
+            Liters fuel_remaining = fmax(car_get_fuel_level(car) - fuel_consumed, 0);
 
             // --------------- handle approaching dead end ---------------
             // -----------------------------------------------------------
@@ -228,6 +252,7 @@ void sim_integrate(Simulation* self, Seconds time_period) {
 
             car_set_lane_progress(car, progress, s, net_forward_movement_meters);
             car_set_speed(car, v);
+            car_set_fuel_level(car, fuel_remaining);
             car_handle_movement_or_lane_change(self, car, lane);
             if (lane_changed) { 
                 car_set_request_indicated_lane(car, false); // Reset lane change request after successful lane change

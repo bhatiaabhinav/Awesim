@@ -8,6 +8,17 @@ Meters meters(double value) { return value; }
 Seconds seconds(double value) { return value; }
 MetersPerSecond mps(double value) { return value; }
 MetersPerSecondSquared mpss(double value) { return value; }
+Radians radians(double value) { return value; }
+Kilograms kilograms(double value) { return value; }
+Liters liters(double value) { return value; }
+Watts watts(double value) { return value; }
+Newtons newtons(double value) { return value; }
+Joules joules(double value) { return value; }
+MetersSquared meters_squared(double value) { return value; }
+MetersCubed meters_cubed(double value) { return value; }
+KgPerMetersCubed kg_per_meters_cubed(double value) { return value; }
+JoulesPerLiter joules_per_liter(double value) { return value; }
+LitersPerSecond liters_per_second(double value) { return value; }
 
 //
 // Distance conversions
@@ -43,3 +54,11 @@ double to_mph(MetersPerSecond mps) { return mps * (3600.0 / 1609.34); }
 
 MetersPerSecond from_fps(double value) { return value * 0.3048; }
 double to_fps(MetersPerSecond mps) { return mps / 0.3048; }
+
+//
+// Volume conversions
+//
+
+Liters from_gallons(double value) { return value * 3.78541; }
+
+double to_gallons(Liters l) { return l / 3.78541; }

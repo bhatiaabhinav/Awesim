@@ -141,11 +141,21 @@ Vec2D line_segment_unit_vector(LineSegment line);
 // Typed units
 //
 
-typedef double Meters;
-typedef double Seconds;
-typedef double MetersPerSecond;
-typedef double MetersPerSecondSquared;
-typedef double Radians;
+typedef double Meters;                      // distance
+typedef double Seconds;                     // time
+typedef double MetersPerSecond;             // speed
+typedef double MetersPerSecondSquared;      // acceleration
+typedef double Radians;                     // angle in radians
+typedef double Kilograms;                   // mass
+typedef double Liters;                      // volume of fluid
+typedef double Watts;                       // power
+typedef double Newtons;                     // force
+typedef double Joules;                      // energy
+typedef double MetersSquared;               // area
+typedef double MetersCubed;                 // volume
+typedef double KgPerMetersCubed;            // density
+typedef double JoulesPerLiter;              // energy density
+typedef double LitersPerSecond;             // flow rate
 
 // Initializes a Meters value.
 Meters meters(double value);
@@ -158,6 +168,39 @@ MetersPerSecond mps(double value);
 
 // Initializes a MetersPerSecondSquared value.
 MetersPerSecondSquared mpss(double value);
+
+// Initializes a Radians value.
+Radians radians(double value);
+
+// Initializes a Kilograms value.
+Kilograms kilograms(double value);
+
+// Initializes a Liters value.
+Liters liters(double value);
+
+// Initializes a Watts value.
+Watts watts(double value);
+
+// Initializes a Newtons value.
+Newtons newtons(double value);
+
+// Initializes a Joules value.
+Joules joules(double value);
+
+// Initializes a MetersSquared value.
+MetersSquared meters_squared(double value);
+
+// Initializes a MetersCubed value.
+MetersCubed meters_cubed(double value);
+
+// Initializes a KgPerMetersCubed value.
+KgPerMetersCubed kg_per_meters_cubed(double value);
+
+// Initializes a JoulesPerLiter value.
+JoulesPerLiter joules_per_liter(double value);
+
+// Initializes a LitersPerSecond value.
+LitersPerSecond liters_per_second(double value);
 
 
 //
@@ -222,6 +265,17 @@ MetersPerSecond from_fps(double value);
 
 // Converts meters per second to feet per second.
 double to_fps(MetersPerSecond mps);
+
+
+// 
+// Volume conversion functions
+// 
+
+// Converts gallons (US) to liters.
+Liters from_gallons(double value);
+
+// Converts liters to gallons (US).
+double to_gallons(Liters l);
 
 
 //

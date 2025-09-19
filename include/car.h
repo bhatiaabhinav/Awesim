@@ -74,6 +74,7 @@ struct Car {
     // fixed properties:
     CarId id;                         // unique identifier for the car
     Dimensions dimensions;          // width and length of the car
+    Liters fuel_tank_capacity;       // fuel tank capacity in liters
     CarCapabilities capabilities;   // capabilities of the car
     CarPersonality preferences;     // Preference profile of the car.
 
@@ -84,6 +85,7 @@ struct Car {
     int lane_rank;              // rank of the car in the lane, where 0 is the first car in the lane (the one closest to the end of the lane), and num_cars-1 is the last car in the lane (the one closest to the start of the lane).
     MetersPerSecond speed;              // current speed. Should be set by the simulation engine.
     double damage;                      // damage level of the car. 0.0 for no damage and 1.0 for total damage.
+    Liters fuel_level;                  // fuel level of the car in liters. If fuel level is 0.0, the car cannot accelerate in the direction of motion, but can decelerate (brake). The fuel level will be set by the simulation engine.
 
     // control variables:
     MetersPerSecondSquared acceleration;    // current acceleration. Should be determined by the car's decision-making logic when car_make_decision() is called.
@@ -103,7 +105,7 @@ typedef struct Car Car;
 typedef struct Simulation Simulation;
 
 
-void car_init(Car* car, Dimensions dimensions, CarCapabilities capabilities, CarPersonality preferences);
+void car_init(Car* car, Dimensions dimensions,  CarCapabilities capabilities, Liters fuel_tank_capacity, CarPersonality preferences);
 
 
 // getters:
@@ -111,6 +113,7 @@ CarId car_get_id(const Car* self);
 Dimensions car_get_dimensions(const Car* self);
 Meters car_get_length(const Car* self); 
 Meters car_get_width(const Car* self);
+Liters car_get_fuel_tank_capacity(const Car* self);
 CarCapabilities car_get_capabilities(const Car* self);
 CarPersonality car_get_preferences(const Car* self);
 
@@ -122,6 +125,7 @@ Meters car_get_lane_progress_meters(const Car* self);
 int car_get_lane_rank(const Car* self);
 MetersPerSecond car_get_speed(const Car* self);
 double car_get_damage(const Car* self);
+Liters car_get_fuel_level(const Car* self);
 
 MetersPerSecondSquared car_get_acceleration(const Car* self);
 CarIndicator car_get_indicator_turn(const Car* self);
@@ -137,6 +141,8 @@ LaneId car_get_prev_lane_id(const Car* self);
 
 // setters:
 
+// Sets the fuel tank capacity of the car.
+void car_set_fuel_tank_capacity(Car* self, Liters capacity);
 // Sets the lane of the car.
 void car_set_lane(Car* self, const Lane* lane);
 // Sets the lane progress of the car. The progress should be between 0.0 and 1.0. Will be clipped automatically.
@@ -148,6 +154,8 @@ void car_set_speed(Car* self, MetersPerSecond speed);
 void car_set_acceleration(Car* self, MetersPerSecondSquared acceleration);
 // Sets the damage level of the car. The damage should be between 0.0 and 1.0.
 void car_set_damage(Car* self, const double damage);
+// Sets the fuel level of the car.
+void car_set_fuel_level(Car* self, Liters fuel_level);
 // Sets the turn indicator signal of the car. This is purely an intent signal and does not request the sim to execute the turn.
 void car_set_indicator_turn(Car* self, CarIndicator indicator);
 // Sets the lane change indicator signal of the car. This is purely an intent signal and does not request the sim to execute the lane change.
