@@ -30,9 +30,9 @@ class AwesimEnv(gym.Env):
     DEFAULT_DECISION_INTERVAL = 0.1  # Time between agent decisions (seconds)
     DEFAULT_SIM_DURATION = 60 * 60  # Simulation duration (seconds, default 1 hour)
     DEFAULT_APPOINTMENT_TIME = 60 * 30  # Default appointment time (seconds, 30 minutes)
-    DEFAULT_TIME_PENALTY = 0.2  # Penalty per second for time spent
-    DEFAULT_GOAL_REWARD = 100.0  # Reward for reaching the goal lane
-    DEFAULT_CRASH_PENALTY = 100.0  # Penalty for crashing
+    DEFAULT_TIME_PENALTY = 0.0  # Penalty per second for time spent
+    DEFAULT_GOAL_REWARD = 1.0  # Reward for reaching the goal lane
+    DEFAULT_CRASH_PENALTY = 0.0  # Penalty for crashing
     DEFAULT_RENDER_IP = "127.0.0.1"  # Default IP for rendering server
     TERMINATION_CHECK_INTERVAL = 0.1  # Interval for checking termination conditions (seconds)
     SPEED_ADJUSTMENT_MPH = 10  # Max speed adjustment per action (±10 mph)
@@ -679,14 +679,12 @@ class AwesimEnv(gym.Env):
             cost_lost_wage_already_considered = how_late_already_hrs * self.cost_lost_wage_per_hour
             workday_wage = 8 * self.cost_lost_wage_per_hour
             cost += max(workday_wage - cost_lost_wage_already_considered, 0)  # Cap lost wage cost to a full workday if never reached the goal lane
-        
-        reached_late = reached_goal and is_late
 
         if self.verbose:
             if crashed:
                 print("Crashed!")
             if reached_goal:
-                if reached_late:
+                if is_late:
                     print("Reached goal, but late!")
                 else:
                     print("Reached goal!")
@@ -701,9 +699,9 @@ class AwesimEnv(gym.Env):
             "is_success": not crashed if self.goal_lane is None else reached_goal,
             "crashed": crashed,
             "reached_goal": reached_goal,
-            "reached_late": reached_late,
+            "is_late": is_late,
             "out_of_fuel": out_of_fuel,
-            "total_fuel_consumed": A.to_gallons(fuel_final - self.fuel_drive_beginning),
+            "total_fuel_consumed": A.to_gallons(self.fuel_drive_beginning - fuel_final),
             "timeout": timeout,
             "cost": cost,
         }
