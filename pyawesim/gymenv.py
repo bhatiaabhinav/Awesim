@@ -29,6 +29,7 @@ class AwesimEnv(gym.Env):
     DEFAULT_NUM_CARS = 256  # Number of vehicles in the simulation
     DEFAULT_DECISION_INTERVAL = 0.1  # Time between agent decisions (seconds)
     DEFAULT_SIM_DURATION = 60 * 60  # Simulation duration (seconds, default 1 hour)
+    DEFAULT_APPOINTMENT_TIME = 60 * 30  # Default appointment time (seconds, 30 minutes)
     DEFAULT_TIME_PENALTY = 0.2  # Penalty per second for time spent
     DEFAULT_GOAL_REWARD = 100.0  # Reward for reaching the goal lane
     DEFAULT_CRASH_PENALTY = 100.0  # Penalty for crashing
@@ -41,9 +42,10 @@ class AwesimEnv(gym.Env):
     MAX_DISTANCE = 1000.0  # Maximum distance for nearby vehicles (meters)
     MAX_TTC = 10.0  # Maximum time-to-collision (seconds)
     MAX_THW = 10.0  # Maximum time-headway (seconds)
-    COST_GAS_PER_MILE = 0.13  # Average cost of gas per mile ($) in US
+    COST_GAS_PER_GALLON = 3.2 # Average cost of gas per gallon ($) in US
     COST_LOST_WAGE_PER_HOUR = 30.0  # Average wages per hour ($) in US
     COST_CAR = 35000.0  # Average new car cost ($) in US. This is the cost for total loss in a crash.
+    DEFAULT_INIT_FUEL_GALLONS = 15.0  # Default initial fuel level in gallons
     OBSERVATION_NORMALIZATION = {
         "speed": 10,  # Normalize speeds by 10 m/s
         "acceleration": 10,  # Normalize accelerations by 10 m/s²
@@ -52,6 +54,7 @@ class AwesimEnv(gym.Env):
         "lanes": 10,  # Normalize lane counts by 10
         "countdown": 60,  # Normalize traffic light countdown by 60 seconds
         'time': 3600,  # Normalize time by 3600 seconds (1 hour)
+        'fuel': 50,  # Normalize fuel level by 50 liters (~13.2 gallons)
     }
 
     def __init__(
@@ -61,10 +64,14 @@ class AwesimEnv(gym.Env):
         num_cars: int = DEFAULT_NUM_CARS,
         decision_interval: float = DEFAULT_DECISION_INTERVAL,
         sim_duration: float = DEFAULT_SIM_DURATION,
-        deadline_mode: bool = False,    # if true, the episode is terminated and not truncated when sim_duration is reached
+        appointment_time: float = DEFAULT_APPOINTMENT_TIME,  # time in seconds by which the agent should reach the goal lane, otherwise lost wage cost will be start accumulating
         time_penalty_per_second: float = DEFAULT_TIME_PENALTY,
         goal_reward: float = DEFAULT_GOAL_REWARD,
         crash_penalty: float = DEFAULT_CRASH_PENALTY,
+        cost_gas_per_gallon: float = COST_GAS_PER_GALLON,
+        cost_lost_wage_per_hour: float = COST_LOST_WAGE_PER_HOUR,
+        cost_car: float = COST_CAR,
+        init_fuel_gallons: float = DEFAULT_INIT_FUEL_GALLONS,
         synchronized: bool = False,
         synchronized_sim_speedup: float = 1.0,
         should_render: bool = False,
@@ -81,10 +88,14 @@ class AwesimEnv(gym.Env):
             num_cars (int): Number of vehicles in the simulation.
             decision_interval (float): Time interval between agent actions (seconds).
             sim_duration (float): Maximum duration of an episode (seconds).
-            deadline_mode (bool): If true, the episode is terminated and not truncated when sim_duration is reached.
+            appointment_time (float): Time in seconds by which the agent should reach the goal lane, otherwise lost wage cost will start accumulating.
             time_penalty_per_second (float): Penalty per second for time spent.
             goal_reward (float): Reward for reaching the goal lane.
             crash_penalty (float): Penalty for crashing.
+            cost_gas_per_gallon (float): Cost of gas per gallon ($).
+            cost_lost_wage_per_hour (float): Cost of lost wages per hour ($).
+            cost_car (float): Cost of the car ($), applied on total loss in a crash.
+            init_fuel_gallons (float): Initial fuel level in gallons.
             synchronized (bool): If True, synchronize simulation for rendering.
             synchronized_sim_speedup (float): Speedup factor for synchronized simulation.
             should_render (bool): If True, connect to rendering server.
@@ -104,8 +115,13 @@ class AwesimEnv(gym.Env):
         self.time_penalty_per_second = time_penalty_per_second
         self.goal_reward = goal_reward
         self.crash_penalty = crash_penalty
+        self.cost_gas_per_gallon = cost_gas_per_gallon
+        self.cost_lost_wage_per_hour = cost_lost_wage_per_hour
+        self.cost_car = cost_car
+        self.init_fuel_gallons = init_fuel_gallons
         self.sim_duration = sim_duration
-        self.deadline_mode = deadline_mode
+        self.appointment_time = appointment_time
+        self.steps = 0
         self.synchronized = synchronized
         self.synchronized_sim_speedup = synchronized_sim_speedup
         self.should_render = should_render
@@ -157,6 +173,7 @@ class AwesimEnv(gym.Env):
                         A.car_get_acceleration(agent) / self.OBSERVATION_NORMALIZATION["acceleration"],
                         A.car_get_request_indicated_lane(agent),
                         A.car_get_request_indicated_turn(agent),
+                        A.car_get_fuel_level(agent) / self.OBSERVATION_NORMALIZATION["fuel"],
                     ],
                     dtype=np.float32,
                 ),
@@ -520,6 +537,13 @@ class AwesimEnv(gym.Env):
         A.driving_assistant_configure_follow_mode(self.das, self.agent, self.sim, True)
         A.driving_assistant_configure_merge_assistance(self.das, self.agent, self.sim, True)
 
+        # Configure fuel
+        A.car_set_fuel_level(self.agent, A.from_gallons(self.init_fuel_gallons))
+        A.car_set_fuel_tank_capacity(self.agent, A.from_gallons(self.init_fuel_gallons))    # unnecessary but just in case as default tank capacity is Inf for all cars in awesim
+
+        self.steps = 0
+        self.fuel_drive_beginning = A.car_get_fuel_level(self.agent)
+
         return self._get_observation(), {}
 
     def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
@@ -611,39 +635,83 @@ class AwesimEnv(gym.Env):
 
         # Simulate and compute reward
         reward = 0.0
+        cost = 0.0
         elapsed_time = 0.0
-        crashed = reached_goal = deadline_reached = False
-        while not (crashed or reached_goal or deadline_reached) and elapsed_time < self.decision_interval:
-            A.simulate(self.sim, self.TERMINATION_CHECK_INTERVAL)  # Advance simulation
-            elapsed_time += self.TERMINATION_CHECK_INTERVAL
+        sim_time_initial = A.sim_get_time(self.sim)
+        crashed = reached_goal = timeout = out_of_fuel = reached_late = False
+        fuel_initial = A.car_get_fuel_level(self.agent)
+        while not (crashed or reached_goal or timeout or out_of_fuel) and elapsed_time < self.decision_interval - 1e-6:
+            delta_time = min(self.TERMINATION_CHECK_INTERVAL, self.decision_interval - elapsed_time)    # make sure you don't end up simulating more than decision_interval if it is not a multiple of TERMINATION_CHECK_INTERVAL
+            t0 = A.sim_get_time(self.sim)
+            A.simulate(self.sim, delta_time)  # Advance simulation
+            delta_time = A.sim_get_time(self.sim) - t0  # true delta time (since it is not guaranteed that sim would have simulated exactly for delta_time if it is not a multiple of dt.)
+            elapsed_time = A.sim_get_time(self.sim) - sim_time_initial
+            
             A.situational_awareness_build(self.sim, self.agent.id)
-            reward -= self.time_penalty_per_second * self.TERMINATION_CHECK_INTERVAL  # Apply time penalty
+            reward -= self.time_penalty_per_second * delta_time  # Apply time penalty
             if self.goal_lane is None:
-                reward += A.car_get_speed(self.agent) * self.TERMINATION_CHECK_INTERVAL  # Reward for speed
+                reward += A.car_get_speed(self.agent) * delta_time  # Reward for speed
             crashed = self._crashed()
             reached_goal = self._reached_destination()
-            deadline_reached = A.sim_get_time(self.sim) >= self.sim_duration
+            timeout = A.sim_get_time(self.sim) >= self.sim_duration
+            out_of_fuel = A.car_get_fuel_level(self.agent) < 1e-9
             if crashed:
                 reward -= self.crash_penalty
+                cost += self.cost_car
             if reached_goal:
                 reward += self.goal_reward
+            
+        fuel_final = A.car_get_fuel_level(self.agent)
+        fuel_consumed = fuel_initial - fuel_final
+        fuel_consumed_gallons = A.to_gallons(fuel_consumed)
+        if np.isfinite(fuel_consumed_gallons):
+            cost += self.cost_gas_per_gallon * fuel_consumed_gallons
+
+        is_late = A.sim_get_time(self.sim) > self.appointment_time
+
+        # Start accumulating lost wage cost if appointment time has passed and goal lane is not reached yet
+        if self.goal_lane is not None and not reached_goal and is_late:
+            cost += self.cost_lost_wage_per_hour * self.decision_interval / 3600.0
+
+        if self.goal_lane is not None and not reached_goal and timeout:
+            how_late_already_hrs = (A.sim_get_time(self.sim) - self.appointment_time) / 3600.0
+            how_late_already_hrs = max(how_late_already_hrs, 0)  # in case the appointment is past the sim_duration
+            cost_lost_wage_already_considered = how_late_already_hrs * self.cost_lost_wage_per_hour
+            workday_wage = 8 * self.cost_lost_wage_per_hour
+            cost += max(workday_wage - cost_lost_wage_already_considered, 0)  # Cap lost wage cost to a full workday if never reached the goal lane
+        
+        reached_late = reached_goal and is_late
 
         if self.verbose:
             if crashed:
                 print("Crashed!")
             if reached_goal:
-                print("Reached goal!")
+                if reached_late:
+                    print("Reached goal, but late!")
+                else:
+                    print("Reached goal!")
+            if out_of_fuel:
+                print("Out of fuel!")
+            if timeout:
+                print("Timed out!")
 
         obs = self._get_observation()
         info = {
             "time": A.sim_get_time(self.sim),
             "is_success": not crashed if self.goal_lane is None else reached_goal,
             "crashed": crashed,
+            "reached_goal": reached_goal,
+            "reached_late": reached_late,
+            "out_of_fuel": out_of_fuel,
+            "total_fuel_consumed": A.to_gallons(fuel_final - self.fuel_drive_beginning),
+            "timeout": timeout,
+            "cost": cost,
         }
+        self.steps += 1
 
-        terminated = crashed or reached_goal or (self.deadline_mode and deadline_reached)
-        truncated = (not self.deadline_mode) and deadline_reached
-        return obs, reward, crashed or reached_goal, truncated, info
+        terminated = crashed or reached_goal or out_of_fuel or timeout
+        truncated = False
+        return obs, reward, terminated, truncated, info
 
     def close(self) -> None:
         """

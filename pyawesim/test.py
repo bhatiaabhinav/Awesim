@@ -1,22 +1,26 @@
 import sys
 import torch
 from gymenv import AwesimEnv
-from gymenv_utils import make_mlp_with_layernorm
+from gymenv_utils import make_mlp
 from ppo import Actor
 
 
 ENV_CONFIG = {
     "goal_lane": 84,
-    "city_width": 1000,
-    "num_cars": 256,
-    "decision_interval": 1,
-    "sim_duration": 60 * 10,
-    "goal_reward": 100.0,
-    "crash_penalty": 100.0,
-    "time_penalty_per_second": 0.2,
+    "city_width": 1000,                 # in meters
+    "num_cars": 256,                    # number of other cars in the environment
+    "decision_interval": 1,             # in seconds, how often the agent can take an action (reconfigure the driving assist)
+    "sim_duration": 60 * 60,            # 60 minutes max duration after which the episode ends and wage for entire 8-hour workday is lost
+    "appointment_time": 60 * 20,        # 20 minutes to reach the appointment
+    "cost_gas_per_gallon": 4.0,         # in NYC (USD)
+    "cost_car": 30000,                  # cost of the car (USD), incurred if crashed (irrespective of severity)
+    "cost_lost_wage_per_hour": 40,      # of a decent job in NYC (USD)
+    "init_fuel_gallons": 3.0,           # initial fuel in gallons -- 1/4th of a 12-gallon tank car
+    "goal_reward": 1.0,                 # A small positive number to incentivize reaching the goal
 }
 POLICY_CONFIG = {
     "net_arch": [1024, 512, 256],
+    "layernorm": True,
 }
 
 
@@ -37,8 +41,8 @@ def test_model(model_path) -> None:
     obs_dim = env.observation_space.shape[0]   # type: ignore
     action_dim = env.action_space.shape[0]     # type: ignore
 
-    actor_model = make_mlp_with_layernorm(obs_dim, POLICY_CONFIG["net_arch"], action_dim)
-    actor = Actor(actor_model, env.action_space)    # type: ignore
+    actor_model = make_mlp(obs_dim, POLICY_CONFIG["net_arch"], action_dim, layernorm=POLICY_CONFIG["layernorm"])
+    actor = Actor(actor_model, env.action_space, norm_obs=True)    # type: ignore
     actor.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
 
     actor.evaluate_policy(env, 100)

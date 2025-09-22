@@ -243,7 +243,8 @@ class PPO:
                  adam_weight_decay: float = 0.0,
                  adam_epsilon: float = 1e-7,
                  inference_device: str = 'cpu',
-                 training_device: str = 'cpu'):
+                 training_device: str = 'cpu',
+                 custom_info_keys_to_log_at_episode_end: List[str] = [],):  # keys in info dict to log at episode end
 
         assert envs.metadata["autoreset_mode"] == AutoresetMode.SAME_STEP, "VectorEnv must be in SAME_STEP autoreset mode"
 
@@ -272,12 +273,15 @@ class PPO:
         self.norm_rewards = norm_rewards
         self.inference_device = inference_device
         self.training_device = training_device
+        self.custom_info_keys_to_log_at_episode_end = custom_info_keys_to_log_at_episode_end
 
         # stats
         self.stats = {
             'iterations': 0,
             'total_timesteps': 0,
             'total_episodes': 0,
+            'timestepss': [],               # after each iteration
+            'episodess': [],            # after each iteration
             'losses': [],               # after each iteration
             'actor_losses': [],         # after each iteration
             'critic_losses': [],        # after each iteration
@@ -292,12 +296,16 @@ class PPO:
             'returns': [],              # return of each trajectory collected so far
             'discounted_returns': [],   # discounted return of each trajectory collected so far
             'lengths': [],              # length of each trajectory collected so far
+            'total_costs': [],          # total cost of each trajectory collected so far (if env provides this info)
             'successes': [],            # success of each trajectory collected so far (if env provides this info)
             'mean_returns': [],         # mean return of latest 100 trajectories after each iteration
             'mean_discounted_returns': [],  # mean discounted return of latest 100 trajectories after each iteration
             'mean_lengths': [],         # mean length of latest 100 trajectories after each iteration
+            'mean_total_costs': [],     # mean total cost of latest 100 trajectories after each iteration (if env provides this info)
             'mean_successes': [],       # mean success of latest 100 trajectories after each iteration (if env provides this info)
         }
+        self.stats['info_keys'] = {key: [] for key in (self.custom_info_keys_to_log_at_episode_end)}
+        self.stats['info_key_means'] = {key: [] for key in (self.custom_info_keys_to_log_at_episode_end)}  # mean of latest 100 episodes after each iteration
 
         # data buffers
         state_dim = envs.single_observation_space.shape[0]  # type: ignore
@@ -334,6 +342,7 @@ class PPO:
         self.returns_buffer = np.zeros((N,), dtype=np.float32)
         self.discounted_returns_buffer = np.zeros((N,), dtype=np.float32)
         self.lengths_buffer = np.zeros((N,), dtype=np.int32)
+        self.costs_total_buffer = np.zeros((N,), dtype=np.float32)
 
         # actor for inference, if using a different device for inference
         if self.inference_device != self.training_device:
@@ -369,21 +378,37 @@ class PPO:
                 # update current obs
                 self.obs.data.copy_(torch.tensor(obs_next_potentially_resetted, device=self.inference_device), non_blocking=True)
 
-                # update returns and lengths
+                # update returns, lengths, costs
                 self.discounted_returns_buffer += r_t * np.power(self.gamma, self.lengths_buffer)
                 self.returns_buffer += r_t
                 self.lengths_buffer += 1
+                if 'cost' in infos:
+                    c_t = infos['cost']
+                    if 'final_info' in infos:
+                        c_t += infos['final_info']['cost']
+                    self.costs_total_buffer += c_t
                 for i in range(self.envs.num_envs):
                     if terminated_t[i] or truncated_t[i]:
                         self.stats['returns'].append(self.returns_buffer[i])
                         self.stats['discounted_returns'].append(self.discounted_returns_buffer[i])
                         self.stats['lengths'].append(self.lengths_buffer[i])
+                        self.stats['total_costs'].append(self.costs_total_buffer[i])
                         if 'is_success' in infos['final_info']:
                             self.stats['successes'].append(infos['final_info']['is_success'][i])  # type: ignore
                         self.returns_buffer[i] = 0.0
                         self.discounted_returns_buffer[i] = 0.0
                         self.lengths_buffer[i] = 0
+                        self.costs_total_buffer[i] = 0.0
                         self.stats['total_episodes'] += 1
+
+                        for key in self.custom_info_keys_to_log_at_episode_end:
+                            if key in infos['final_info']:
+                                self.stats['info_keys'][key].append(infos['final_info'][key][i])
+                            else:
+                                # raise warning only first time
+                                if len(self.stats['info_keys'][key]) == 0:
+                                    print(f"Warning: info key '{key}' not found in env info dictionary. Ignoring it. This warning will not be repeated.", file=sys.stderr)
+                                self.stats['info_keys'][key].append(np.nan)
 
                 print(f"Collected steps {(t + 1) * self.envs.num_envs}/{self.nsteps * self.envs.num_envs}", end='\r')
         terminal_width = shutil.get_terminal_size((80, 20)).columns
@@ -401,14 +426,21 @@ class PPO:
 
         # update stats
         self.stats['total_timesteps'] += self.nsteps * self.envs.num_envs
+        self.stats['timestepss'].append(self.stats['total_timesteps'])
+        self.stats['episodess'].append(self.stats['total_episodes'])
         mean_return = np.mean(self.stats['returns'][-100:]) if len(self.stats['returns']) > 0 else 0.0
         mean_discounted_return = np.mean(self.stats['discounted_returns'][-100:]) if len(self.stats['discounted_returns']) > 0 else 0.0
         mean_length = np.mean(self.stats['lengths'][-100:]) if len(self.stats['lengths']) > 0 else 0.0
+        mean_total_cost = np.mean(self.stats['total_costs'][-100:]) if len(self.stats['total_costs']) > 0 else 0.0
         mean_success = np.mean(self.stats['successes'][-100:]) if len(self.stats['successes']) > 0 else 0.0
         self.stats['mean_returns'].append(mean_return)
         self.stats['mean_discounted_returns'].append(mean_discounted_return)
         self.stats['mean_lengths'].append(mean_length)
+        self.stats['mean_total_costs'].append(mean_total_cost)
         self.stats['mean_successes'].append(mean_success)
+        for key in self.custom_info_keys_to_log_at_episode_end:
+            key_mean = np.nanmean(self.stats['info_keys'][key][-100:]) if len(self.stats['info_keys'][key]) > 0 else 0.0
+            self.stats['info_key_means'][key].append(key_mean)
 
     def compute_values_advantages(self) -> None:
         # everything happens on training device here
@@ -538,6 +570,7 @@ class PPO:
                 f"  Total timesteps: {self.stats['total_timesteps']}\n"
                 f"  Total episodes: {self.stats['total_episodes']}\n"
                 f"  Mean return: {self.stats['mean_returns'][-1]:.6f}\n"
+                f"  Mean total cost: {self.stats['mean_total_costs'][-1]:.6f}\n"
                 f"  Mean length: {self.stats['mean_lengths'][-1]:.6f}\n"
                 f"  Mean success: {self.stats['mean_successes'][-1]:.6f}\n"
                 f"  Total loss: {self.stats['losses'][-1]:.6f}\n"

@@ -12,27 +12,29 @@ from ppo import Actor, Critic, PPO
 
 
 # Experiment metadata
-EXPERIMENT_NAME = "Deadline-20mins"
-NOTES = """Trains a PPO policy with a custom PPO implementation in a gym environment where an agent controls a vehicle using ADAS with 3 actionable parameters, updated every second: cruise speed = action[0] * top_speed (with 0.9 smoothing step size from old target), turn/safe-merge signal, and follow distance = action[2] * 5s (with 0.9 smoothing step size from old value). Automatic Emergency Braking is always active with fixed parameters (2 mph, 0.01 mph, 3 ft, 6 ft; see ai.h). The goal is to reach lane #84 (2nd Ave N, between 1st St and S-2) from a random start without crashing, with episodes terminated (not truncated) after 20 minutes. Reward: +1 for goal, 0 otherwise. Crashing also terminates episode. Observation includes 149 variables: vehicle state/capabilities (varies per episode), ADAS state, map awareness, nearby vehicles, intersection state, road/environment factors and TIME. Key hyperparameters: [150, 128, 128, 128, value/policy] architecture, gamma=0.999, custom impl of normalize obs/rewards."""
+EXPERIMENT_NAME = "ApptWorld-20mins"
+NOTES = """From a random starting point, reach destination (lane #84) in 20 mins (rew = 1, 0 otherwise), else lost wage cost starts accumulating (in a seperate cost stream). Cost of gas and cost of crash also included in the cost stream. Episode ends at 60 mins and wage for entire 8-hour workday is lost if not reached. No CMDP solution implemented yet."""
 
 # Configuration dictionaries
 CONFIG = {
     "experiment_name": EXPERIMENT_NAME,
-    "n_totalsteps_per_batch": 8192,
-    "ppo_iters": 10000,
-    "norm_obs": True,
-    "norm_reward": True,
+    "n_totalsteps_per_batch": 32768,    # total steps across all parallel envs per PPO update
+    "ppo_iters": 10000,                 # number of PPO updates
+    "norm_obs": True,                   # whether to normalize observations by running estimates of mean and stddev
+    "norm_reward": True,                # whether to normalize rewards by running estimates of stddev of discounted returns
 }
 ENV_CONFIG = {
     "goal_lane": 84,
-    "city_width": 1000,
-    "num_cars": 256,
-    "decision_interval": 1,
-    "sim_duration": 60 * 20,
-    "deadline_mode": True,
-    "goal_reward": 1.0,
-    "crash_penalty": 0.0,
-    "time_penalty_per_second": 0.0,
+    "city_width": 1000,                 # in meters
+    "num_cars": 256,                    # number of other cars in the environment
+    "decision_interval": 1,             # in seconds, how often the agent can take an action (reconfigure the driving assist)
+    "sim_duration": 60 * 60,            # 60 minutes max duration after which the episode ends and wage for entire 8-hour workday is lost
+    "appointment_time": 60 * 20,        # 20 minutes to reach the appointment
+    "cost_gas_per_gallon": 4.0,         # in NYC (USD)
+    "cost_car": 30000,                  # cost of the car (USD), incurred if crashed (irrespective of severity)
+    "cost_lost_wage_per_hour": 40,      # of a decent job in NYC (USD)
+    "init_fuel_gallons": 3.0,           # initial fuel in gallons -- 1/4th of a 12-gallon tank car
+    "goal_reward": 1.0,                 # A small positive number to incentivize reaching the goal
 }
 VEC_ENV_CONFIG = {"n_envs": 64}
 PPO_CONFIG = {
@@ -42,7 +44,7 @@ PPO_CONFIG = {
     "critic_lr": 0.0001,
     "decay_lr": False,
     "entropy_coef": 0.0,
-    "batch_size": 64,  # For smaller machines
+    "batch_size": 256,
     "target_kl": 0.01,
     "lam": 0.95,
     "gamma": 0.999,
@@ -53,8 +55,8 @@ PPO_CONFIG = {
     "inference_device": "cuda" if torch.cuda.is_available() else "cpu",
 }
 POLICY_CONFIG = {
-    "net_arch": [128, 128, 128],
-    "layernorm": False,
+    "net_arch": [1024, 512, 256],
+    "layernorm": True,
 }
 # Combined configuration for logging
 FULL_CONFIG = {**CONFIG, **ENV_CONFIG, **VEC_ENV_CONFIG, **PPO_CONFIG, **POLICY_CONFIG}
@@ -74,14 +76,13 @@ def train_model(no_wandb=False) -> Tuple[Actor, Critic, PPO]:
 
     vec_env = setup_training_env()
 
-    project = "awesim" if ENV_CONFIG["goal_lane"] is None else ("awesim_goal_deadline" if ENV_CONFIG["deadline_mode"] else "awesim_goal")
+    project = "Awesim-ApppointmentWorld"
     if not no_wandb:
         wandb.init(
             project=project,
             name=EXPERIMENT_NAME,
             config=FULL_CONFIG,
             notes=NOTES,
-            sync_tensorboard=True,
             save_code=True,
         )
 
@@ -94,7 +95,7 @@ def train_model(no_wandb=False) -> Tuple[Actor, Critic, PPO]:
     actor = Actor(actor_model, vec_env.single_action_space, norm_obs=CONFIG["norm_obs"])    # type: ignore
     critic = Critic(critic_model, norm_obs=CONFIG["norm_obs"])
 
-    ppo = PPO(vec_env, actor, critic, **PPO_CONFIG)
+    ppo = PPO(vec_env, actor, critic, **PPO_CONFIG, custom_info_keys_to_log_at_episode_end=['crashed', 'reached_goal', 'reached_late', 'out_of_fuel', 'timeout', 'total_fuel_consumed'])
 
     # make dir for saving models
     model_dir = f"./models/{EXPERIMENT_NAME}"
@@ -110,7 +111,14 @@ def train_model(no_wandb=False) -> Tuple[Actor, Critic, PPO]:
                 "episodes": ppo.stats['total_episodes'],
                 "rollout/ep_rew_mean": ppo.stats['mean_returns'][-1],
                 "rollout/ep_len_mean": ppo.stats['mean_lengths'][-1],
+                "rollout/ep_cost_mean": ppo.stats['mean_total_costs'][-1],
                 "rollout/success_rate": ppo.stats['mean_successes'][-1],
+                "rollout/crash_rate": ppo.stats['info_key_means']['crashed'][-1],
+                "rollout/reached_goal_rate": ppo.stats['info_key_means']['reached_goal'][-1],
+                "rollout/out_of_fuel_rate": ppo.stats['info_key_means']['out_of_fuel'][-1],
+                "rollout/reached_late_rate": ppo.stats['info_key_means']['reached_late'][-1],
+                "rollout/timeout_rate": ppo.stats['info_key_means']['timeout'][-1],
+                "rollout/mean_fuel_consumed": ppo.stats['info_key_means']['total_fuel_consumed'][-1],
                 "train/loss": ppo.stats["losses"][-1],
                 "train/value_loss": ppo.stats["critic_losses"][-1],
                 "train/policy_gradient_loss": ppo.stats["actor_losses"][-1],
@@ -141,8 +149,17 @@ def train_model(no_wandb=False) -> Tuple[Actor, Critic, PPO]:
 
 if __name__ == "__main__":
     actor, critic, ppo = train_model(True)
-    plt.plot(ppo.stats['mean_returns'])
-    plt.xlabel("Iteration")
-    plt.ylabel("Mean Reward (over 100-episode moving window)")
-    plt.title("Custom PPO on AwesimEnv")
-    plt.show()
+    print(ppo.stats['timestepss'])
+    print(ppo.stats['mean_returns'])
+    print(ppo.stats['mean_total_costs'])
+    plt.plot(ppo.stats['timestepss'], ppo.stats['mean_returns'])
+    plt.xlabel("Total Timesteps")
+    plt.ylabel("Mean Reward")
+    plt.title("Training Curve -- Mean Reward (100-ep moving window) vs Timesteps")
+    plt.savefig(f"./models/{EXPERIMENT_NAME}/training_curve_returns.png")
+    plt.clf()
+    plt.plot(ppo.stats['timestepss'], ppo.stats['mean_total_costs'])
+    plt.xlabel("Total Timesteps")
+    plt.ylabel("Mean Total Cost")
+    plt.title("Training Curve -- Mean Total Cost (100-ep moving window) vs Timesteps")
+    plt.savefig(f"./models/{EXPERIMENT_NAME}/training_curve_total_costs.png")
