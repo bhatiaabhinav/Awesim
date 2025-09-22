@@ -95,7 +95,7 @@ def train_model(no_wandb=False) -> Tuple[Actor, Critic, PPO]:
     actor = Actor(actor_model, vec_env.single_action_space, norm_obs=CONFIG["norm_obs"])    # type: ignore
     critic = Critic(critic_model, norm_obs=CONFIG["norm_obs"])
 
-    ppo = PPO(vec_env, actor, critic, **PPO_CONFIG, custom_info_keys_to_log_at_episode_end=['crashed', 'reached_goal', 'is_late', 'out_of_fuel', 'timeout', 'total_fuel_consumed'])
+    ppo = PPO(vec_env, actor, critic, **PPO_CONFIG, custom_info_keys_to_log_at_episode_end=['crashed', 'reached_goal', 'reached_in_time', 'reached_but_late', 'out_of_fuel', 'timeout', 'total_fuel_consumed'])
 
     # make dir for saving models
     model_dir = f"./models/{EXPERIMENT_NAME}"
@@ -116,7 +116,8 @@ def train_model(no_wandb=False) -> Tuple[Actor, Critic, PPO]:
                 "rollout/crash_rate": ppo.stats['info_key_means']['crashed'][-1],
                 "rollout/reached_goal_rate": ppo.stats['info_key_means']['reached_goal'][-1],
                 "rollout/out_of_fuel_rate": ppo.stats['info_key_means']['out_of_fuel'][-1],
-                "rollout/late_rate": ppo.stats['info_key_means']['is_late'][-1],
+                "rollout/reached_in_time_rate": ppo.stats['info_key_means']['reached_in_time'][-1],
+                "rollout/reached_but_late_rate": ppo.stats['info_key_means']['reached_but_late'][-1],
                 "rollout/timeout_rate": ppo.stats['info_key_means']['timeout'][-1],
                 "rollout/mean_fuel_consumed": ppo.stats['info_key_means']['total_fuel_consumed'][-1],
                 "train/loss": ppo.stats["losses"][-1],

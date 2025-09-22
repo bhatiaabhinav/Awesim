@@ -638,7 +638,7 @@ class AwesimEnv(gym.Env):
         cost = 0.0
         elapsed_time = 0.0
         sim_time_initial = A.sim_get_time(self.sim)
-        crashed = reached_goal = timeout = out_of_fuel = reached_late = False
+        crashed = reached_goal = timeout = out_of_fuel = False
         fuel_initial = A.car_get_fuel_level(self.agent)
         while not (crashed or reached_goal or timeout or out_of_fuel) and elapsed_time < self.decision_interval - 1e-6:
             delta_time = min(self.TERMINATION_CHECK_INTERVAL, self.decision_interval - elapsed_time)    # make sure you don't end up simulating more than decision_interval if it is not a multiple of TERMINATION_CHECK_INTERVAL
@@ -699,7 +699,8 @@ class AwesimEnv(gym.Env):
             "is_success": not crashed if self.goal_lane is None else reached_goal,
             "crashed": crashed,
             "reached_goal": reached_goal,
-            "is_late": is_late,
+            "reached_in_time": reached_goal and not is_late,
+            "reached_but_late": reached_goal and is_late,
             "out_of_fuel": out_of_fuel,
             "total_fuel_consumed": A.to_gallons(self.fuel_drive_beginning - fuel_final),
             "timeout": timeout,
