@@ -225,4 +225,101 @@ snprintf(time_stats, sizeof(time_stats), "%s %02d:%02d:%02d  (%s %.1fx)",
     // Render weather stats
     render_text(renderer, weather_strings[sim->weather], WINDOW_SIZE_WIDTH - 10, 20 + hud_font_size,
                 255, 255, 255, 255, hud_font_size, ALIGN_TOP_RIGHT, false, NULL);
+
+
+    if (HIGHLIGHTED_CARS[0] != ID_NULL) {
+        // Render highlighted car 0 fuel level on top left (in gallon)
+
+        Uint8 r = HIGHLIGHTED_CAR_COLOR.r, g = HIGHLIGHTED_CAR_COLOR.g, b = HIGHLIGHTED_CAR_COLOR.b;
+
+        Car* car0 = sim_get_car(sim, HIGHLIGHTED_CARS[0]);
+        if (car0) {
+            char fuel_stats[32];
+            snprintf(fuel_stats, sizeof(fuel_stats), "Fuel:       %.2f/%.1f gal", to_gallons(car0->fuel_level), to_gallons(car0->fuel_tank_capacity));
+            render_text(renderer, fuel_stats, 10, 20 + hud_font_size, r, g, b, 255,
+                        hud_font_size, ALIGN_TOP_LEFT, false, NULL);
+        }
+
+        // Render car 0 speed on top left
+        if (car0) {
+            char speed_stats[32];
+            snprintf(speed_stats, sizeof(speed_stats), "Speed:   %.1f mph", to_mph(car0->speed));
+            render_text(renderer, speed_stats, 10, 30 + 2 * hud_font_size, r, g, b, 255,
+                        hud_font_size, ALIGN_TOP_LEFT, false, NULL);
+        }
+
+        // Render car 0 acceleration on top left
+        if (car0) {
+            char accel_stats[32];
+            snprintf(accel_stats, sizeof(accel_stats), "Accel:     %.1f m/s²", car0->acceleration);
+            render_text(renderer, accel_stats, 10, 40 + 3 * hud_font_size, r, g, b, 255,
+                        hud_font_size, ALIGN_TOP_LEFT, false, NULL);
+        }
+
+        // Render indicator status of car 0 on top left. At a time, only one of merge or turn is active. So we pick one that is not INDICATOR_NONE. In parenthesis, we print whether it is turn or lane indicator.
+        if (car0) {
+            char indicator_stats[32];
+
+            CarIndicator indicator = INDICATOR_NONE;
+            bool is_turn_indicator = false;
+            if (car0->indicator_turn != INDICATOR_NONE) {
+                indicator = car0->indicator_turn;
+                is_turn_indicator = true;
+            } else if (car0->indicator_lane != INDICATOR_NONE) {
+                indicator = car0->indicator_lane;
+            }
+            bool indicating_anything = indicator != INDICATOR_NONE;
+
+            snprintf(indicator_stats, sizeof(indicator_stats), "%s (%s) %s", indicator == INDICATOR_LEFT ? "⬅" : "", indicating_anything ? (is_turn_indicator ? "Turn" : "Merge") : "⏺", indicator == INDICATOR_RIGHT ? "➡" : " ");
+            render_text(renderer, indicator_stats, 10, 50 + 4 * hud_font_size, r, g, b, 255,
+                        hud_font_size, ALIGN_TOP_LEFT, false, NULL);
+        }
+    }
+
+    if (sim->is_agent_enabled && sim->is_agent_driving_assistant_enabled) {
+        // Render driving assistant status on top left in pink
+        Uint8 r = 255, g = 105, b = 180; // hot pink
+        Car* car0 = sim_get_car(sim, 0);    // 0 is always the agent car
+        DrivingAssistant* das = car0 ? sim_get_driving_assistant(sim, car0->id) : NULL;
+
+        // print target speed in format: Speed Current/Target: {current}/{target} mph
+        if (das) {
+            char target_speed_stats[64];
+            snprintf(target_speed_stats, sizeof(target_speed_stats), "Speed Current/Target:   %.1f/%.1f mph", to_mph(car0->speed), to_mph(das->speed_target));
+            render_text(renderer, target_speed_stats, 10, 80 + 5 * hud_font_size, r, g, b, 255,
+                        hud_font_size, ALIGN_TOP_LEFT, false, NULL);
+        }
+
+        // print follow mode THW (and buffer in parenthesis)
+        // Also print follow THW distance with bars. Each bar = 1 second. Max 5 bars. Each thin bar = 0.5 second. First create a static map of THW to bars.
+        static const char* thw_bars[] = {
+            "❘",        // anything lt 0.5 s
+            "❙",        // lt 1 s
+            "❙❘",       // lt 1.5 s
+            "❙❙",       // lt 2 s
+            "❙❙❘",      // lt 2.5 s
+            "❙❙❙",      // lt 3 s
+            "❙❙❙❘",     // lt 3.5 s
+            "❙❙❙❙",     // lt 4 s
+            "❙❙❙❙❘",    // lt 4.5 s
+            "❙❙❙❙❙"     // lt 5 s
+        };
+        // convert THW to index in thw_bars array
+        int thw_index = (int)(das && das->follow_mode ? fmin(floor(das->follow_mode_thw * 2.0), 9.0) : 0);
+        if (das && das->follow_mode) {
+            char follow_mode_stats[40];
+            snprintf(follow_mode_stats, sizeof(follow_mode_stats), "Follow:  %.1f s (%.1f ft) %s", das->follow_mode_thw, to_feet(das->follow_mode_buffer), thw_bars[thw_index]);
+            render_text(renderer, follow_mode_stats, 10, 90 + 6 * hud_font_size, r, g, b, 255,
+                        hud_font_size, ALIGN_TOP_LEFT, false, NULL);
+        }
+
+        // If AEB is engaged, print that in red text, else set alpha to low value.
+        if (das) {
+            char aeb_str[4];
+            snprintf(aeb_str, sizeof(aeb_str), "AEB");
+            Uint8 alpha = das->aeb_in_progress ? 255 : 64;
+            render_text(renderer, aeb_str, 10, 100 + 7 * hud_font_size, 255, 0, 0, alpha,
+                        hud_font_size, ALIGN_TOP_LEFT, false, NULL);
+        }
+    }
 }

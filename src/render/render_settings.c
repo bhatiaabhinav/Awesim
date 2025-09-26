@@ -28,7 +28,7 @@ const LaneId HIGHLIGHTED_LANES[] = {
     ID_NULL // The last element MUST be ID_NULL to mark end of array.
 };
 
-SDL_Color HIGHLIGHTED_CAR_COLOR = {0, 0, 255, 255}; // Blue color for highlighted cars
+SDL_Color HIGHLIGHTED_CAR_COLOR = {64, 64, 255, 255}; // Blue color for highlighted cars
 SDL_Color HIGHLIGHTED_NEARBY_VEHICLES_COLOR = {139, 0, 0, 255}; // Dark red
 SDL_Color HIGHLIGHTED_FORWARD_VEHICLE_COLOR_AEB_ENGAGED = {200, 0, 0, 255}; // Lighter red
 SDL_Color HIGHLIGHTED_LANE_COLOR = {192, 192, 192, 255}; // Light gray color for highlighted lanes
