@@ -174,32 +174,11 @@ void sim_integrate(Simulation* self, Seconds time_period) {
             Liters fuel_consumed = fuel_consumption_compute_typical(_v, a, dt);
             Liters fuel_remaining = fmax(car_get_fuel_level(car) - fuel_consumed, 0);
 
-            // --------------- handle approaching dead end ---------------
-            // -----------------------------------------------------------
-            bool approaching_dead_end = lane_get_num_connections(lane) == 0 && s >= lane->length - meters(8.0);
-            if (approaching_dead_end) {
-                // teleport to the leftmost lane, to have a chance at merging into something.
-                adjacent_left = lane_get_adjacent_left(lane, map);
-                adjacent_right = lane_get_adjacent_right(lane, map);
-                LOG_TRACE("Car %d is approaching a dead end on lane %d at progress %.2f (s = %.2f). Adjacent lanes are left: %d, right: %d", 
-                          car->id, lane->id, progress, s, lane->adjacents[0], lane->adjacents[1]);
-                bool teleported = false;
-                while (adjacent_left && adjacent_left->direction == lane->direction) {
-                    LOG_TRACE("Car %d: Moving to adjacent left lane %d", car->id, adjacent_left->id);
-                    lane = adjacent_left;
-                    adjacent_left = lane_get_adjacent_left(lane, map);
-                    teleported = true;
-                }
-                s = progress * lane->length;            // progress is constant across neighbor lanes, but s can be different for curved roads.
-                if (teleported) LOG_TRACE("Car %d: Teleported to lane %d at progress %.2f (s = %.2f)", car->id, lane->id, progress, s);
-            }
-
             // ------------ handle merge --------------------
             // ----------------------------------------------
             bool merge_available = lane_is_merge_available(lane);
-            bool merge_intent = lane_change_requested == INDICATOR_LEFT || approaching_dead_end;
-            bool is_merge_safe = true;  // todo
-            if (merge_available && merge_intent && is_merge_safe) {
+            bool merge_intent = lane_change_requested == INDICATOR_LEFT;
+            if (merge_available && merge_intent) {
                 Lane* merges_into = lane_get_merge_into(lane, map);
                 s += lane->merges_into_start * merges_into->length;
                 lane = merges_into;
@@ -212,24 +191,33 @@ void sim_integrate(Simulation* self, Seconds time_period) {
             // ---------- handle turn -----------------------
             // ----------------------------------------------
             while (s > lane->length) {
-                s -= lane->length;
+                LOG_TRACE("Car %d: Progress %.2f (s = %.2f) exceeds lane length %.2f. Handling turn. Connections: left = %d, straight = %d, right = %d", car->id, progress, s, lane->length, lane->connections[0], lane->connections[1], lane->connections[2]);
                 Lane* connection_left = lane_get_connection_left(lane, map);
                 Lane* connection_straight = lane_get_connection_straight(lane, map);
                 Lane* connection_right = lane_get_connection_right(lane, map);
-                LOG_TRACE("Car %d: Progress %.2f (s = %.2f) exceeds lane length %.2f. Handling turn. Connections: left = %d, straight = %d, right = %d", car->id, progress, s, lane->length, lane->connections[0], lane->connections[1], lane->connections[2]);
                 if (turn_requested == INDICATOR_LEFT && connection_left) {
+                    s -= lane->length;
                     lane = connection_left;
                     turn_requested = INDICATOR_NONE; // Reset request after turn
                     turned = true;
                     LOG_TRACE("Car %d turned left into lane %d.", car->id, lane->id);
                 } else if (turn_requested == INDICATOR_RIGHT && connection_right) {
+                    s -= lane->length;
                     lane = connection_right;
                     turn_requested = INDICATOR_NONE; // Reset request after turn
                     turned = true;
                     LOG_TRACE("Car %d turned right into lane %d.", car->id, lane->id);
                 } else {
-                    lane = connection_straight;
-                    LOG_TRACE("Car %d went straight into lane %d", car->id, lane->id);
+                    if (connection_straight) {
+                        s -= lane->length;
+                        lane = connection_straight;
+                        LOG_TRACE("Car %d went straight into lane %d", car->id, lane->id);
+                    } else {
+                        // dead end. Clamp to end of lane and stop the car. Movement ignored = s - lane->length.
+                        net_forward_movement_meters -= (s - lane->length);
+                        s = lane->length; // no connections, so clamp s to lane length.
+                        v = 0; // and stop the car.
+                    }
                 }
                 progress = s / lane->length;
                 LOG_TRACE("Car %d: New lane %d at progress %.2f (s = %.2f)", car->id, lane->id, progress, s);
