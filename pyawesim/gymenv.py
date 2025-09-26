@@ -42,7 +42,7 @@ class AwesimEnv(gym.Env):
     MAX_DISTANCE = 1000.0  # Maximum distance for nearby vehicles (meters)
     MAX_TTC = 10.0  # Maximum time-to-collision (seconds)
     MAX_THW = 10.0  # Maximum time-headway (seconds)
-    COST_GAS_PER_GALLON = 3.2 # Average cost of gas per gallon ($) in US
+    COST_GAS_PER_GALLON = 3.2  # Average cost of gas per gallon ($) in US
     COST_LOST_WAGE_PER_HOUR = 30.0  # Average wages per hour ($) in US
     COST_CAR = 35000.0  # Average new car cost ($) in US. This is the cost for total loss in a crash.
     DEFAULT_INIT_FUEL_GALLONS = 15.0  # Default initial fuel level in gallons
@@ -592,22 +592,19 @@ class AwesimEnv(gym.Env):
             merge_makes_sense = (
                 indicator_direction == A.INDICATOR_LEFT and sit.is_lane_change_left_possible
             ) or (
-                indicator_direction == A.INDICATOR_RIGHT
-                and (sit.is_lane_change_right_possible or sit.is_exit_available_eventually)
+                indicator_direction == A.INDICATOR_RIGHT and (sit.is_lane_change_right_possible or sit.is_exit_available_eventually)
             )
             if turn_makes_sense and not merge_makes_sense:
                 new_turn_intent = indicator_direction
             elif merge_makes_sense and not turn_makes_sense:
                 new_merge_intent = indicator_direction
                 if (
-                    sit.is_an_intersection_upcoming
-                    and sit.distance_to_end_of_lane_from_leading_edge < A.meters(10)
-                    and A.car_get_speed(self.agent) > A.from_mph(5)
+                    sit.is_an_intersection_upcoming and sit.distance_to_end_of_lane_from_leading_edge < A.meters(10) and A.car_get_speed(self.agent) > A.from_mph(5)
                 ):
                     new_merge_intent = A.INDICATOR_NONE  # Prevent last-moment lane changes near intersections
             elif not (turn_makes_sense or merge_makes_sense):
                 new_merge_intent = A.INDICATOR_NONE
-                new_turn_intent  = A.INDICATOR_NONE
+                new_turn_intent = A.INDICATOR_NONE
             elif sit.is_approaching_end_of_lane:
                 new_turn_intent = indicator_direction
             else:
@@ -639,6 +636,8 @@ class AwesimEnv(gym.Env):
         elapsed_time = 0.0
         sim_time_initial = A.sim_get_time(self.sim)
         crashed = reached_goal = timeout = out_of_fuel = False
+        crashed_forward = crashed_backward = False
+        crashed_on_intersection = False
         fuel_initial = A.car_get_fuel_level(self.agent)
         while not (crashed or reached_goal or timeout or out_of_fuel) and elapsed_time < self.decision_interval - 1e-6:
             delta_time = min(self.TERMINATION_CHECK_INTERVAL, self.decision_interval - elapsed_time)    # make sure you don't end up simulating more than decision_interval if it is not a multiple of TERMINATION_CHECK_INTERVAL
@@ -646,7 +645,6 @@ class AwesimEnv(gym.Env):
             A.simulate(self.sim, delta_time)  # Advance simulation
             delta_time = A.sim_get_time(self.sim) - t0  # true delta time (since it is not guaranteed that sim would have simulated exactly for delta_time if it is not a multiple of dt.)
             elapsed_time = A.sim_get_time(self.sim) - sim_time_initial
-            
             A.situational_awareness_build(self.sim, self.agent.id)
             reward -= self.time_penalty_per_second * delta_time  # Apply time penalty
             if self.goal_lane is None:
@@ -658,9 +656,13 @@ class AwesimEnv(gym.Env):
             if crashed:
                 reward -= self.crash_penalty
                 cost += self.cost_car
+                crashed_forward = sit.is_vehicle_ahead and sit.distance_to_lead_vehicle - (A.car_get_length(self.agent) / 2 + A.car_get_length(sit.lead_vehicle) / 2) <= 0
+                crashed_backward = sit.is_vehicle_behind and sit.distance_to_following_vehicle - (A.car_get_length(self.agent) / 2 + A.car_get_length(sit.following_vehicle) / 2) <= 0
+                if sit.is_on_intersection:
+                    crashed_on_intersection = True
             if reached_goal:
                 reward += self.goal_reward
-            
+
         fuel_final = A.car_get_fuel_level(self.agent)
         fuel_consumed = fuel_initial - fuel_final
         fuel_consumed_gallons = A.to_gallons(fuel_consumed)
@@ -673,9 +675,9 @@ class AwesimEnv(gym.Env):
         if self.goal_lane is not None and not reached_goal and is_late:
             cost += self.cost_lost_wage_per_hour * self.decision_interval / 3600.0
 
-        if self.goal_lane is not None and not reached_goal and timeout:
+        if self.goal_lane is not None and not reached_goal and (timeout or out_of_fuel):
             how_late_already_hrs = (A.sim_get_time(self.sim) - self.appointment_time) / 3600.0
-            how_late_already_hrs = max(how_late_already_hrs, 0)  # in case the appointment is past the sim_duration
+            how_late_already_hrs = max(how_late_already_hrs, 0)  # in case it is not time for appointment yet
             cost_lost_wage_already_considered = how_late_already_hrs * self.cost_lost_wage_per_hour
             workday_wage = 8 * self.cost_lost_wage_per_hour
             cost += max(workday_wage - cost_lost_wage_already_considered, 0)  # Cap lost wage cost to a full workday if never reached the goal lane
@@ -698,6 +700,13 @@ class AwesimEnv(gym.Env):
             "time": A.sim_get_time(self.sim),
             "is_success": not crashed if self.goal_lane is None else reached_goal,
             "crashed": crashed,
+            "crashed_on_intersection": crashed_on_intersection,
+            "crashed_forward": crashed_forward,
+            "crashed_backward": crashed_backward,
+            "progress_m_during_crash": A.car_get_lane_progress_meters(self.agent) if crashed else np.nan,
+            "progress_m_during_front_crash": A.car_get_lane_progress_meters(self.agent) if crashed_forward else np.nan,
+            "progress_m_during_back_crash": A.car_get_lane_progress_meters(self.agent) if crashed_backward else np.nan,
+            "aeb_in_progress_during_crash": float(self.das.aeb_in_progress) if crashed else np.nan,
             "reached_goal": reached_goal,
             "reached_in_time": reached_goal and not is_late,
             "reached_but_late": reached_goal and is_late,

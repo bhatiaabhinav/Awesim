@@ -50,6 +50,11 @@ PPO_CONFIG = {
     "gamma": 0.999,
     "clipnorm": 0.5,
     "norm_rewards": CONFIG["norm_reward"],
+    "cmdp_mode": False,
+    "constrain_undiscounted_cost": True,
+    "cost_threshold": 100.0,  # max cost per episode  # TODO: tune this
+    "lagrange_lr": 0.01,
+    "lagrange_max": 100.0,
     # "verbose": 1,
     "training_device": "cuda" if torch.cuda.is_available() else "cpu",
     "inference_device": "cuda" if torch.cuda.is_available() else "cpu",
@@ -94,8 +99,13 @@ def train_model(no_wandb=False) -> Tuple[Actor, Critic, PPO]:
     critic_model = make_mlp(obs_dim, POLICY_CONFIG["net_arch"], 1, layernorm=POLICY_CONFIG["layernorm"])
     actor = Actor(actor_model, vec_env.single_action_space, norm_obs=CONFIG["norm_obs"])    # type: ignore
     critic = Critic(critic_model, norm_obs=CONFIG["norm_obs"])
+    if PPO_CONFIG["cmdp_mode"]:
+        cost_critic_model = make_mlp(obs_dim, POLICY_CONFIG["net_arch"], 1, layernorm=POLICY_CONFIG["layernorm"])
+        cost_critic = Critic(cost_critic_model, norm_obs=CONFIG["norm_obs"])
+    else:
+        cost_critic = None
 
-    ppo = PPO(vec_env, actor, critic, **PPO_CONFIG, custom_info_keys_to_log_at_episode_end=['crashed', 'reached_goal', 'reached_in_time', 'reached_but_late', 'out_of_fuel', 'timeout', 'total_fuel_consumed'])
+    ppo = PPO(vec_env, actor, critic, cost_critic=cost_critic, **PPO_CONFIG, custom_info_keys_to_log_at_episode_end=['crashed', 'reached_goal', 'reached_in_time', 'reached_but_late', 'out_of_fuel', 'timeout', 'total_fuel_consumed', 'crashed_forward', 'crashed_backward', 'progress_m_during_crash', 'progress_m_during_front_crash', 'progress_m_during_back_crash', 'crashed_on_intersection', 'aeb_in_progress_during_crash'])  # type: ignore
 
     # make dir for saving models
     model_dir = f"./models/{EXPERIMENT_NAME}"
@@ -109,9 +119,11 @@ def train_model(no_wandb=False) -> Tuple[Actor, Critic, PPO]:
                 "global_step": ppo.stats['total_timesteps'],
                 "iteration": ppo.stats['iterations'],
                 "episodes": ppo.stats['total_episodes'],
+                "hours_of_experience": ppo.stats['total_timesteps'] * ENV_CONFIG['decision_interval'] / 3600.0,
                 "rollout/ep_rew_mean": ppo.stats['mean_returns'][-1],
                 "rollout/ep_len_mean": ppo.stats['mean_lengths'][-1],
                 "rollout/ep_cost_mean": ppo.stats['mean_total_costs'][-1],
+                "rollout/ep_cost_mean_discounted": ppo.stats['mean_discounted_costs'][-1],
                 "rollout/success_rate": ppo.stats['mean_successes'][-1],
                 "rollout/crash_rate": ppo.stats['info_key_means']['crashed'][-1],
                 "rollout/reached_goal_rate": ppo.stats['info_key_means']['reached_goal'][-1],
@@ -120,10 +132,20 @@ def train_model(no_wandb=False) -> Tuple[Actor, Critic, PPO]:
                 "rollout/reached_but_late_rate": ppo.stats['info_key_means']['reached_but_late'][-1],
                 "rollout/timeout_rate": ppo.stats['info_key_means']['timeout'][-1],
                 "rollout/mean_fuel_consumed": ppo.stats['info_key_means']['total_fuel_consumed'][-1],
+                "rollout/crashed_forward_rate": ppo.stats['info_key_means']['crashed_forward'][-1],
+                "rollout/crashed_backward_rate": ppo.stats['info_key_means']['crashed_backward'][-1],
+                "rollout/mean_progress_m_during_crash": ppo.stats['info_key_means']['progress_m_during_crash'][-1],
+                "rollout/mean_progress_m_during_front_crash": ppo.stats['info_key_means']['progress_m_during_front_crash'][-1],
+                "rollout/mean_progress_m_during_back_crash": ppo.stats['info_key_means']['progress_m_during_back_crash'][-1],
+                "rollout/crashed_on_intersection_rate": ppo.stats['info_key_means']['crashed_on_intersection'][-1],
+                "rollout/aeb_in_progress_during_crash_rate": ppo.stats['info_key_means']['aeb_in_progress_during_crash'][-1],
                 "train/loss": ppo.stats["losses"][-1],
                 "train/value_loss": ppo.stats["critic_losses"][-1],
+                "train/cost_value_loss": ppo.stats["cost_losses"][-1],
                 "train/policy_gradient_loss": ppo.stats["actor_losses"][-1],
                 "train/mean_value": ppo.stats["values"][-1],
+                "train/mean_cost_value": ppo.stats["cost_values"][-1],
+                "train/lagrange": ppo.stats['lagranges'][-1],
                 "train/entropy_loss": -ppo.stats["entropies"][-1],
                 "train/approx_kl": ppo.stats["kl_divs"][-1],
                 "train/std": np.exp(ppo.stats["logstds"][-1]),
