@@ -223,6 +223,12 @@ class PPO:
                  actor: Actor,
                  critic: Critic,
                  iters: int,
+                 cmdp_mode: bool = False,
+                 cost_critic: Optional[Critic] = None,  # required if cmdp_mode is True
+                 cost_threshold: float = 0.0,           # must be > 0 if cmdp_mode is True
+                 constrain_undiscounted_cost: bool = False,  # if True, use undiscounted cost to update lagrange multiplier, else use discounted cost
+                 lagrange_lr: float = 0.01,
+                 lagrange_max: float = 1000.0,
                  actor_lr: float = 3e-4,
                  critic_lr: float = 3e-4,
                  decay_lr: bool = False,
@@ -251,9 +257,18 @@ class PPO:
         self.envs = envs
         self.actor = actor.to(training_device)
         self.critic = critic.to(training_device)
+        self.cmdp_mode = cmdp_mode
+        if self.cmdp_mode:
+            assert cost_critic is not None, "cost_critic must be provided in CMDP mode"
+            assert cost_threshold > 0.0, "cost_threshold must be > 0 in CMDP mode"
+            if not normalize_advantages:
+                print("Warning: It is recommended to normalize advantages when using CMDP mode so that the scale of reward and cost advantages are similar before combining them.", file=sys.stderr)
+            self.cost_critic = cost_critic.to(training_device)
         self.iters = iters
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr, weight_decay=adam_weight_decay, eps=adam_epsilon)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=critic_lr, weight_decay=adam_weight_decay, eps=adam_epsilon)
+        if self.cmdp_mode:
+            self.cost_optimizer = torch.optim.Adam(self.cost_critic.parameters(), lr=critic_lr, weight_decay=adam_weight_decay, eps=adam_epsilon)
         self.actor_lr = actor_lr
         self.critic_lr = critic_lr
         self.decay_lr = decay_lr
@@ -274,32 +289,42 @@ class PPO:
         self.inference_device = inference_device
         self.training_device = training_device
         self.custom_info_keys_to_log_at_episode_end = custom_info_keys_to_log_at_episode_end
+        self.cost_threshold = cost_threshold
+        self.constrain_undiscounted_cost = constrain_undiscounted_cost
+        self.lagrange_lr = lagrange_lr
+        self.lagrange_max = lagrange_max
+        self.lagrange = 0.0  # Lagrange multiplier
 
         # stats
         self.stats = {
             'iterations': 0,
             'total_timesteps': 0,
             'total_episodes': 0,
-            'timestepss': [],               # after each iteration
+            'timestepss': [],           # after each iteration
             'episodess': [],            # after each iteration
             'losses': [],               # after each iteration
             'actor_losses': [],         # after each iteration
             'critic_losses': [],        # after each iteration
+            'cost_losses': [],          # after each iteration
             'entropies': [],            # after each iteration
             'kl_divs': [],              # after each iteration
             'values': [],               # mean value of states in the batch after each iteration
+            'cost_values': [],          # mean cost value of states in the batch after each iteration
             'logprobs': [],             # mean logprob of actions in the batch after each iteration (its negative is the true mean entropy of the actions in the batch)
             'logstds': [],              # mean logstd of actions in the batch after each iteration
             'actor_lrs': [],            # adjusted per iteration
             'critic_lrs': [],           # adjusted per iteration
             'entropy_coefs': [],        # adjusted per iteration
+            'lagranges': [],            # after each iteration
             'returns': [],              # return of each trajectory collected so far
             'discounted_returns': [],   # discounted return of each trajectory collected so far
+            'discounted_costs': [],     # discounted cost of each trajectory collected so far
             'lengths': [],              # length of each trajectory collected so far
             'total_costs': [],          # total cost of each trajectory collected so far (if env provides this info)
             'successes': [],            # success of each trajectory collected so far (if env provides this info)
             'mean_returns': [],         # mean return of latest 100 trajectories after each iteration
             'mean_discounted_returns': [],  # mean discounted return of latest 100 trajectories after each iteration
+            'mean_discounted_costs': [],    # mean discounted cost of latest 100 trajectories after each iteration
             'mean_lengths': [],         # mean length of latest 100 trajectories after each iteration
             'mean_total_costs': [],     # mean total cost of latest 100 trajectories after each iteration (if env provides this info)
             'mean_successes': [],       # mean success of latest 100 trajectories after each iteration (if env provides this info)
@@ -316,10 +341,13 @@ class PPO:
         self.actions_buf = torch.zeros((N, M, action_dim), dtype=torch.float32, device=self.training_device)
         self.log_probs_buf = torch.zeros((N, M, 1), dtype=torch.float32, device=self.training_device)
         self.rewards_buf = torch.zeros((N, M, 1), dtype=torch.float32, device=self.training_device)
+        self.costs_buf = torch.zeros((N, M, 1), dtype=torch.float32, device=self.training_device)
         self.terminateds_buf = torch.zeros((N, M, 1), dtype=torch.float32, device=self.training_device)
         self.truncateds_buf = torch.zeros((N, M, 1), dtype=torch.float32, device=self.training_device)
         self.values_buf = torch.zeros((N, M, 1), dtype=torch.float32, device=self.training_device)
+        self.cost_values_buf = torch.zeros((N, M, 1), dtype=torch.float32, device=self.training_device)
         self.advantages_buf = torch.zeros((N, M, 1), dtype=torch.float32, device=self.training_device)
+        self.cost_advantages_buf = torch.zeros((N, M, 1), dtype=torch.float32, device=self.training_device)
 
         # data buffers for collecting trajectories, if using a different device for inference
         if self.inference_device != self.training_device:
@@ -328,6 +356,7 @@ class PPO:
             self.actions_buf_inference = torch.zeros((N, M, action_dim), dtype=torch.float32, device=self.inference_device)
             self.log_probs_buf_inference = torch.zeros((N, M, 1), dtype=torch.float32, device=self.inference_device)
             self.rewards_buf_inference = torch.zeros((N, M, 1), dtype=torch.float32, device=self.inference_device)
+            self.costs_buf_inference = torch.zeros((N, M, 1), dtype=torch.float32, device=self.inference_device)
             self.terminateds_buf_inference = torch.zeros((N, M, 1), dtype=torch.float32, device=self.inference_device)
             self.truncateds_buf_inference = torch.zeros((N, M, 1), dtype=torch.float32, device=self.inference_device)
         else:
@@ -336,11 +365,13 @@ class PPO:
             self.actions_buf_inference = self.actions_buf
             self.log_probs_buf_inference = self.log_probs_buf
             self.rewards_buf_inference = self.rewards_buf
+            self.costs_buf_inference = self.costs_buf
             self.terminateds_buf_inference = self.terminateds_buf
             self.truncateds_buf_inference = self.truncateds_buf
 
         self.returns_buffer = np.zeros((N,), dtype=np.float32)
         self.discounted_returns_buffer = np.zeros((N,), dtype=np.float32)
+        self.discounted_costs_buffer = np.zeros((N,), dtype=np.float32)
         self.lengths_buffer = np.zeros((N,), dtype=np.int32)
         self.costs_total_buffer = np.zeros((N,), dtype=np.float32)
 
@@ -372,6 +403,12 @@ class PPO:
                 self.actions_buf_inference[:, t, :] = a_t
                 self.log_probs_buf_inference[:, t, :] = logp_t
                 self.rewards_buf_inference[:, t, 0] = torch.tensor(r_t, dtype=torch.float32, device=self.inference_device)
+                if self.cmdp_mode:
+                    assert 'cost' in infos, "Env must return 'cost' info in CMDP mode"
+                c_t = infos.get('cost', np.zeros(self.envs.num_envs))
+                if 'final_info' in infos and 'cost' in infos['final_info']:  # some episode ended and vecenv provided final cost info for that env and zeros for others in a vectorized way
+                    c_t += infos['final_info']['cost']
+                self.costs_buf_inference[:, t, 0] = torch.tensor(c_t, dtype=torch.float32, device=self.inference_device)
                 self.terminateds_buf_inference[:, t, 0] = torch.tensor(terminated_t, dtype=torch.float32, device=self.inference_device)
                 self.truncateds_buf_inference[:, t, 0] = torch.tensor(truncated_t, dtype=torch.float32, device=self.inference_device)
 
@@ -380,23 +417,22 @@ class PPO:
 
                 # update returns, lengths, costs
                 self.discounted_returns_buffer += r_t * np.power(self.gamma, self.lengths_buffer)
+                self.discounted_costs_buffer += c_t * np.power(self.gamma, self.lengths_buffer)
                 self.returns_buffer += r_t
                 self.lengths_buffer += 1
-                if 'cost' in infos:
-                    c_t = infos['cost']
-                    if 'final_info' in infos:
-                        c_t += infos['final_info']['cost']
-                    self.costs_total_buffer += c_t
+                self.costs_total_buffer += c_t
                 for i in range(self.envs.num_envs):
                     if terminated_t[i] or truncated_t[i]:
                         self.stats['returns'].append(self.returns_buffer[i])
                         self.stats['discounted_returns'].append(self.discounted_returns_buffer[i])
+                        self.stats['discounted_costs'].append(self.discounted_costs_buffer[i])
                         self.stats['lengths'].append(self.lengths_buffer[i])
                         self.stats['total_costs'].append(self.costs_total_buffer[i])
                         if 'is_success' in infos['final_info']:
                             self.stats['successes'].append(infos['final_info']['is_success'][i])  # type: ignore
                         self.returns_buffer[i] = 0.0
                         self.discounted_returns_buffer[i] = 0.0
+                        self.discounted_costs_buffer[i] = 0.0
                         self.lengths_buffer[i] = 0
                         self.costs_total_buffer[i] = 0.0
                         self.stats['total_episodes'] += 1
@@ -421,6 +457,7 @@ class PPO:
             self.actions_buf.data.copy_(self.actions_buf_inference.data, non_blocking=True)
             self.log_probs_buf.data.copy_(self.log_probs_buf_inference.data, non_blocking=True)
             self.rewards_buf.data.copy_(self.rewards_buf_inference.data, non_blocking=True)
+            self.costs_buf.data.copy_(self.costs_buf_inference.data, non_blocking=True)
             self.terminateds_buf.data.copy_(self.terminateds_buf_inference.data, non_blocking=True)
             self.truncateds_buf.data.copy_(self.truncateds_buf_inference.data, non_blocking=True)
 
@@ -430,11 +467,13 @@ class PPO:
         self.stats['episodess'].append(self.stats['total_episodes'])
         mean_return = np.mean(self.stats['returns'][-100:]) if len(self.stats['returns']) > 0 else 0.0
         mean_discounted_return = np.mean(self.stats['discounted_returns'][-100:]) if len(self.stats['discounted_returns']) > 0 else 0.0
+        mean_discounted_cost = np.mean(self.stats['discounted_costs'][-100:]) if len(self.stats['discounted_costs']) > 0 else 0.0
         mean_length = np.mean(self.stats['lengths'][-100:]) if len(self.stats['lengths']) > 0 else 0.0
         mean_total_cost = np.mean(self.stats['total_costs'][-100:]) if len(self.stats['total_costs']) > 0 else 0.0
         mean_success = np.mean(self.stats['successes'][-100:]) if len(self.stats['successes']) > 0 else 0.0
         self.stats['mean_returns'].append(mean_return)
         self.stats['mean_discounted_returns'].append(mean_discounted_return)
+        self.stats['mean_discounted_costs'].append(mean_discounted_cost)
         self.stats['mean_lengths'].append(mean_length)
         self.stats['mean_total_costs'].append(mean_total_cost)
         self.stats['mean_successes'].append(mean_success)
@@ -445,6 +484,8 @@ class PPO:
     def compute_values_advantages(self) -> None:
         # everything happens on training device here
         self.critic.eval()
+        if self.cmdp_mode:
+            self.cost_critic.eval()
         with torch.no_grad():
             v = self.critic(self.obs_buf)   # (N, M, 1)
             v_next = self.critic(self.obs_next_buf)  # (N, M, 1)
@@ -458,26 +499,52 @@ class PPO:
             self.values_buf.data.copy_(v.data, non_blocking=True)
             self.advantages_buf.data.copy_(advantages.data, non_blocking=True)
 
-    def loss(self, data: Optional[Tuple[torch.Tensor, ...]], actor_coeff=1.0, critic_coeff=0.5, entropy_coeff=0.0) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
-        # data should contain obs, actions, values, advantages, old_logprobs and should be on training device. If none, loss will be computed for all data in buffers
-        if data is None:
-            obs, actions, old_values, advantages, old_logprobs = self.obs_buf, self.actions_buf, self.values_buf, self.advantages_buf, self.log_probs_buf
-        else:
-            obs, actions, old_values, advantages, old_logprobs = data
+            if self.cmdp_mode:
+                c = self.cost_critic(self.obs_buf)  # (N, M, 1)
+                c_next = self.cost_critic(self.obs_next_buf)  # (N, M, 1)
+                cost_advantages = self.costs_buf + self.gamma * (1.0 - self.terminateds_buf) * c_next - c  # (N, M, 1)
+                cost_adv_next = torch.zeros((self.envs.num_envs, 1), dtype=torch.float32, device=self.training_device)
+                for t in reversed(range(self.nsteps)):
+                    cost_advantages[:, t, :] += (1.0 - dones[:, t, :]) * self.gamma * self.lam * cost_adv_next
+                    cost_adv_next = cost_advantages[:, t, :]
 
-        critic_loss = self.critic.get_loss(obs, old_values, advantages)
+                self.cost_values_buf.data.copy_(c.data, non_blocking=True)
+                self.cost_advantages_buf.data.copy_(cost_advantages.data, non_blocking=True)
+
+    def loss(self, data: Optional[Tuple[torch.Tensor, ...]], actor_coeff=1.0, value_coeff=0.5, cost_coeff=0.5, entropy_coeff=0.0) -> Tuple[Tensor, Tensor, Tensor, Optional[Tensor], Tensor]:
+        # data should contain obs, actions, values, advantages, old_logprobs, cost_values, cost_advantages and should be on training device. If none, loss will be computed for all data in buffers
+        if data is None:
+            obs, actions, old_values, advantages, old_logprobs, old_cost_values, cost_advantages = self.obs_buf, self.actions_buf, self.values_buf, self.advantages_buf, self.log_probs_buf, self.cost_values_buf, self.cost_advantages_buf
+        else:
+            obs, actions, old_values, advantages, old_logprobs, old_cost_values, cost_advantages = data
+
+        value_loss = self.critic.get_loss(obs, old_values, advantages)
+        cost_loss = self.cost_critic.get_loss(obs, old_cost_values, cost_advantages) if self.cmdp_mode else None
         if self.normalize_advantages:
-            advantages = (advantages - advantages.mean().detach()) / (advantages.std().detach() + 1e-8)
+            advantages = (advantages - advantages.mean().detach()) / (advantages.std().detach() + 1e-3)
+            if self.cmdp_mode:
+                cost_advantages = (cost_advantages - cost_advantages.mean().detach()) / (cost_advantages.std().detach() + 1e-3)
+        advantages -= self.lagrange * cost_advantages
+        if self.normalize_advantages:
+            advantages = (advantages - advantages.mean().detach()) / (advantages.std().detach() + 1e-8)  # again
+        # print("Advantages min/max/mean/std:", advantages.min().item(), advantages.max().item(), advantages.mean().item(), advantages.std().item())
         actor_loss, entropy = self.actor.get_loss_and_entropy(obs, actions, advantages, old_logprobs, self.clip_ratio)
-        total_loss = actor_coeff * actor_loss + critic_coeff * critic_loss - entropy_coeff * entropy
-        return total_loss, actor_loss, critic_loss, entropy
+        if cost_loss is not None:
+            total_loss = actor_coeff * actor_loss + value_coeff * value_loss + cost_coeff * cost_loss - entropy_coeff * entropy
+        else:
+            total_loss = actor_coeff * actor_loss + value_coeff * value_loss - entropy_coeff * entropy
+        return total_loss, actor_loss, value_loss, cost_loss, entropy
 
     def train_one_iteration(self):
         self.collect_trajectories()
         if self.norm_rewards and len(self.stats['discounted_returns']) > 1:
             reward_std = np.std(self.stats['discounted_returns'])
             if reward_std > 1e-8:
-                self.rewards_buf /= reward_std  # type: ignore
+                self.rewards_buf /= (reward_std + 1e-3)  # type: ignore
+            if self.cmdp_mode:
+                costs_std = np.std(self.stats['discounted_costs'])
+                if costs_std > 1e-8:
+                    self.costs_buf /= (costs_std + 1e-3)  # type: ignore
         self.compute_values_advantages()
         stop_actor_training = False
         entropy_coef = self.entropy_coef
@@ -491,12 +558,17 @@ class PPO:
                 param_group['lr'] = actor_lr
             for param_group in self.critic_optimizer.param_groups:
                 param_group['lr'] = critic_lr
+            if self.cmdp_mode:
+                for param_group in self.cost_optimizer.param_groups:
+                    param_group['lr'] = critic_lr
         epochs = 0
         kl = 0.0
         for epoch in range(self.nepochs):
             print(f"Training epoch {epoch + 1}/{self.nepochs}", end='\r')
             self.actor.train()
             self.critic.train()
+            if self.cmdp_mode:
+                self.cost_critic.train()
             total = self.nsteps * self.envs.num_envs
             idxs = torch.randperm(total, device=self.training_device)
             for start in range(0, total, self.batch_size):
@@ -507,10 +579,14 @@ class PPO:
                 mb_old_values = self.values_buf.reshape(-1, 1)[mb_idxs]
                 mb_advantages = self.advantages_buf.reshape(-1, 1)[mb_idxs]
                 mb_old_logprobs = self.log_probs_buf.reshape(-1, 1)[mb_idxs]
-                data = (mb_obs, mb_actions, mb_old_values, mb_advantages, mb_old_logprobs)
-                mb_loss, _, _, _ = self.loss(data, float(not stop_actor_training), 0.5, entropy_coef)
+                mb_old_cost_values = self.cost_values_buf.reshape(-1, 1)[mb_idxs]
+                mb_cost_advantages = self.cost_advantages_buf.reshape(-1, 1)[mb_idxs]
+                data = (mb_obs, mb_actions, mb_old_values, mb_advantages, mb_old_logprobs, mb_old_cost_values, mb_cost_advantages)
+                mb_loss, _, _, _, _ = self.loss(data, float(not stop_actor_training), 0.5, 0.5, entropy_coef)
                 self.actor_optimizer.zero_grad()
                 self.critic_optimizer.zero_grad()
+                if self.cmdp_mode:
+                    self.cost_optimizer.zero_grad()
                 mb_loss.backward()
                 # update actor
                 if not stop_actor_training:
@@ -521,6 +597,11 @@ class PPO:
                 if self.clipnorm < np.inf:
                     torch.nn.utils.clip_grad_norm_(self.critic.parameters(), self.clipnorm)
                 self.critic_optimizer.step()
+                # update cost critic
+                if self.cmdp_mode:
+                    if self.clipnorm < np.inf:
+                        torch.nn.utils.clip_grad_norm_(self.cost_critic.parameters(), self.clipnorm)
+                    self.cost_optimizer.step()
             epochs += 1
 
             self.actor.eval()
@@ -536,8 +617,11 @@ class PPO:
         # compute loss on all data for logging
         self.actor.eval()
         self.critic.eval()
-        total_loss, actor_loss, critic_loss, entropy = self.loss(None, 1, 0.5, entropy_coef)
+        if self.cmdp_mode:
+            self.cost_critic.eval()
+        total_loss, actor_loss, critic_loss, cost_loss, entropy = self.loss(None, 1, 0.5, 0.5 * float(self.cmdp_mode), entropy_coef)
         value = self.values_buf.mean().item()
+        mean_cost = self.cost_values_buf.mean().item() if self.cmdp_mode else 0.0
         logstd, logprobs = self.actor.get_logstd_logprob(self.obs_buf, self.actions_buf)
         mean_logstd = logstd.mean().item()
         mean_logprob = logprobs.mean().item()
@@ -546,14 +630,24 @@ class PPO:
         self.stats['losses'].append(total_loss.item())
         self.stats['actor_losses'].append(actor_loss.item())
         self.stats['critic_losses'].append(critic_loss.item())
+        self.stats['cost_losses'].append(cost_loss.item() if cost_loss is not None else 0.0)
         self.stats['entropies'].append(entropy.item())
         self.stats['kl_divs'].append(kl)
         self.stats['values'].append(value)
+        self.stats['cost_values'].append(mean_cost)
         self.stats['logstds'].append(mean_logstd)
         self.stats['logprobs'].append(mean_logprob)
         self.stats['actor_lrs'].append(actor_lr)
         self.stats['critic_lrs'].append(critic_lr)
         self.stats['entropy_coefs'].append(entropy_coef)
+        if self.cmdp_mode:
+            # update lagrange multiplier
+            window_size_for_cost_mean = 256
+            stats_to_use = self.stats['total_costs'] if self.constrain_undiscounted_cost else self.stats['discounted_costs']
+            mean_cost = np.mean(stats_to_use[-window_size_for_cost_mean:]) if len(stats_to_use) > 0 else 0.0
+            self.lagrange = self.lagrange + self.lagrange_lr * (mean_cost - self.cost_threshold)
+            self.lagrange = np.clip(self.lagrange, 0.0, self.lagrange_max)  # avoid too large lagrange multiplier
+        self.stats['lagranges'].append(self.lagrange)
 
         # update actor for inference, if using a different device for inference
         if self.inference_device != self.training_device:
@@ -571,14 +665,18 @@ class PPO:
                 f"  Total episodes: {self.stats['total_episodes']}\n"
                 f"  Mean return: {self.stats['mean_returns'][-1]:.6f}\n"
                 f"  Mean total cost: {self.stats['mean_total_costs'][-1]:.6f}\n"
+                f"  Mean discounted cost: {self.stats['mean_discounted_costs'][-1]:.6f}\n"
                 f"  Mean length: {self.stats['mean_lengths'][-1]:.6f}\n"
                 f"  Mean success: {self.stats['mean_successes'][-1]:.6f}\n"
+                f"  Lagrange multiplier: {self.stats['lagranges'][-1]:.6f}\n"
                 f"  Total loss: {self.stats['losses'][-1]:.6f}\n"
                 f"  Actor loss: {self.stats['actor_losses'][-1]:.6f}\n"
                 f"  Critic loss: {self.stats['critic_losses'][-1]:.6f}\n"
+                f"  Cost critic loss: {self.stats['cost_losses'][-1]:.6f}\n"
                 f"  Entropy: {self.stats['entropies'][-1]:.6f}\n"
                 f"  KL: {self.stats['kl_divs'][-1]:.6f}\n"
-                f"  Value: {self.stats['values'][-1]:.6f}"
+                f"  Value: {self.stats['values'][-1]:.6f}\n"
+                f"  Cost value: {self.stats['cost_values'][-1]:.6f}"
             )
             if self.stats['iterations'] >= self.iters:
                 print("Training complete.")
