@@ -62,6 +62,9 @@ static Meters compute_best_case_braking_gap(const Car* car, const SituationalAwa
 
     // Initial conditions
     const Meters initial_gap = sa->distance_to_lead_vehicle - (car_get_length(car) + car_get_length(sa->lead_vehicle)) / 2.0;  // Initial bumper-to-bumper gap
+    if (initial_gap <= 0) {
+        return 0;  // Already colliding or overlapping
+    }
     const MetersPerSecond ego_speed = car->speed;  // Ego vehicle speed (positive forward)
     const MetersPerSecond lead_speed = sa->lead_vehicle->speed;  // Lead vehicle speed (positive forward, negative if reversing)
     const MetersPerSecond relative_speed = lead_speed - ego_speed;  // Relative speed (lead relative to ego)

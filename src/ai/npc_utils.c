@@ -295,6 +295,20 @@ void nearby_vehicles_flatten(NearbyVehicles* nearby_vehicles, NearbyVehiclesFlat
         count++;
     }
 
+    // Add vehicles from the turning into same lane
+    for (CarIndicator turn_indicator = 0; turn_indicator < 3; turn_indicator++) {
+        for (int i = 0; i < 3; i++) {
+            NearbyVehicle v = nearby_vehicles->turning_into_same_lane[i][turn_indicator];
+            const Car* c = v.car;
+            CarId id = c ? c->id : ID_NULL;
+            flattened->car_ids[count] = id;
+            flattened->distances[count] = v.distance;
+            flattened->time_to_collisions[count] = v.time_to_collision;
+            flattened->time_headways[count] = v.time_headway;
+            count++;
+        }
+    }
+
     if (include_outgoing_and_incoming_lanes) {
 
         // Add vehicles from the outgoing lane
@@ -324,8 +338,8 @@ void nearby_vehicles_flatten(NearbyVehicles* nearby_vehicles, NearbyVehiclesFlat
     
     flattened->count = count;
 
-    // Fill the rest with ID_NULL if we have less than 15 cars
-    for (; count < 15; count++) {
+    // Fill the rest with ID_NULL if we have less than 24 cars
+    for (; count < 24; count++) {
         flattened->car_ids[count] = ID_NULL;
         flattened->distances[count] = INFINITY;
         flattened->time_to_collisions[count] = INFINITY;

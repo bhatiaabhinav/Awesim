@@ -1,6 +1,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 #include "logging.h"
 #include "ai.h"
 
@@ -36,7 +37,7 @@ static void _find_vehicle_behind_and_at_and_ahead_of_point(Simulation* sim, cons
         } else if (fabs(car_position - point) <= car_half_length + at_buffer_half) {
             if (*car_at_out) { continue; } // We already have a car at, so we can skip this one.
             *car_at_out = car;
-            *car_at_distance_out = 0;
+            *car_at_distance_out = car_position - point; // center-to-center distance, also marks whether it is ahead (positive) or behind (negative)
         } else if (car_position + car_half_length < point - at_buffer_half) {
             *car_behind_out = car;
             *car_behind_distance_out = point - car_position - (at_buffer_half + car_half_length);
@@ -44,10 +45,9 @@ static void _find_vehicle_behind_and_at_and_ahead_of_point(Simulation* sim, cons
         }
     }
 
-    // assert the distances are non-negative, else throw an error and exit since this is a bug.
-    if (*car_ahead_distance_out < 0 || *car_behind_distance_out < 0 || *car_at_distance_out < 0) {
-        LOG_ERROR("For lane %d at position %.2f: Negative distance found: car_ahead_distance = %.2f, car_behind_distance = %.2f, car_at_distance = %.2f", 
-                  lane_get_id(lane), point, *car_ahead_distance_out, *car_behind_distance_out, *car_at_distance_out);
+    // assert the bumper-to-bumper distances are non-negative, else throw an error and exit since this is a bug.
+    if (*car_ahead_distance_out < 0 || *car_behind_distance_out < 0) {
+        LOG_ERROR("For lane %d at position %.2f: Negative distance found: car_ahead_distance = %.2f, car_behind_distance = %.2f", lane->id, point, *car_ahead_distance_out, *car_behind_distance_out);
         exit(EXIT_FAILURE);
     }
 
@@ -74,7 +74,7 @@ static void _find_vehicle_behind_and_at_and_ahead_of_point(Simulation* sim, cons
                 // If we already don't have a car at, then we can set it to this car.
                 if (!*car_at_out) {
                     *car_at_out = car;
-                    *car_at_distance_out = 0; // distance from the point
+                    *car_at_distance_out = point_to_center_distance; // center-to-center distance, also marks whether it is ahead (positive) or behind (negative). Positive in this case.
                 }
                 // TODO: should keep scanning to find a car properly ahead
             } else {
@@ -103,7 +103,7 @@ static void _find_vehicle_behind_and_at_and_ahead_of_point(Simulation* sim, cons
                 // If we already don't have a car at, then we can set it to this car.
                 if (!*car_at_out) {
                     *car_at_out = car;
-                    *car_at_distance_out = 0; // distance from the point
+                    *car_at_distance_out = -point_to_center_distance; // center-to-center distance, also marks whether it is ahead (positive) or behind (negative). Negative in this case.
                 }
                 // TODO: should keep scanning to find a car properly behind
             } else {
@@ -273,6 +273,7 @@ void situational_awareness_build(Simulation* sim, CarId car_id) {
     situation->is_approaching_dead_end = lane_get_num_connections(lane) == 0;
     if (lane->is_at_intersection) {
         situation->intersection = intersection;
+        situation->is_an_intersection_upcoming = false;
         situation->is_on_intersection = true;
         situation->is_stopped_at_intersection = false;
     } else {
@@ -504,6 +505,174 @@ void situational_awareness_build(Simulation* sim, CarId car_id) {
 
     _update_ttc_headways(car, &situation->nearby_vehicles);
 
+    for (CarIndicator turn_indicator = 0; turn_indicator < 3; turn_indicator++) {
+        // if we are going into a lane that has more than 1 incoming connections (happens on intersection exits), we need to worry about vehicles coming from those incoming connections. We will pick the vehicle with the least time-to-collision (TTC) from the projected moment ego car reaches the start of the next lane. If there is no TTC vehicle, we will pick the projected closest vehicle instead at that time.
+        const Lane* next_lane = NULL;
+        const Lane* next_lane_predecessor = NULL;
+        Meters ego_distance_to_next_lane_start = INFINITY;
+        if (car_speed > 0 && situation->is_an_intersection_upcoming && car_get_lane_rank(car) == 0) {   // we are the leading car going into an intersection
+            // this is the outgoing lane after the intersection, if we turn according to the turn indicator.
+            next_lane_predecessor = situation->lane_next_after_turn[turn_indicator];
+            next_lane = next_lane_predecessor ? lane_get_connection_straight(next_lane_predecessor, map) : NULL;
+            ego_distance_to_next_lane_start = next_lane ? distance_to_end_of_lane + next_lane_predecessor->length : INFINITY; // from center = distance to end of our lane + length of the predecessor lane
+        } else if (car_speed > 0 && situation->is_on_intersection) {
+            // this is the outgoing lane as we exit the intersection
+            next_lane_predecessor = situation->lane;
+            next_lane = lane_get_connection_straight(next_lane_predecessor, map);
+            assert(next_lane != NULL); // if we are on an intersection, there must be a next lane
+            ego_distance_to_next_lane_start = distance_to_end_of_lane;
+        } else {
+            // don't worry about it
+        }
+        Seconds ego_time_to_next_lane_start = next_lane && car_speed >= 0 ? ego_distance_to_next_lane_start / (car_speed + 1e-6) : INFINITY;
+        for (CarIndicator incoming_indicator = 0; incoming_indicator < 3; incoming_indicator++) {
+            LaneId incoming_lane_id = next_lane ? next_lane->connections_incoming[incoming_indicator] : ID_NULL;
+            Lane* incoming_lane = incoming_lane_id != ID_NULL ? map_get_lane(map, incoming_lane_id) : NULL;
+            Car* least_ttc_car = NULL;
+            Seconds least_ttc = INFINITY;
+            Meters least_ttc_car_distance = INFINITY;
+            Seconds least_ttc_car_headway = INFINITY;
+            Car* least_distance_car = NULL;     // will record this if can't find any ttc car
+            Meters least_distance = INFINITY;
+            Seconds least_distance_headway = INFINITY;
+            Seconds least_distance_ttc = INFINITY;
+            if (incoming_lane && car_speed >= 0 && incoming_lane != next_lane_predecessor) {
+                // Let us consider the start of the next lane as the origin (0 meters) for the purpose of calculating projected positions of cars from incoming lanes. This means our car is currently at x = -ego_distance_to_next_lane_start. After time ego_time_to_next_lane_start, we will be at x = 0.
+                for (CarId that_lane_car_id = 0; that_lane_car_id < lane_get_num_cars(incoming_lane); that_lane_car_id++) {
+                    Car* that_car = lane_get_car(incoming_lane, sim, that_lane_car_id);
+                    Meters that_car_current_coordinate = -(incoming_lane->length - car_get_lane_progress_meters(that_car)); // distance to the end of its lane, from its center
+                    Meters that_car_projected_coordinate = that_car_current_coordinate + car_get_speed(that_car) * ego_time_to_next_lane_start; // where it will be when we reach the start of the next lane
+                    if (that_car_projected_coordinate > 0) {
+                        // Projected leading vehicle
+                        // Will it be colliding at that time?
+                        if (that_car_projected_coordinate < (car_length + car_get_length(that_car)) / 2.0) {
+                            // yes, it is projected to collide with us
+                            least_ttc_car = that_car;
+                            least_ttc = 0;
+                            least_ttc_car_distance = that_car_projected_coordinate;  // center-to-center distance. It also marks whether it is ahead (positive) or behind (negative)
+                            least_ttc_car_headway = 0;
+                            LOG_TRACE("Car %d: Incoming vehicle into lane %d for from direction %d is %d (projected distance c2c = %.2f m), and we are projected to collide with it from behind.", car->id, incoming_lane->id, incoming_indicator, that_car->id, least_ttc_car_distance);
+                            break; // No need to check further, we found a colliding vehicle.
+                        } else {
+                            // it will be ahead of us.
+                            Meters distance_bumper_to_bumper = that_car_projected_coordinate - (car_length + car_get_length(that_car)) / 2.0;
+                            MetersPerSecond relative_speed = car_get_speed(that_car) - car_speed; // if positive, collision won't happen
+                            Seconds ttc = relative_speed < 0 ? distance_bumper_to_bumper / -relative_speed : INFINITY;
+                            Seconds headway = distance_bumper_to_bumper / car_speed;
+                            if (headway < 0) headway = INFINITY; // if our speed is negative, we set headway to infinity
+                            if (ttc < least_ttc) {
+                                least_ttc = ttc;
+                                least_ttc_car = that_car;
+                                least_ttc_car_distance = distance_bumper_to_bumper; // will be positive since it is ahead of us
+                                least_ttc_car_headway = headway;
+                            }
+                            if (distance_bumper_to_bumper < fabs(least_distance)) {
+                                least_distance = distance_bumper_to_bumper;
+                                least_distance_car = that_car;
+                                least_distance_headway = headway;
+                                least_distance_ttc = ttc;
+                            }
+                        }
+                    } else {
+                        // Projected trailing vehicle (that_car_projected_coordinate is negative)
+                        // Will it be colliding at that time?
+                        if (-that_car_projected_coordinate < (car_length + car_get_length(that_car)) / 2.0) {
+                            // yes, it is projected to collide with us
+                            least_ttc_car = that_car;
+                            least_ttc = 0;
+                            least_ttc_car_distance = that_car_projected_coordinate;  // center-to-center distance. It also marks whether it is ahead (positive) or behind (negative). In this case, it will be negative since it is will be behind us.
+                            least_ttc_car_headway = 0;
+                            LOG_TRACE("Car %d: Incoming vehicle into lane %d for from direction %d is %d (projected distance c2c = %.2f m), and is projected to collide with us from behind.", car->id, incoming_lane->id, incoming_indicator, that_car->id, least_ttc_car_distance);
+                            break; // No need to check further, we found a colliding vehicle.
+                        } else {
+                            // it will be behind us.
+                            Meters distance_bumper_to_bumper = -that_car_projected_coordinate - (car_length + car_get_length(that_car)) / 2.0;
+                            MetersPerSecond relative_speed = car_speed - car_get_speed(that_car); // if positive, collision won't happen
+                            Seconds ttc = relative_speed < 0 ? distance_bumper_to_bumper / -relative_speed : INFINITY;
+                            Seconds headway = distance_bumper_to_bumper / car_get_speed(that_car);
+                            if (headway < 0) headway = INFINITY; // if their speed is negative, we set headway to infinity
+                            if (ttc < least_ttc) {
+                                least_ttc = ttc;
+                                least_ttc_car = that_car;
+                                least_ttc_car_distance = -distance_bumper_to_bumper; // will be negative. intentional, so that the agent can know it is behind us.
+                                least_ttc_car_headway = headway;
+                            }
+                            if (distance_bumper_to_bumper < fabs(least_distance)) {
+                                least_distance = -distance_bumper_to_bumper; // will be negative. intentional, so that the agent can know it is behind us.
+                                least_distance_car = that_car;
+                                least_distance_headway = headway;
+                                least_distance_ttc = ttc;
+                            }
+                        }
+                    }
+                }
+                // if we didn't find any ttc car, we will settle for the least distance car
+                if (!least_ttc_car) {
+                    least_ttc_car = least_distance_car;
+                    least_ttc = least_distance_ttc;
+                    least_ttc_car_distance = least_distance;    // may be negative if it is projected to be behind us
+                    least_ttc_car_headway = least_distance_headway;
+                }
+                // if we still haven't found anything yet, just pick up the leading vehicle in the previous lane
+                // if (car_id == 0) {
+                //     printf("On intersection, and still no least ttc car found for car %d going into lane %d from direction %d\n", car->id, next_lane ? next_lane->id : -1, incoming_indicator);
+                // }
+                const Lane* prev_of_incoming = lane_get_connection_incoming_straight(incoming_lane, map);
+                if (!least_ttc_car && prev_of_incoming && lane_get_num_cars(prev_of_incoming) > 0) {
+                    Car* that_car = lane_get_car(prev_of_incoming, sim, 0);
+                    Meters that_car_current_coordinate = -(prev_of_incoming->length - car_get_lane_progress_meters(that_car) + incoming_lane->length); // negative of its distance to the start of the next lane, from its center
+                    Meters that_car_projected_coordinate = that_car_current_coordinate + car_get_speed(that_car) * ego_time_to_next_lane_start; // where it will be when we reach the start of the next lane
+                    if (that_car_projected_coordinate > 0) {
+                        // it will be ahead of us.
+                        // will it be colliding at that time?
+                        if (that_car_projected_coordinate < (car_length + car_get_length(that_car)) / 2.0) {
+                            // yes, it is projected to collide with us
+                            least_ttc_car = that_car;
+                            least_ttc = 0;
+                            least_ttc_car_distance = that_car_projected_coordinate;  // center-to-center distance. It also marks whether it is ahead (positive) or behind (negative)
+                            least_ttc_car_headway = 0;
+                            LOG_TRACE("Car %d: Incoming vehicle into lane %d for from direction %d is %d (projected distance c2c = %.2f m), and we are projected to collide with it from behind.", car->id, incoming_lane->id, incoming_indicator, that_car->id, least_ttc_car_distance);
+                        } else {
+                            Meters distance_bumper_to_bumper = that_car_projected_coordinate - (car_length + car_get_length(that_car)) / 2.0;
+                            MetersPerSecond relative_speed = car_get_speed(that_car) - car_speed; // if positive, collision won't happen
+                            Seconds ttc = relative_speed < 0 ? distance_bumper_to_bumper / -relative_speed : INFINITY;
+                            Seconds headway = distance_bumper_to_bumper / car_speed;
+                            if (headway < 0) headway = INFINITY; // if our speed is negative, we set headway to infinity
+                            least_ttc_car = that_car;
+                            least_ttc = ttc;
+                            least_ttc_car_distance = distance_bumper_to_bumper; // will be positive since it is ahead of us
+                            least_ttc_car_headway = headway;
+                        }
+                    } else {
+                        // it will be behind us.
+                        // will it be colliding at that time?
+                        if (-that_car_projected_coordinate < (car_length + car_get_length(that_car)) / 2.0) {
+                            // yes, it is projected to collide with us
+                            least_ttc_car = that_car;
+                            least_ttc = 0;
+                            least_ttc_car_distance = that_car_projected_coordinate;  // center-to-center distance. It also marks whether it is ahead (positive) or behind (negative). In this case, it will be negative since it is will be behind us.
+                            least_ttc_car_headway = 0;
+                            LOG_TRACE("Car %d: Incoming vehicle into lane %d for from direction %d is %d (projected distance c2c = %.2f m), and is projected to collide with us from behind.", car->id, incoming_lane->id, incoming_indicator, that_car->id, least_ttc_car_distance);
+                        } else {
+                            Meters distance_bumper_to_bumper = -that_car_projected_coordinate - (car_length + car_get_length(that_car)) / 2.0;
+                            MetersPerSecond relative_speed = car_speed - car_get_speed(that_car); // if positive, collision won't happen
+                            Seconds ttc = relative_speed < 0 ? distance_bumper_to_bumper / -relative_speed : INFINITY;
+                            Seconds headway = distance_bumper_to_bumper / car_get_speed(that_car);
+                            if (headway < 0) headway = INFINITY; // if their speed is negative, we set headway to infinity
+                            least_ttc_car = that_car;
+                            least_ttc = ttc;
+                            least_ttc_car_distance = -distance_bumper_to_bumper; // will be negative. intentional, so that the agent can know it is behind us.
+                            least_ttc_car_headway = headway;
+                        }
+                    }
+                }
+            }
+            situation->nearby_vehicles.turning_into_same_lane[incoming_indicator][turn_indicator].car = least_ttc_car;
+            situation->nearby_vehicles.turning_into_same_lane[incoming_indicator][turn_indicator].distance = least_ttc_car_distance;
+            situation->nearby_vehicles.turning_into_same_lane[incoming_indicator][turn_indicator].time_to_collision = least_ttc;
+            situation->nearby_vehicles.turning_into_same_lane[incoming_indicator][turn_indicator].time_headway = least_ttc_car_headway;
+        }
+    }
 
     int my_rank = car_get_lane_rank(car);
     if (my_rank > 0) {
