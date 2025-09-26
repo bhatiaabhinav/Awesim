@@ -277,49 +277,55 @@ snprintf(time_stats, sizeof(time_stats), "%s %02d:%02d:%02d  (%s %.1fx)",
     }
 
     if (sim->is_agent_enabled && sim->is_agent_driving_assistant_enabled) {
-        // Render driving assistant status on top left in pink
-        Uint8 r = 255, g = 105, b = 180; // hot pink
+        // Render driving assistant status on top left
         Car* car0 = sim_get_car(sim, 0);    // 0 is always the agent car
         DrivingAssistant* das = car0 ? sim_get_driving_assistant(sim, car0->id) : NULL;
 
-        // print target speed in format: Speed Current/Target: {current}/{target} mph
+
+        // print "ADAS Targets:" header
         if (das) {
-            char target_speed_stats[64];
-            snprintf(target_speed_stats, sizeof(target_speed_stats), "Speed Current/Target:   %.1f/%.1f mph", to_mph(car0->speed), to_mph(das->speed_target));
-            render_text(renderer, target_speed_stats, 10, 80 + 5 * hud_font_size, r, g, b, 255,
+            Uint8 r = HIGHLIGHTED_CAR_COLOR.r, g = HIGHLIGHTED_CAR_COLOR.g, b = HIGHLIGHTED_CAR_COLOR.b;
+            render_text(renderer, "ADAS Targets:", 10, 80 + 5 * hud_font_size, r, g, b, 255,
                         hud_font_size, ALIGN_TOP_LEFT, false, NULL);
         }
 
-        // print follow mode THW (and buffer in parenthesis)
-        // Also print follow THW distance with bars. Each bar = 1 second. Max 5 bars. Each thin bar = 0.5 second. First create a static map of THW to bars.
-        static const char* thw_bars[] = {
-            "❘",        // anything lt 0.5 s
-            "❙",        // lt 1 s
-            "❙❘",       // lt 1.5 s
-            "❙❙",       // lt 2 s
-            "❙❙❘",      // lt 2.5 s
-            "❙❙❙",      // lt 3 s
-            "❙❙❙❘",     // lt 3.5 s
-            "❙❙❙❙",     // lt 4 s
-            "❙❙❙❙❘",    // lt 4.5 s
-            "❙❙❙❙❙"     // lt 5 s
-        };
-        // convert THW to index in thw_bars array
-        int thw_index = (int)(das && das->follow_mode ? fmin(floor(das->follow_mode_thw * 2.0), 9.0) : 0);
-        if (das && das->follow_mode) {
-            char follow_mode_stats[40];
-            snprintf(follow_mode_stats, sizeof(follow_mode_stats), "Follow:  %.1f s (%.1f ft) %s", das->follow_mode_thw, to_feet(das->follow_mode_buffer), thw_bars[thw_index]);
-            render_text(renderer, follow_mode_stats, 10, 90 + 6 * hud_font_size, r, g, b, 255,
+        // print target speed in hot pink
+        if (das) {
+            char target_speed_stats[32];
+            Uint8 r = 255, g = 105, b = 180; // hot pink
+            snprintf(target_speed_stats, sizeof(target_speed_stats), " Speed:   %.1f mph", to_mph(das->speed_target));
+            render_text(renderer, target_speed_stats, 10, 90 + 6 * hud_font_size, r, g, b, 255,
                         hud_font_size, ALIGN_TOP_LEFT, false, NULL);
         }
 
-        // If AEB is engaged, print that in red text, else set alpha to low value.
+        // If FOLLOW is enabled, print that in green light color, else set alpha to low value.
         if (das) {
-            char aeb_str[4];
-            snprintf(aeb_str, sizeof(aeb_str), "AEB");
+            char follow_str[32];
+            snprintf(follow_str, sizeof(follow_str), " Follow:   %.1f s + %.1f ft", das->follow_mode_thw, to_feet(das->follow_mode_buffer));
+            Uint8 r = GREEN_LIGHT_COLOR.r, g = GREEN_LIGHT_COLOR.g, b = GREEN_LIGHT_COLOR.b;
+            Uint8 alpha = das->follow_mode ? 255 : 64;
+            render_text(renderer, follow_str, 10, 100 + 7 * hud_font_size, r, g, b, alpha,
+                        hud_font_size, ALIGN_TOP_LEFT, false, NULL);
+        }
+
+        // If STOP is enabled, print that in red light color, else set alpha to low value.
+        if (das) {
+            char stop_str[32];
+            snprintf(stop_str, sizeof(stop_str), " Stop:      %.1f ft", to_feet(das->stopping_distance_target));
+            Uint8 r = RED_LIGHT_COLOR.r, g = RED_LIGHT_COLOR.g, b = RED_LIGHT_COLOR.b;
+            Uint8 alpha = das->stop_mode ? 255 : 64;
+            render_text(renderer, stop_str, 10, 110 + 8 * hud_font_size, r, g, b, alpha,
+                        hud_font_size, ALIGN_TOP_LEFT, false, NULL);
+        }
+
+        // If AEB is engaged, print that in bright red text, else set alpha to low value.
+        if (das) {
+            char aeb_str[8];
+            snprintf(aeb_str, sizeof(aeb_str), " AEB");
             Uint8 alpha = das->aeb_in_progress ? 255 : 64;
-            render_text(renderer, aeb_str, 10, 100 + 7 * hud_font_size, 255, 0, 0, alpha,
+            render_text(renderer, aeb_str, 10, 120 + 9 * hud_font_size, 255, 0, 0, alpha,
                         hud_font_size, ALIGN_TOP_LEFT, false, NULL);
         }
+
     }
 }

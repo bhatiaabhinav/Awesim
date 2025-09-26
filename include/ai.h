@@ -358,15 +358,17 @@ typedef struct DrivingAssistant {
     // Acceleration based on target speed:
     MetersPerSecond speed_target;       // Determines target speed
 
-    // Standard PD mode to adjust both speed and position.
-    bool PD_mode;                       // Whether to adjust speed AND position.
-    Meters position_error;              // Determines target position in PD_mode. Error = current position - target position. i.e., this is error in target position's frame of reference. During PD_control, the position_error is continuously updated as the car moves. The speed is never accelerated to go beyond the speed_target magnitude. Once target position is reached, PD_mode is turned off automatically.
-
     // Requested intents to determine steering:
     CarIndicator merge_intent;           // For switching lanes within a road, or merge/exit a highway. Set to None automatically once the assistant issues merge command.
     CarIndicator turn_intent;            // For which lane to take when approaching intersections. Set to None automatically once the assistant issues turn command.
 
-    // Smart modes (overrides PD mode parameters):
+    // Smart modes:
+
+    // Stop mode to come to a stop at a target distance from current position. If it is not possible to stop in time, the car will brake as hard as possible and try to stop as soon as possible even though it will overshoot the target stopping position. Stop mode disengages automatically once the car is fully stopped (speed < 0.01 mph) or manually disengaged. Stop mode automatically sets speed_target = 0.
+    bool stop_mode;                       // Whether to trigger stop mode. Can be triggered only if the vehicle is moving ahead (speed > 0) and stopping_distance_target >= 0.
+    Meters stopping_distance_target;      // Non-negative. Target stopping distance from current position. It is constantly updated as the car moves forward. On overshooting, it gets clamped to 0 (which means continue to brake as hard as possible to stop ASAP).
+
+    // Follow mode for adaptive cruise control. Cannot be engaged simulataneously with stop mode.
     bool follow_mode;                       // Match speed of next vehicle and maintains follow distance = car_speed * follow_mode_thw + follow_mode_buffer, while not exceeding speed_target. If no vehicle ahead, targets speed_target. Follow mode cannot be engaged with a negative speed_target.
     Seconds follow_mode_thw;                // Time headway distance to the next vehicle.
     Meters follow_mode_buffer;              // Buffer distance to maintain from the next vehicle, in addition to the follow_mode_thw distance. You can also think of this as the distance to maintain in stopped traffic.
@@ -398,8 +400,8 @@ bool driving_assistant_reset_settings(DrivingAssistant* das, Car* car);
 
 Seconds driving_assistant_get_last_configured_at(const DrivingAssistant* das);
 MetersPerSecond driving_assistant_get_speed_target(const DrivingAssistant* das);
-bool driving_assistant_get_PD_mode(const DrivingAssistant* das);
-Meters driving_assistant_get_position_error(const DrivingAssistant* das);
+bool driving_assistant_get_stop_mode(const DrivingAssistant* das);
+Meters driving_assistant_get_stopping_distance_target(const DrivingAssistant* das);
 CarIndicator driving_assistant_get_merge_intent(const DrivingAssistant* das);
 CarIndicator driving_assistant_get_turn_intent(const DrivingAssistant* das);
 bool driving_assistant_get_follow_mode(const DrivingAssistant* das);
@@ -416,8 +418,8 @@ bool driving_assistant_get_use_linear_speed_control(const DrivingAssistant* das)
 // Setters (will update the timestamp)
 
 void driving_assistant_configure_speed_target(DrivingAssistant* das, const Car* car, const Simulation* sim, MetersPerSecond speed_target);
-void driving_assistant_configure_PD_mode(DrivingAssistant* das, const Car* car, const Simulation* sim, bool PD_mode);
-void driving_assistant_configure_position_error(DrivingAssistant* das, const Car* car, const Simulation* sim, Meters position_error);
+void driving_assistant_configure_stop_mode(DrivingAssistant* das, const Car* car, const Simulation* sim, bool stop_mode);
+void driving_assistant_configure_stopping_distance_target(DrivingAssistant* das, const Car* car, const Simulation* sim, Meters stopping_distance_target);
 void driving_assistant_configure_merge_intent(DrivingAssistant* das, const Car* car, const Simulation* sim, CarIndicator merge_intent);
 void driving_assistant_configure_turn_intent(DrivingAssistant* das, const Car* car, const Simulation* sim, CarIndicator turn_intent);
 void driving_assistant_configure_follow_mode(DrivingAssistant* das, const Car* car, const Simulation* sim, bool follow_mode);

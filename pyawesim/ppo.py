@@ -59,6 +59,7 @@ class Actor(nn.Module):
             self.obs_count.data.copy_(new_count)
         if self.norm_obs:
             x = (x - self.obs_mean) / torch.sqrt(self.obs_var + 1e-8)
+            x = torch.clamp(x, -10.0, 10.0)  # avoid extreme values
         mean = self.mean_model(x)
         logstd = self.logstd
         if self.deterministic:
@@ -192,6 +193,7 @@ class Critic(nn.Module):
             self.obs_count.data.copy_(new_count)
         if self.norm_obs:
             x = (x - self.obs_mean) / torch.sqrt(self.obs_var + 1e-8)
+            x = torch.clamp(x, -10.0, 10.0)  # avoid extreme values
         return self.model(x)
 
     def forward(self, x):

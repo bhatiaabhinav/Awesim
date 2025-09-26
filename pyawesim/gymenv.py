@@ -141,10 +141,18 @@ class AwesimEnv(gym.Env):
 
         A.seed_rng(env_index + 1)  # Seed random number generator for reproducibility
 
-        # Define action and observation spaces
+        # Define action space. # 5 continuous actions: follow mode vs stop at lane end mode, speed limit, follow mode THW, margin feet (for follow distance buffer (in addition to THW) in follow mode, or stopping margin from end of lane when in stop mode.)
+        follow_mode_probability_low, follow_mode_probability_high = 0.0, 1.0        # normalized to [0, 1] where 0 means always in stop mode at lane end, and 1 means always in follow mode, anything in between probabilistically sets follow mode with that probability
+        speed_target_low, speed_target_high = 0.0, 1.0                              # normalized to [0, 1] where 0 means 0 mph and 1 means agent's top speed
+        follow_mode_thw_low, follow_mode_thw_high = self.MIN_FOLLOW_THW, self.MAX_FOLLOW_THW  # in seconds
+        margin_min, margin_max = A.from_feet(1), A.from_feet(10)                    # in feet, margin for follow distance buffer (in addition to THW) in follow mode, or stopping margin from end of lane when in stop mode.
+        turn_signal_min, turn_signal_max = -1.0, 1.0                                # -1 means left signal, +1 means right signal, 0 means no signal, anything in between means probabilistically choose left / right with probability proportional to magnitude of the value
         self.action_space = spaces.Box(
-            low=-1.0, high=1.0, shape=(3,), dtype=np.float32
-        )  # 3D continuous actions: speed, turn/merge, follow distance
+            low = np.array([follow_mode_probability_low, speed_target_low, follow_mode_thw_low, margin_min, turn_signal_min], dtype=np.float32),
+            high = np.array([follow_mode_probability_high, speed_target_high, follow_mode_thw_high, margin_max, turn_signal_max], dtype=np.float32),
+        )
+
+        # Define observation space
         n_state_factors = len(self._get_observation())
         self.observation_space = spaces.Box(
             low=-10, high=10, shape=(n_state_factors,), dtype=np.float32
@@ -258,13 +266,16 @@ class AwesimEnv(gym.Env):
             np.ndarray: Concatenated array of ADAS parameters and one-hot encoded intents.
         """
         das = A.sim_get_driving_assistant(self.sim, 0)
+        sit = A.sim_get_situational_awareness(self.sim, 0)
+        stopping_target_from_end_of_lane = sit.distance_to_end_of_lane_from_leading_edge - das.stopping_distance_target if das.stop_mode else 0
+        stopping_target_from_end_of_lane = max(stopping_target_from_end_of_lane, 0.0)  # just in case, as it can be negative if we are already past the end of lane and the margin is measured from leading edge
         return np.concatenate(
             (
                 np.array(
                     [
                         das.speed_target / self.OBSERVATION_NORMALIZATION["speed"],
-                        das.PD_mode,
-                        das.position_error / self.OBSERVATION_NORMALIZATION["distance"],
+                        das.stop_mode,
+                        stopping_target_from_end_of_lane / self.OBSERVATION_NORMALIZATION["distance"],
                         das.follow_mode,
                         das.follow_mode_thw / self.OBSERVATION_NORMALIZATION["speed"],
                         das.follow_mode_buffer,
@@ -512,9 +523,9 @@ class AwesimEnv(gym.Env):
         super().reset(seed=seed, options=options)
         A.sim_disconnect_from_render_server(self.sim)
 
-        # Reset until agent is not in goal lane (if goal is specified)
+        # Reset until agent is not in goal lane (if goal is specified) or a dead-end lane or an the interstate highway
         first_reset_done = False
-        while not first_reset_done or (self.goal_lane is not None and A.car_get_lane_id(A.sim_get_car(self.sim, 0)) == self.goal_lane):
+        while not first_reset_done or (self.goal_lane is not None and A.car_get_lane_id(A.sim_get_car(self.sim, 0)) == self.goal_lane) or A.lane_get_num_connections(A.map_get_lane(A.sim_get_map(self.sim), A.car_get_lane_id(A.sim_get_car(self.sim, 0)))) == 0 or A.lane_get_road(A.map_get_lane(A.sim_get_map(self.sim), A.car_get_lane_id(A.sim_get_car(self.sim, 0))), A.sim_get_map(self.sim)).num_lanes >= 3:
             A.awesim_setup(
                 self.sim, self.city_width, self.num_cars, 0.02, A.clock_reading(0, 8, 0, 0), A.WEATHER_SUNNY
             )
@@ -534,8 +545,9 @@ class AwesimEnv(gym.Env):
 
         # Configure ADAS features
         A.driving_assistant_configure_aeb_assistance(self.das, self.agent, self.sim, True)
-        A.driving_assistant_configure_follow_mode(self.das, self.agent, self.sim, True)
         A.driving_assistant_configure_merge_assistance(self.das, self.agent, self.sim, True)
+        A.driving_assistant_configure_follow_mode(self.das, self.agent, self.sim, False)
+        A.driving_assistant_configure_stop_mode(self.das, self.agent, self.sim, False)
 
         # Configure fuel
         A.car_set_fuel_level(self.agent, A.from_gallons(self.init_fuel_gallons))
@@ -568,21 +580,86 @@ class AwesimEnv(gym.Env):
         A.situational_awareness_build(self.sim, self.agent.id)
         sit = A.sim_get_situational_awareness(self.sim, self.agent.id)
 
-        # Speed adjustment
-        speed_target = np.clip(
-            (float(action[0]) + 1) / 2 * self.agent.capabilities.top_speed,
-            A.from_mph(0),
-            self.agent.capabilities.top_speed,
-        )
-        speed_target = 0.9 * speed_target + 0.1 * self.das.speed_target  # Smooth changes
-        if self.das.follow_mode and speed_target < 0:
-            speed_target = 0  # Follow mode requires non-negative speed
-        A.driving_assistant_configure_speed_target(self.das, self.agent, self.sim, A.mps(speed_target))
+        action_follow_mode_probability = action[0]
+        action_speed_target = action[1]
+        action_follow_mode_thw = action[2]
+        action_margin = action[3]
+        action_turn_signal_probability = action[4]
+
+
+        # clear ADAS mode first
+        A.driving_assistant_configure_follow_mode(self.das, self.agent, self.sim, False)
+        A.driving_assistant_configure_stop_mode(self.das, self.agent, self.sim, False)
+
+        # decide mode.
+        follow_mode = self.np_random.random() < action_follow_mode_probability
+        stop_mode = not follow_mode
+        if (stop_mode):
+            # if there is no intersection or dead end upcoming, then stay in follow mode
+            if not (sit.is_an_intersection_upcoming or sit.is_approaching_dead_end or sit.is_on_entry_ramp):
+                follow_mode = True
+                stop_mode = False
+            # if there is a lead vehicle, then stay in follow mode
+            if sit.is_vehicle_ahead:
+                follow_mode = True
+                stop_mode = False
+            # cannot do stop mode if we are reversing
+            if A.car_get_speed(self.agent) < 0:
+                follow_mode = True
+                stop_mode = False
+
+        # if (sit.is_an_intersection_upcoming or sit.is_approaching_dead_end or sit.is_on_entry_ramp) and A.car_get_speed(self.agent) > 0 and not sit.is_vehicle_ahead:
+        #     stop_mode = True
+        #     follow_mode = not stop_mode
+
+        # set the mode settings, then enable the mode in ADAS
+
+        if follow_mode:
+            # Speed adjustment
+            speed_target = float(action_speed_target) * self.agent.capabilities.top_speed
+            A.driving_assistant_configure_speed_target(self.das, self.agent, self.sim, A.mps(speed_target))
+
+            # Follow mode time-headway adjustment
+            new_follow_thw = float(action_follow_mode_thw)
+            A.driving_assistant_configure_follow_mode_thw(self.das, self.agent, self.sim, A.seconds(new_follow_thw))
+
+            # Follow mode margin:
+            new_margin = float(action_margin + 1e-8)
+            A.driving_assistant_configure_follow_mode_buffer(self.das, self.agent, self.sim, new_margin)
+            # Set stopping distance target to 0 since it is unused in follow mode
+            A.driving_assistant_configure_stopping_distance_target(self.das, self.agent, self.sim, 0.0)
+
+            # set follow mode
+            A.driving_assistant_configure_follow_mode(self.das, self.agent, self.sim, True)
+
+        else:   # stop mode
+            # speed adjustment. Has to be 0.
+            speed_target = 0.0
+            A.driving_assistant_configure_speed_target(self.das, self.agent, self.sim, A.mps(speed_target))
+
+            # follow mode time-headway adjustment. Has no effect in stop mode, but still, since it is used for deciding merge safety, it should be set.
+            new_follow_thw = float(action_follow_mode_thw)
+            A.driving_assistant_configure_follow_mode_thw(self.das, self.agent, self.sim, A.seconds(new_follow_thw))
+
+            # decide stopping distance based on margin from end of lane.
+            new_margin = float(action_margin)
+            stopping_distance = sit.distance_to_end_of_lane_from_leading_edge - new_margin
+            # if we are already past the stopping point, then set stopping distance to 0 so that we stop immediately
+            if stopping_distance < 0:
+                stopping_distance = 0.0
+                new_margin = sit.distance_to_end_of_lane_from_leading_edge - stopping_distance
+                new_margin = max(new_margin, 0.0)  # just in case. Happens when we are already past the end of lane and the margin is negative because we measured from leading edge
+            A.driving_assistant_configure_stopping_distance_target(self.das, self.agent, self.sim, stopping_distance)
+            # set follow mode buffer to a default value, since it is still used for deciding merge safety
+            A.driving_assistant_configure_follow_mode_buffer(self.das, self.agent, self.sim, A.from_feet(3))
+
+            # set stop mode
+            A.driving_assistant_configure_stop_mode(self.das, self.agent, self.sim, True)
 
         # Merge/turn intent
-        should_indicate = self.np_random.random() < abs(action[1])
+        should_indicate = self.np_random.random() < abs(action_turn_signal_probability)
         indicator_direction = (
-            A.INDICATOR_LEFT if action[1] < 0 else A.INDICATOR_RIGHT if should_indicate else A.INDICATOR_NONE
+            (A.INDICATOR_LEFT if action_turn_signal_probability < 0 else A.INDICATOR_RIGHT) if should_indicate else A.INDICATOR_NONE
         )
         new_merge_intent = new_turn_intent = A.INDICATOR_NONE
         if indicator_direction != A.INDICATOR_NONE:
@@ -613,21 +690,14 @@ class AwesimEnv(gym.Env):
         A.driving_assistant_configure_merge_intent(self.das, self.agent, self.sim, new_merge_intent)
         A.driving_assistant_configure_turn_intent(self.das, self.agent, self.sim, new_turn_intent)
 
-        # Follow mode time-headway adjustment
-        new_follow_thw = np.clip(
-            (float(action[2]) + 1) / 2 * self.MAX_FOLLOW_THW,
-            self.MIN_FOLLOW_THW,
-            self.MAX_FOLLOW_THW,
-        )
-        new_follow_thw = 0.9 * new_follow_thw + 0.1 * self.das.follow_mode_thw  # Smooth changes
-        A.driving_assistant_configure_follow_mode_thw(self.das, self.agent, self.sim, A.seconds(new_follow_thw))
-
         if self.verbose:
             print(
-                f"Action: Speed cap: {A.to_mph(speed_target):.1f} mph, "
+                f"Mode: {'Follow' if follow_mode else 'Stop'}, "
+                f"Action: Speed cap: {A.to_mph(speed_target):.1f} mph (cur = {A.to_mph(A.car_get_speed(self.agent)):.1f} mph), "
+                f"Follow THW: {new_follow_thw:.2f} sec, "
+                f"Margin buffer: {A.to_feet(new_margin):.1f} ft (cur = {A.to_feet(sit.distance_to_end_of_lane_from_leading_edge if stop_mode else np.nan):.1f} ft), "
                 f"{'Merge' if new_merge_intent != A.INDICATOR_NONE else 'Turn' if new_turn_intent != A.INDICATOR_NONE else 'No'} "
                 f"{'Left' if new_merge_intent == A.INDICATOR_LEFT or new_turn_intent == A.INDICATOR_LEFT else 'Right' if new_merge_intent == A.INDICATOR_RIGHT or new_turn_intent == A.INDICATOR_RIGHT else ''}, "
-                f"Follow THW: {new_follow_thw:.1f} sec"
             )
 
         # Simulate and compute reward

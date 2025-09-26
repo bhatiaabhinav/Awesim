@@ -143,7 +143,7 @@ void awesim_map_setup(Map* map, Meters city_width) {
     road_set_name(I2W, "I-2 W");
     road_set_name(I1N, "I-1 N");
     road_set_name(I1S, "I-1 S");
-    LOG_DEBUG("Interstate roads created: I-2 E, I-2 W, I-1 N, I-1 S");
+    LOG_TRACE("Interstate roads created: I-2 E, I-2 W, I-1 N, I-1 S");
 
     // Interstate connectors
     Road* interstate_connectors[4];
@@ -157,7 +157,7 @@ void awesim_map_setup(Map* map, Meters city_width) {
     road_set_name(interstate_connectors[1], "I-1 S -> I-2 W");
     road_set_name(interstate_connectors[2], "I-2 W -> I-1 N");
     road_set_name(interstate_connectors[3], "I-1 N -> I-2 E");
-    LOG_DEBUG("Interstate connectors named: I-2 E -> I-1 S, I-1 S -> I-2 W, I-2 W -> I-1 N, I-1 N -> I-2 E");
+    LOG_TRACE("Interstate connectors named: I-2 E -> I-1 S, I-1 S -> I-2 W, I-2 W -> I-1 N, I-1 N -> I-2 E");
 
     // State highways
     const Meters state_hgway_width = state_num_lanes * lane_width;
@@ -183,12 +183,12 @@ void awesim_map_setup(Map* map, Meters city_width) {
     road_set_name(_S1S, "S-1 S");
     road_set_name(_S2E, "S-2 E");
     road_set_name(_S2W, "S-2 W");
-    LOG_DEBUG("State roads created: S-1 N, S-1 S, S-2 E, S-2 W");
+    LOG_TRACE("State roads created: S-1 N, S-1 S, S-2 E, S-2 W");
 
     // Central intersection
     Intersection* intersection = intersection_create_from_crossing_roads_and_update_connections(map, _S2E, _S2W, _S1N, _S1S, false, state_turn_radius, false, false, state_speed_limit, 1.0);
     intersection_set_name(intersection, "S-2 & S-1 Intersection");
-    LOG_DEBUG("Created central intersection S-2 & S-1 at center: (%.2f, %.2f), with %d lanes", intersection->center.x, intersection->center.y, intersection->num_lanes);
+    LOG_TRACE("Created central intersection S-2 & S-1 at center: (%.2f, %.2f), with %d lanes", intersection->center.x, intersection->center.y, intersection->num_lanes);
 
     Road* _S2E_left = _S2E;
     Road* _S2E_right = intersection_get_road_eastbound_to(intersection, map);
@@ -214,11 +214,11 @@ void awesim_map_setup(Map* map, Meters city_width) {
 
     road_set_name(_Av1N, "1st Av N");
     road_set_name(_Av1S, "1st Av S");
-    LOG_DEBUG("1st Avenue roads created: 1st Av N, 1st Av S");
+    LOG_TRACE("1st Avenue roads created: 1st Av N, 1st Av S");
 
     Intersection* Av1S2_intersection = intersection_create_from_crossing_roads_and_update_connections(map, _S2E_left, _S2W_left, _Av1N, _Av1S, false, local_turn_radius, false, false, local_speed_limit, 1.0);
     intersection_set_name(Av1S2_intersection, "S-2 & 1st Av Intersection");
-    LOG_DEBUG("Created intersection S-2 & 1st Av at center: (%.2f, %.2f)", Av1S2_intersection->center.x, Av1S2_intersection->center.y);
+    LOG_TRACE("Created intersection S-2 & 1st Av at center: (%.2f, %.2f)", Av1S2_intersection->center.x, Av1S2_intersection->center.y);
 
     Road* _S2E_left_left = _S2E_left;
     Road* _S2E_left_new = intersection_get_road_eastbound_to(Av1S2_intersection, map);
@@ -242,11 +242,11 @@ void awesim_map_setup(Map* map, Meters city_width) {
 
     road_set_name(_Av2N, "2nd Av N");
     road_set_name(_Av2S, "2nd Av S");
-    LOG_DEBUG("2nd Avenue roads created: 2nd Av N, 2nd Av S");
+    LOG_TRACE("2nd Avenue roads created: 2nd Av N, 2nd Av S");
 
     Intersection* Av2S2_intersection = intersection_create_from_crossing_roads_and_update_connections(map, _S2E_right, _S2W_right, _Av2N, _Av2S, false, local_turn_radius, false, false, local_speed_limit, 1.0);
     intersection_set_name(Av2S2_intersection, "S-2 & 2nd Av Intersection");
-    LOG_DEBUG("Created intersection S-2 & 2nd Av at center: (%.2f, %.2f)", Av2S2_intersection->center.x, Av2S2_intersection->center.y);
+    LOG_TRACE("Created intersection S-2 & 2nd Av at center: (%.2f, %.2f)", Av2S2_intersection->center.x, Av2S2_intersection->center.y);
 
     Road* _S2E_right_right = intersection_get_road_eastbound_to(Av2S2_intersection, map);
     Road* _S2W_right_right = _S2W_right;
@@ -271,11 +271,11 @@ void awesim_map_setup(Map* map, Meters city_width) {
 
     road_set_name(_St1E, "1st St E");
     road_set_name(_St1W, "1st St W");
-    LOG_DEBUG("1st Street roads created: 1st St E, 1st St W");
+    LOG_TRACE("1st Street roads created: 1st St E, 1st St W");
 
     Intersection* St1S1_intersection = intersection_create_from_crossing_roads_and_update_connections(map, _St1E, _St1W, _S1N_above, _S1S_above, false, local_turn_radius, false, false, local_speed_limit, 1.0);
     intersection_set_name(St1S1_intersection, "1st St & S-1 Intersection");
-    LOG_DEBUG("Created intersection 1st St & S-1 at center: (%.2f, %.2f)", St1S1_intersection->center.x, St1S1_intersection->center.y);
+    LOG_TRACE("Created intersection 1st St & S-1 at center: (%.2f, %.2f)", St1S1_intersection->center.x, St1S1_intersection->center.y);
 
     Road* _St1E_left = _St1E;
     Road* _St1E_right = intersection_get_road_eastbound_to(St1S1_intersection, map);
@@ -299,11 +299,11 @@ void awesim_map_setup(Map* map, Meters city_width) {
 
     road_set_name(_St2E, "2nd St E");
     road_set_name(_St2W, "2nd St W");
-    LOG_DEBUG("2nd Street roads created: 2nd St E, 2nd St W");
+    LOG_TRACE("2nd Street roads created: 2nd St E, 2nd St W");
 
     Intersection* St2S1_intersection = intersection_create_from_crossing_roads_and_update_connections(map, _St2E, _St2W, _S1N_below, _S1S_below, false, local_turn_radius, false, false, local_speed_limit, 1.0);
     intersection_set_name(St2S1_intersection, "2nd St & S-1 Intersection");
-    LOG_DEBUG("Created intersection 2nd St & S-1 at center: (%.2f, %.2f)", St2S1_intersection->center.x, St2S1_intersection->center.y);
+    LOG_TRACE("Created intersection 2nd St & S-1 at center: (%.2f, %.2f)", St2S1_intersection->center.x, St2S1_intersection->center.y);
 
     Road* _St2E_left = _St2E;
     Road* _St2E_right = intersection_get_road_eastbound_to(St2S1_intersection, map);
@@ -321,7 +321,7 @@ void awesim_map_setup(Map* map, Meters city_width) {
     // 1st St and 1st Av intersection
     Intersection* St1Av1_intersection = intersection_create_from_crossing_roads_and_update_connections(map, _St1E_left, _St1W_left, _Av1N_above, _Av1S_above, local_four_way_stop, local_turn_radius, false, false, local_speed_limit, 1.0);
     intersection_set_name(St1Av1_intersection, "1st St & 1st Av Intersection");
-    LOG_DEBUG("Created intersection 1st St & 1st Av at center: (%.2f, %.2f)", St1Av1_intersection->center.x, St1Av1_intersection->center.y);
+    LOG_TRACE("Created intersection 1st St & 1st Av at center: (%.2f, %.2f)", St1Av1_intersection->center.x, St1Av1_intersection->center.y);
 
     Road* _St1E_left_left = _St1E_left;
     Road* _St1E_left_new = intersection_get_road_eastbound_to(St1Av1_intersection, map);
@@ -338,7 +338,7 @@ void awesim_map_setup(Map* map, Meters city_width) {
     // 1st St and 2nd Av intersection
     Intersection* St1Av2_intersection = intersection_create_from_crossing_roads_and_update_connections(map, _St1E_right, _St1W_right, _Av2N_above, _Av2S_above, local_four_way_stop, local_turn_radius, false, false, local_speed_limit, 1.0);
     intersection_set_name(St1Av2_intersection, "1st St & 2nd Av Intersection");
-    LOG_DEBUG("Created intersection 1st St & 2nd Av at center: (%.2f, %.2f)", St1Av2_intersection->center.x, St1Av2_intersection->center.y);
+    LOG_TRACE("Created intersection 1st St & 2nd Av at center: (%.2f, %.2f)", St1Av2_intersection->center.x, St1Av2_intersection->center.y);
 
     Road* _St1E_right_right = intersection_get_road_eastbound_to(St1Av2_intersection, map);
     Road* _St1W_right_right = _St1W_right;
@@ -355,7 +355,7 @@ void awesim_map_setup(Map* map, Meters city_width) {
     // 2nd St and 1st Av intersection
     Intersection* St2Av1_intersection = intersection_create_from_crossing_roads_and_update_connections(map, _St2E_left, _St2W_left, _Av1N_below, _Av1S_below, local_four_way_stop, local_turn_radius, false, false, local_speed_limit, 1.0);
     intersection_set_name(St2Av1_intersection, "2nd St & 1st Av Intersection");
-    LOG_DEBUG("Created intersection 2nd St & 1st Av at center: (%.2f, %.2f)", St2Av1_intersection->center.x, St2Av1_intersection->center.y);
+    LOG_TRACE("Created intersection 2nd St & 1st Av at center: (%.2f, %.2f)", St2Av1_intersection->center.x, St2Av1_intersection->center.y);
 
     Road* _St2E_left_left = _St2E_left;
     Road* _St2E_left_new = intersection_get_road_eastbound_to(St2Av1_intersection, map);
@@ -372,7 +372,7 @@ void awesim_map_setup(Map* map, Meters city_width) {
     // 2nd St and 2nd Av intersection
     Intersection* St2Av2_intersection = intersection_create_from_crossing_roads_and_update_connections(map, _St2E_right, _St2W_right, _Av2N_below, _Av2S_below, local_four_way_stop, local_turn_radius, false, false, local_speed_limit, 1.0);
     intersection_set_name(St2Av2_intersection, "2nd St & 2nd Av Intersection");
-    LOG_DEBUG("Created intersection 2nd St & 2nd Av at center: (%.2f, %.2f)", St2Av2_intersection->center.x, St2Av2_intersection->center.y);
+    LOG_TRACE("Created intersection 2nd St & 2nd Av at center: (%.2f, %.2f)", St2Av2_intersection->center.x, St2Av2_intersection->center.y);
 
     Road* _St2E_right_right = intersection_get_road_eastbound_to(St2Av2_intersection, map);
     Road* _St2W_right_right = _St2W_right;
@@ -421,7 +421,7 @@ void awesim_map_setup(Map* map, Meters city_width) {
     road_set_name(TRE_RTS_connector, "Euler St E -> Gauss Av S");
     road_set_name(RTS_St1WRR_connector, "Gauss Av S -> 1st St W");
     road_set_name(St1ERR_RTN_connector, "1st St E -> Gauss Av N");
-    LOG_DEBUG("Top right extension roads created: Euler St E, Euler St W, Gauss Av N, Gauss Av S");
+    LOG_TRACE("Top right extension roads created: Euler St E, Euler St W, Gauss Av N, Gauss Av S");
 
     // Bottom Right Extension (BRE, BRW, RBN, RBS)
     const Coordinates BRE_center = {_St2E_right_right->center.x, _Av2N_below_below->start_point.y - local_turn_radius - 1.5 * lane_width};
@@ -458,7 +458,7 @@ void awesim_map_setup(Map* map, Meters city_width) {
     road_set_name(BRE_RBN_connector, "Newton St E -> Leibniz Av N");
     road_set_name(RBS_BRW_connector, "Leibniz Av S -> Newton St W");
     road_set_name(St2ERR_RBS_connector, "2nd St E -> Leibniz Av S");
-    LOG_DEBUG("Bottom right extension roads created: Newton St E, Newton St W, Leibniz Av N, Leibniz Av S");
+    LOG_TRACE("Bottom right extension roads created: Newton St E, Newton St W, Leibniz Av N, Leibniz Av S");
 
     // Bottom Left Extension (BLE, BLW, LBN, LBS)
     const Coordinates BLE_center = {_St2E_left_left->center.x, _Av1N_below_below->start_point.y - local_turn_radius - 1.5 * lane_width};
@@ -495,7 +495,7 @@ void awesim_map_setup(Map* map, Meters city_width) {
     road_set_name(BLE_Av1N_connector, "Turing St E -> 1st Av N");
     road_set_name(LBS_BLE_connector, "Von Neumann Av S -> Turing St E");
     road_set_name(St2WLL_LBS_connector, "2nd St W -> Von Neumann Av S");
-    LOG_DEBUG("Bottom left extension roads created: Turing St E, Turing St W, Von Neumann Av N, Von Neumann Av S");
+    LOG_TRACE("Bottom left extension roads created: Turing St E, Turing St W, Von Neumann Av N, Von Neumann Av S");
 
     // Top Left Extension (TLE, TLW, LTN, LTS)
     const Coordinates TLE_center = {_St1E_left_left->center.x, _Av1N_above_above->end_point.y + local_turn_radius + lane_width / 2};
@@ -532,7 +532,7 @@ void awesim_map_setup(Map* map, Meters city_width) {
     road_set_name(Av1N_above_above_TLW_connector, "1st Av N -> Riemann St W");
     road_set_name(LTS_St1E_connector, "Hilbert Av S -> 1st St E");
     road_set_name(TLE_Av1S_connector, "Riemann St E -> 1st Av S");
-    LOG_DEBUG("Top left extension roads created: Riemann St E, Riemann St W, Hilbert Av N, Hilbert Av S");
+    LOG_TRACE("Top left extension roads created: Riemann St E, Riemann St W, Hilbert Av N, Hilbert Av S");
 
     // Exit and entry ramps
     Road* exit_shoulders[4];
@@ -600,5 +600,5 @@ void awesim_map_setup(Map* map, Meters city_width) {
     road_set_name(entry_ramps[2], "S-1 S -> I-2 W Entry Ramp");
     road_set_name(entry_shoulders[3], "I-1 N Entry Ramp");
     road_set_name(entry_ramps[3], "S-2 W -> I-1 N Entry Ramp");
-    LOG_DEBUG("Exit and entry ramps created for all highways");
+    LOG_TRACE("Exit and entry ramps created for all highways");
 }

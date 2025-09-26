@@ -17,8 +17,8 @@ bool driving_assistant_reset_settings(DrivingAssistant* das, Car* car) {
     // Resetting all settings to default values
     das->last_configured_at = 0;
     das->speed_target = 0.0;
-    das->PD_mode = false;
-    das->position_error = 0.0;
+    das->stop_mode = false; // Default to false
+    das->stopping_distance_target = 0; // Default to 0 meters (which is not feasible) so this triggers full braking if stop_mode is engaged.
     das->merge_intent = INDICATOR_NONE;
     das->turn_intent = INDICATOR_NONE;
     das->follow_mode = false;
@@ -180,24 +180,27 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
     SituationalAwareness* sa = sim_get_situational_awareness(sim, car_get_id(car));
 
 
-    // ---------- Verify follow control and PD control requisites ----------------------
+    // ---------- Verify follow control and stop control requisites ----------------------
+
+    if (das->follow_mode && das->stop_mode) {
+        LOG_ERROR("Cannot enable both follow mode and stop mode simultaneously for car %d. Disabling follow mode.", car->id);
+        das->follow_mode = false; // Disable follow mode if both are enabled
+    }
 
     if (das->follow_mode) {
         if (das->speed_target < 0) {
-            LOG_DEBUG("Disabling follow mode for car %d due to negative speed target.", car->id);
+            LOG_WARN("Disabling follow mode for car %d due to negative speed target.", car->id);
             das->follow_mode = false;
         }
     }
     
-    if (das->PD_mode) {
-        if (das->follow_mode) {
-            das->PD_mode = false; // Disable PD mode if follow mode is active. The code should never reach here since it was already ensured in setters that the modes are mutually exclusive.
+    if (das->stop_mode) {
+        if (car_get_speed(car) < -1e-9) {
+            LOG_WARN("Disabling stop mode for car %d since the car is reversing. Speed = %.2f mph", car->id, to_mph(car_get_speed(car)));
+            das->stop_mode = false;
+            das->stopping_distance_target = 0; // Reset stopping distance target
         }
-        if (fabs(das->position_error) < from_centimeters(1)) {
-            LOG_DEBUG("Position error is negligible for car %d. Switching to standard speed control.", car->id);
-            das->PD_mode = false; // Disable PD mode if position error is negligible
-            das->position_error = 0.0; // Reset position error
-        }
+        das->speed_target = 0; // Stop mode always implies speed target = 0
     }
 
 
@@ -236,18 +239,19 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
         }
     }
 
-    // ----------- PD control ------------------------
-    if (das->PD_mode && !das->aeb_in_progress) {
-        // Use PD control to adjust both speed and position
-        Meters position_target = car_get_lane_progress_meters(car) - das->position_error; // Target position is current position minus the position error (which is the error in target position's frame of reference)
-        Meters overshoot_buffer = from_feet(0);
-        MetersPerSecond speed_target = das->speed_target;
-        Meters speed_limit = fabs(speed_target);
-        accel = car_compute_acceleration_chase_target(car, position_target, speed_target, overshoot_buffer, speed_limit, das->use_preferred_accel_profile);
+    // ----------- Stop mode ------------------------
+    if (das->stop_mode && !das->aeb_in_progress) {
+        Meters position_target = car_get_lane_progress_meters(car) + das->stopping_distance_target;
+        MetersPerSecond speed_target = das->speed_target;   // which is always 0 in stop mode
+        Meters speed_limit = car_get_speed(car);            // In stop mode, we don't want to exceed current speed
+        if (speed_limit < from_mph(5)) {
+            speed_limit = from_mph(5); // Allow speeding up to 5 mph (if already below that speed) to enable creeping.
+        }
+        accel = car_compute_acceleration_chase_target(car, position_target, speed_target, 0, speed_limit, das->use_preferred_accel_profile);
     }
 
     // ---------- Standard speed/cruise control ----------------------
-    if (!das->follow_mode && !das->PD_mode && !das->aeb_in_progress) {
+    if (!das->follow_mode && !das->stop_mode && !das->aeb_in_progress) {
         accel = das->use_linear_speed_control ? car_compute_acceleration_adjust_speed_linear(car, das->speed_target, das->use_preferred_accel_profile) : car_compute_acceleration_adjust_speed(car, das->speed_target, das->use_preferred_accel_profile);
     }
 
@@ -313,17 +317,21 @@ void driving_assistant_post_sim_step(DrivingAssistant* das, Car* car, Simulation
     }
     situational_awareness_build(sim, car_get_id(car)); // Ensure situational awareness is up-to-date
 
-    if (das->aeb_in_progress && !das->follow_mode) {
-        das->speed_target = car_get_speed(car); // Update speed target to current speed if AEB is in progress, so that once AEB is disengaged (automatic or manual), the car will not accelerate or decelerate unexpectedly.
+    if (das->aeb_in_progress && !das->follow_mode && !das->stop_mode) {
+        das->speed_target = car_get_speed(car); // Update speed target to current speed if AEB is in progress, so that once AEB is disengaged (automatic or manual), the car will not accelerate or decelerate unexpectedly as it enters speed-only control mode.
     }
 
-    if (das->PD_mode) {
-        das->position_error += car_get_recent_forward_movement(car); // Update position error based on recent forward movement
-        if (fabs(das->position_error) < from_centimeters(1)) {
-            // If position error is negligible, we can use standard speed control
-            LOG_DEBUG("Position error is negligible for car %d. Switching to standard speed control.", car->id);
-            das->PD_mode = false; // Disable PD mode if position error is negligible
-            das->position_error = 0.0; // Reset position error
+    if (das->stop_mode) {
+        das->stopping_distance_target -= car_get_recent_forward_movement(car); // Update stopping distance target based on recent forward movement
+        if (das->stopping_distance_target < 0) {
+            das->stopping_distance_target = 0; // Clamp to 0 if overshot
+        }
+        if (fabs(car_get_speed(car)) < AEB_DISENGAGE_MAX_SPEED_MPS) {
+            // Car is fully stopped
+            das->stop_mode = false; // Auto disengage stop mode once fully stopped
+            LOG_DEBUG("Stop mode disengaged for car %d after coming to a full stop. Speed = %.2f. Residual stopping distance target = %.2f feet", car->id, to_mph(car_get_speed(car)), to_feet(das->stopping_distance_target));
+            das->stopping_distance_target = 0; // Reset stopping distance target
+            das->speed_target = 0; // Ensure speed target is 0 so that the car continues to stop to 0.00 speed in the speed-only mode.
         }
     }
 
@@ -364,8 +372,8 @@ void driving_assistant_post_sim_step(DrivingAssistant* das, Car* car, Simulation
 
 Seconds driving_assistant_get_last_configured_at(const DrivingAssistant* das) { return das->last_configured_at; }
 MetersPerSecond driving_assistant_get_speed_target(const DrivingAssistant* das) { return das->speed_target; }
-bool driving_assistant_get_PD_mode(const DrivingAssistant* das) { return das->PD_mode; }
-Meters driving_assistant_get_position_error(const DrivingAssistant* das) { return das->position_error; }
+bool driving_assistant_get_stop_mode(const DrivingAssistant* das) { return das->stop_mode; }
+Meters driving_assistant_get_stopping_distance_target(const DrivingAssistant* das) { return das->stopping_distance_target; }
 CarIndicator driving_assistant_get_merge_intent(const DrivingAssistant* das) { return das->merge_intent; }
 CarIndicator driving_assistant_get_turn_intent(const DrivingAssistant* das) { return das->turn_intent; }
 bool driving_assistant_get_follow_mode(const DrivingAssistant* das) { return das->follow_mode; }
@@ -402,30 +410,32 @@ void driving_assistant_configure_speed_target(DrivingAssistant* das, const Car* 
     das->last_configured_at = sim_get_time(sim);
 }
 
-void driving_assistant_configure_PD_mode(DrivingAssistant* das, const Car* car, const Simulation* sim, bool PD_mode) {
+void driving_assistant_configure_stop_mode(DrivingAssistant* das, const Car* car, const Simulation* sim, bool stop_mode) {
     if (!validate_input(car, das, sim)) {
         return; // Early return if input validation fails
     }
-    das->PD_mode = PD_mode;
-    if (PD_mode) {
-        das->follow_mode = false; // Disable follow mode when PD mode is enabled
-    } else {
-        das->position_error = 0.0; // Reset position error when PD mode is disabled
+    if (stop_mode) {
+        if (car_get_speed(car) < -1e-9) {
+            LOG_ERROR("Stop mode cannot be enabled for car %d while reversing. Instead, set speed target to 0 in speed-only control mode to try to stop the car. This function will now return without changing anything.", car->id);
+            return; // Do not enable stop mode if the car is reversing
+        }
+        das->follow_mode = false;               // Disable follow mode when stop mode is enabled
+        das->speed_target = 0;                  // Set speed target to 0 when stop mode is enabled
+        LOG_DEBUG("Stop mode engaged for car %d.", car->id);
     }
+    das->stop_mode = stop_mode;
     das->last_configured_at = sim_get_time(sim);
 }
 
-void driving_assistant_configure_position_error(DrivingAssistant* das, const Car* car, const Simulation* sim, Meters position_error) {
+void driving_assistant_configure_stopping_distance_target(DrivingAssistant* das, const Car* car, const Simulation* sim, Meters stopping_distance_target) {
     if (!validate_input(car, das, sim)) {
         return; // Early return if input validation fails
     }
-    if (das->PD_mode) {
-        das->position_error = position_error;
-    } else {
-        LOG_WARN("Position error can only be configured when PD mode is enabled for car %d", car->id);
-        das->position_error = 0.0; // Reset position error if PD mode is not enabled. Just for good measure.
-        return; // Position error can only be set in PD mode
+    if (stopping_distance_target < 0) {
+        LOG_WARN("Stopping distance target cannot be negative for car %d. Setting it to 0.", car->id);
+        stopping_distance_target = 0;
     }
+    das->stopping_distance_target = stopping_distance_target;
     das->last_configured_at = sim_get_time(sim);
 }
 
@@ -454,8 +464,8 @@ void driving_assistant_configure_follow_mode(DrivingAssistant* das, const Car* c
         return;
     }
     if (follow_mode) {
-        das->PD_mode = false;       // Disable PD mode when follow mode is enabled
-        das->position_error = 0.0;  // Reset position error when follow mode is enabled
+        das->stop_mode = false;                 // Disable stop mode when follow mode is enabled
+        LOG_DEBUG("Follow mode engaged for car %d.", car->id);
     }
     das->follow_mode = follow_mode;
     das->last_configured_at = sim_get_time(sim);
@@ -466,7 +476,7 @@ void driving_assistant_configure_follow_mode_buffer(DrivingAssistant* das, const
         return;
     }
     if (follow_mode_buffer < from_feet(MINIMUM_FOLLOW_MODE_BUFFER_FEET)) {
-        LOG_WARN("Follow mode buffer too small for car %d. Setting it to a minimum of %.1f feet.", car->id, MINIMUM_FOLLOW_MODE_BUFFER_FEET);
+        LOG_WARN("Follow mode buffer (tried = %1.f feet) too small for car %d. Setting it to a minimum of %.1f feet.", car->id, to_feet(follow_mode_buffer), MINIMUM_FOLLOW_MODE_BUFFER_FEET);
         follow_mode_buffer = from_feet(MINIMUM_FOLLOW_MODE_BUFFER_FEET);
     }
     das->follow_mode_buffer = follow_mode_buffer;
