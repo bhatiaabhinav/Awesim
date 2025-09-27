@@ -75,17 +75,17 @@ struct NearbyVehicles {
     NearbyVehicle behind[3];                // Vehicle behind in target lane for change/merge. If none, closest in prev lane (straight incoming).
     NearbyVehicle after_next_turn[3];              // First vehicle encountered on outgoing path after turn. Populated only if ego vehicle is the frontmost vehicle in the lane (and therefore, about to make a turn decision).
     NearbyVehicle incoming_from_previous_turn[3];  // Leading vehicle turning onto ego's lane. Populated only if ego vehicle is the last vehicle in ego's lane (and therefore, one of these vehicles will be the first to turn into ego's lane and tail the ego vehicle).
-    NearbyVehicle turning_into_same_lane[3][3];       // When on intersection (outer array id = 1 used as it corresponds to straight), vehicles from other lanes turning into the same lane as ego vehicle. That lane may have 3 incoming connections, so we record the least TTC vehicle (counted from the projected moment ego reaches the entry of the lane in question) in each of the 3 connections. One of those connections will be ego's current lane, in which case, we will record NULL for that connection. If there are no TTC vehicles, then we pick the least projected distance vehicle instead (the prev lane of these incoming lanes are also scanned). If ego is approaching an intersection, then the "same lane" will be the one we will be turning into post leaving intersection. We can turn in three directions, so we will have 3 sets of these vehicles (outer array id = 0 for left turn, 1 for straight, 2 for right turn).
+    NearbyVehicle turning_into_same_lane[3 * 3 * 3];       // When on intersection, vehicles from other lanes turning into the same lane as ego vehicle. That lane may have 3 incoming connections (middle array), so we record the behind/colliding/ahead vehicles (outermost array) in each of the 3 connections (once we project ego vehicle to those lanes based on distance to the beginning of the outgoing lane of the intersection (where all the lanes merge)). When ego is approaching an intersection, then the "same lane" will be the one we will be turning into post leaving intersection. We can turn in three directions, so the innermost array corresponds to that.
 };
 typedef struct NearbyVehicles NearbyVehicles;
 
 
 // Useful for deep learning, where we want to flatten the NearbyVehicles struct
 struct NearbyVehiclesFlattened {
-    CarId car_ids[24];  // Array to hold extracted car IDs
-    Meters distances[24]; // Corresponding bumper-to-bumper distances to the cars
-    Seconds time_to_collisions[24]; // Corresponding time to collisions
-    Seconds time_headways[24]; // Corresponding time headways
+    CarId car_ids[42];  // Array to hold extracted car IDs
+    Meters distances[42]; // Corresponding bumper-to-bumper distances to the cars
+    Seconds time_to_collisions[42]; // Corresponding time to collisions
+    Seconds time_headways[42]; // Corresponding time headways
     int count; // Number of cars extracted
 };
 

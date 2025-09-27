@@ -523,9 +523,9 @@ class AwesimEnv(gym.Env):
         super().reset(seed=seed, options=options)
         A.sim_disconnect_from_render_server(self.sim)
 
-        # Reset until agent is not in goal lane (if goal is specified) or a dead-end lane or an the interstate highway
+        # Reset until agent is not in goal lane (if goal is specified) or a dead-end lane or an the interstate highway (or its entry or exit ramps)
         first_reset_done = False
-        while not first_reset_done or (self.goal_lane is not None and A.car_get_lane_id(A.sim_get_car(self.sim, 0)) == self.goal_lane) or A.lane_get_num_connections(A.map_get_lane(A.sim_get_map(self.sim), A.car_get_lane_id(A.sim_get_car(self.sim, 0)))) == 0 or A.lane_get_road(A.map_get_lane(A.sim_get_map(self.sim), A.car_get_lane_id(A.sim_get_car(self.sim, 0))), A.sim_get_map(self.sim)).num_lanes >= 3:
+        while not first_reset_done or (self.goal_lane is not None and A.car_get_lane_id(A.sim_get_car(self.sim, 0)) == self.goal_lane) or A.lane_get_num_connections(A.map_get_lane(A.sim_get_map(self.sim), A.car_get_lane_id(A.sim_get_car(self.sim, 0)))) == 0 or A.lane_get_num_connections_incoming(A.map_get_lane(A.sim_get_map(self.sim), A.car_get_lane_id(A.sim_get_car(self.sim, 0)))) == 0 or A.lane_get_road(A.map_get_lane(A.sim_get_map(self.sim), A.car_get_lane_id(A.sim_get_car(self.sim, 0))), A.sim_get_map(self.sim)).num_lanes >= 3:
             A.awesim_setup(
                 self.sim, self.city_width, self.num_cars, 0.02, A.clock_reading(0, 8, 0, 0), A.WEATHER_SUNNY
             )
@@ -596,7 +596,7 @@ class AwesimEnv(gym.Env):
         stop_mode = not follow_mode
         if (stop_mode):
             # if there is no intersection or dead end upcoming, then stay in follow mode
-            if not (sit.is_an_intersection_upcoming or sit.is_approaching_dead_end or sit.is_on_entry_ramp):
+            if not (sit.is_an_intersection_upcoming or sit.is_on_intersection or sit.is_approaching_dead_end or sit.is_on_entry_ramp):
                 follow_mode = True
                 stop_mode = False
             # if there is a lead vehicle, then stay in follow mode
