@@ -232,7 +232,7 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
     // ----------- Follow mode ----------------------
     if (das->follow_mode && !das->aeb_in_progress) {
         const Car* lead_car = sa->lead_vehicle;
-        if (lead_car) { 
+        if (lead_car && das->speed_target >= lead_car->speed) { 
             accel = car_compute_acceleration_adaptive_cruise(car, sa, das->speed_target, das->follow_mode_thw, das->follow_mode_buffer, das->use_preferred_accel_profile);
         } else {
             accel = car_compute_acceleration_cruise(car, das->speed_target, das->use_preferred_accel_profile);
@@ -421,7 +421,9 @@ void driving_assistant_configure_stop_mode(DrivingAssistant* das, const Car* car
         }
         das->follow_mode = false;               // Disable follow mode when stop mode is enabled
         das->speed_target = 0;                  // Set speed target to 0 when stop mode is enabled
-        LOG_DEBUG("Stop mode engaged for car %d.", car->id);
+        if (!das->stop_mode) {
+            LOG_DEBUG("Stop mode engaged for car %d.", car->id);
+        }
     }
     das->stop_mode = stop_mode;
     das->last_configured_at = sim_get_time(sim);
@@ -465,7 +467,9 @@ void driving_assistant_configure_follow_mode(DrivingAssistant* das, const Car* c
     }
     if (follow_mode) {
         das->stop_mode = false;                 // Disable stop mode when follow mode is enabled
-        LOG_DEBUG("Follow mode engaged for car %d.", car->id);
+        if (!das->follow_mode) {
+            LOG_DEBUG("Follow mode engaged for car %d.", car->id);
+        }
     }
     das->follow_mode = follow_mode;
     das->last_configured_at = sim_get_time(sim);

@@ -279,6 +279,8 @@ snprintf(time_stats, sizeof(time_stats), "%s %02d:%02d:%02d  (%s %.1fx)",
     if (sim->is_agent_enabled && sim->is_agent_driving_assistant_enabled) {
         // Render driving assistant status on top left
         Car* car0 = sim_get_car(sim, 0);    // 0 is always the agent car
+        situational_awareness_build(sim, 0); // rebuild situational awareness for car 0
+        SituationalAwareness* sit = sim_get_situational_awareness(sim, 0);
         DrivingAssistant* das = car0 ? sim_get_driving_assistant(sim, car0->id) : NULL;
 
 
@@ -298,12 +300,12 @@ snprintf(time_stats, sizeof(time_stats), "%s %02d:%02d:%02d  (%s %.1fx)",
                         hud_font_size, ALIGN_TOP_LEFT, false, NULL);
         }
 
-        // If FOLLOW is enabled, print that in green light color, else set alpha to low value.
+        // If FOLLOW is enabled and there is car ahead and speed target is higher than the lead car's speed, print that in green light color, else set alpha to low value.
         if (das) {
             char follow_str[32];
             snprintf(follow_str, sizeof(follow_str), " Follow:   %.1f s + %.1f ft", das->follow_mode_thw, to_feet(das->follow_mode_buffer));
             Uint8 r = GREEN_LIGHT_COLOR.r, g = GREEN_LIGHT_COLOR.g, b = GREEN_LIGHT_COLOR.b;
-            Uint8 alpha = das->follow_mode ? 255 : 64;
+            Uint8 alpha = das->follow_mode && sit->lead_vehicle && das->speed_target > sit->lead_vehicle->speed ? 255 : 64;
             render_text(renderer, follow_str, 10, 100 + 7 * hud_font_size, r, g, b, alpha,
                         hud_font_size, ALIGN_TOP_LEFT, false, NULL);
         }

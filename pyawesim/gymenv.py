@@ -591,9 +591,6 @@ class AwesimEnv(gym.Env):
         action_turn_signal_probability = action[4]
 
 
-        # clear ADAS mode first
-        A.driving_assistant_configure_follow_mode(self.das, self.agent, self.sim, False)
-        A.driving_assistant_configure_stop_mode(self.das, self.agent, self.sim, False)
 
         # decide mode.
         follow_mode = self.np_random.random() < action_follow_mode_probability
@@ -619,6 +616,10 @@ class AwesimEnv(gym.Env):
         # set the mode settings, then enable the mode in ADAS
 
         if follow_mode:
+
+            # disable stop mode if it was previously enabled
+            A.driving_assistant_configure_stop_mode(self.das, self.agent, self.sim, False)
+
             # Speed adjustment
             speed_target = float(action_speed_target) * self.agent.capabilities.top_speed
             A.driving_assistant_configure_speed_target(self.das, self.agent, self.sim, A.mps(speed_target))
@@ -637,6 +638,10 @@ class AwesimEnv(gym.Env):
             A.driving_assistant_configure_follow_mode(self.das, self.agent, self.sim, True)
 
         else:   # stop mode
+
+            # disable follow mode if it was previously enabled
+            A.driving_assistant_configure_follow_mode(self.das, self.agent, self.sim, False)
+
             # speed adjustment. Has to be 0.
             speed_target = 0.0
             A.driving_assistant_configure_speed_target(self.das, self.agent, self.sim, A.mps(speed_target))
@@ -790,6 +795,7 @@ class AwesimEnv(gym.Env):
             "cost": cost,
         }
         self.steps += 1
+        self.synchronized_sim_speedup = self.sim.simulation_speedup  # record this so that we preserve it across resets if it was modified through GUI during the episode
 
         terminated = crashed or reached_goal or out_of_fuel or timeout
         truncated = False
