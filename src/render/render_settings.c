@@ -3,6 +3,8 @@
 int WINDOW_SIZE_WIDTH = 1000;
 int WINDOW_SIZE_HEIGHT = 1000;
 bool ENABLE_DOUBLE_CLICK_TO_TOGGLE_FULLSCREEN = true;
+bool VSYNC_ENABLED = true;              // VSync enabled by default
+bool HW_RENDERING_ENABLED = false;       // Hardware rendering enabled by default
 
 bool DRAW_LANES = true;                // Draw lanes
 bool DRAW_CARS = true;                 // Draw cars

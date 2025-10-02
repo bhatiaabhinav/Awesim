@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 SDL_Texture* car_id_texture_cache[MAX_CARS_IN_SIMULATION][MAX_FONT_SIZE] = {{NULL}};
+SDL_Texture* car_speed_texture_cache[300][MAX_FONT_SIZE] = {{NULL}};
 NearbyVehiclesFlattened HIGHLIGHTED_NEARBY_VEHICLES;
 bool HIGHLIGHTED_CAR_AEB_ENGAGED;
 
@@ -394,7 +395,8 @@ void render_car(SDL_Renderer* renderer, const Car* car, Map* map, const bool pai
     // Render car speed
     if (paint_speed) {
         char speed_str[10];
-        snprintf(speed_str, sizeof(speed_str), "%.1f", to_mph(car->speed));
+        int speed_int = (int)to_mph(car->speed);
+        snprintf(speed_str, sizeof(speed_str), "%d", speed_int);
         int font_size = (int)(meters(0.75) * SCALE);     // font size = 0.75 meter
 
         // offset in direction of the back of the car
@@ -405,6 +407,7 @@ void render_car(SDL_Renderer* renderer, const Car* car, Map* map, const bool pai
         SDL_Point speed_position_screen = to_screen_coords(speed_position,  screen_width, screen_height);
         int text_x = speed_position_screen.x;
         int text_y = speed_position_screen.y;
-        render_text(renderer, speed_str, text_x, text_y, 255, 255, 255, 255, font_size, ALIGN_CENTER, false, NULL);
+        int cache_id = 100 + speed_int; // to avoid conflict with car ID cache (assuming speed ranged from -100 to 200 mph)
+        render_text(renderer, speed_str, text_x, text_y, 255, 255, 255, 255, font_size, ALIGN_CENTER, false, car_speed_texture_cache[cache_id]);
     }
 }

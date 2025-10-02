@@ -10,6 +10,8 @@
 extern int WINDOW_SIZE_WIDTH;
 extern int WINDOW_SIZE_HEIGHT;
 extern bool ENABLE_DOUBLE_CLICK_TO_TOGGLE_FULLSCREEN;
+extern bool VSYNC_ENABLED;
+extern bool HW_RENDERING_ENABLED;
 extern bool DRAW_LANES;
 extern bool DRAW_CARS;
 extern bool DRAW_TRACK_LINES;
@@ -59,6 +61,7 @@ extern SDL_Texture* road_name_texture_cache[MAX_NUM_ROADS][MAX_FONT_SIZE];
 extern SDL_Texture* intersection_name_texture_cache[MAX_NUM_INTERSECTIONS][MAX_FONT_SIZE];
 extern SDL_Texture* lane_id_texture_cache[MAX_NUM_LANES][MAX_FONT_SIZE];
 extern SDL_Texture* car_id_texture_cache[MAX_CARS_IN_SIMULATION][MAX_FONT_SIZE];
+extern SDL_Texture* car_speed_texture_cache[300][MAX_FONT_SIZE];
 extern NearbyVehiclesFlattened HIGHLIGHTED_NEARBY_VEHICLES;
 extern bool HIGHLIGHTED_CAR_AEB_ENGAGED;
 

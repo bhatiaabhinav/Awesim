@@ -98,6 +98,15 @@ static void cleanup_text_rendering() {
         }
     }
     LOG_DEBUG("Car ID textures cleaned up successfully.");
+    for (int i = 0; i < 300; i++) {
+        for (int j = 0; j < MAX_FONT_SIZE; j++) {
+            if (car_speed_texture_cache[i][j]) {
+                SDL_DestroyTexture(car_speed_texture_cache[i][j]);
+                car_speed_texture_cache[i][j] = NULL;
+            }
+        }
+    }
+    LOG_DEBUG("Car speed textures cleaned up successfully.");
     TTF_Quit();
 }
 
@@ -105,7 +114,6 @@ static void cleanup_text_rendering() {
 bool init_sdl() {
     #ifdef _WIN32
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-        SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
     #endif
 
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
@@ -133,7 +141,12 @@ bool init_sdl() {
         LOG_ERROR("Unable to load icon: %s", SDL_GetError());
     }
 
-    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    // turn off vsync if HW rendering is off
+    if (!HW_RENDERING_ENABLED) {
+        LOG_WARN("Hardware rendering is disabled, turning off VSync");
+        VSYNC_ENABLED = false;
+    }
+    renderer = SDL_CreateRenderer(window, -1, (HW_RENDERING_ENABLED ? SDL_RENDERER_ACCELERATED : SDL_RENDERER_SOFTWARE) | (VSYNC_ENABLED ? SDL_RENDERER_PRESENTVSYNC : 0));
     if (!renderer) {
         LOG_ERROR("Renderer could not be created! SDL_Error: %s", SDL_GetError());
         SDL_DestroyWindow(window);
