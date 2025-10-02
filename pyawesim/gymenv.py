@@ -44,6 +44,7 @@ class AwesimEnv(gym.Env):
     MAX_THW = 10.0  # Maximum time-headway (seconds)
     COST_GAS_PER_GALLON = 3.2  # Average cost of gas per gallon ($) in US
     COST_LOST_WAGE_PER_HOUR = 30.0  # Average wages per hour ($) in US
+    MAY_LOSE_ENTIRE_DAY_WAGE = True  # Lose entire 8-hour workday wage if not reached by the end of sim_duration
     COST_CAR = 35000.0  # Average new car cost ($) in US. This is the cost for total loss in a crash.
     DEFAULT_INIT_FUEL_GALLONS = 15.0  # Default initial fuel level in gallons
     OBSERVATION_NORMALIZATION = {
@@ -70,6 +71,7 @@ class AwesimEnv(gym.Env):
         crash_penalty: float = DEFAULT_CRASH_PENALTY,
         cost_gas_per_gallon: float = COST_GAS_PER_GALLON,
         cost_lost_wage_per_hour: float = COST_LOST_WAGE_PER_HOUR,
+        may_lose_entire_day_wage: bool = MAY_LOSE_ENTIRE_DAY_WAGE,
         cost_car: float = COST_CAR,
         init_fuel_gallons: float = DEFAULT_INIT_FUEL_GALLONS,
         synchronized: bool = False,
@@ -94,6 +96,7 @@ class AwesimEnv(gym.Env):
             crash_penalty (float): Penalty for crashing.
             cost_gas_per_gallon (float): Cost of gas per gallon ($).
             cost_lost_wage_per_hour (float): Cost of lost wages per hour ($).
+            may_lose_entire_day_wage (bool): If True, lose entire 8-hour workday wage if not reached by the end of sim_duration.
             cost_car (float): Cost of the car ($), applied on total loss in a crash.
             init_fuel_gallons (float): Initial fuel level in gallons.
             synchronized (bool): If True, synchronize simulation for rendering.
@@ -117,6 +120,7 @@ class AwesimEnv(gym.Env):
         self.crash_penalty = crash_penalty
         self.cost_gas_per_gallon = cost_gas_per_gallon
         self.cost_lost_wage_per_hour = cost_lost_wage_per_hour
+        self.may_lose_entire_day_wage = may_lose_entire_day_wage
         self.cost_car = cost_car
         self.init_fuel_gallons = init_fuel_gallons
         self.sim_duration = sim_duration
@@ -745,7 +749,7 @@ class AwesimEnv(gym.Env):
         if self.goal_lane is not None and not reached_goal and is_late:
             cost += self.cost_lost_wage_per_hour * self.decision_interval / 3600.0
 
-        if self.goal_lane is not None and not reached_goal and (timeout or out_of_fuel):
+        if self.may_lose_entire_day_wage and self.goal_lane is not None and not reached_goal and (timeout or out_of_fuel or crashed):
             how_late_already_hrs = (A.sim_get_time(self.sim) - self.appointment_time) / 3600.0
             how_late_already_hrs = max(how_late_already_hrs, 0)  # in case it is not time for appointment yet
             cost_lost_wage_already_considered = how_late_already_hrs * self.cost_lost_wage_per_hour

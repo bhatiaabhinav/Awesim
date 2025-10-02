@@ -105,6 +105,7 @@ static void cleanup_text_rendering() {
 bool init_sdl() {
     #ifdef _WIN32
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
     #endif
 
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {

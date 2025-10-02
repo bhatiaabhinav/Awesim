@@ -8,6 +8,7 @@ if not exist bin mkdir bin
 
 windres scripts/windows/resource.rc -O coff -o scripts/windows/resource.o
 gcc ^
+    -O3 -flto -funroll-loops ^
     -Iinclude ^
     -D_WIN32_WINNT=0x0A00 ^
     src/main.c src/utils/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c ^
@@ -28,6 +29,7 @@ echo ✅ Compilation successful. Executable created at: .\bin\awesim.exe
 echo Compiling renderer server source files...
 
 gcc ^
+    -O3 -flto -funroll-loops ^
     -Iinclude ^
     -D_WIN32_WINNT=0x0A00 ^
     src/render_server.c src/utils/*.c src/render/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c ^

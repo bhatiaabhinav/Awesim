@@ -1,4 +1,6 @@
+import ast
 import os
+import sys
 from typing import Tuple
 
 import matplotlib.pyplot as plt
@@ -7,21 +9,14 @@ import torch
 import wandb
 from gymenv import AwesimEnv
 from gymenv_utils import make_mlp
-from gymnasium.vector import AsyncVectorEnv, AutoresetMode, VectorEnv
+from gymnasium.vector import SyncVectorEnv, AsyncVectorEnv, AutoresetMode, VectorEnv
 from ppo import Actor, Critic, PPO
 
-
-# Experiment metadata
-EXPERIMENT_NAME = "ApptWorld-20mins"
-NOTES = """From a random starting point, reach destination (lane #84) in 20 mins (rew = 1, 0 otherwise), else lost wage cost starts accumulating (in a seperate cost stream). Cost of gas and cost of crash also included in the cost stream. Episode ends at 60 mins and wage for entire 8-hour workday is lost if not reached. No CMDP solution implemented yet."""
-
-# Configuration dictionaries
-CONFIG = {
-    "experiment_name": EXPERIMENT_NAME,
-    "n_totalsteps_per_batch": 32768,    # total steps across all parallel envs per PPO update
-    "ppo_iters": 10000,                 # number of PPO updates
-    "norm_obs": True,                   # whether to normalize observations by running estimates of mean and stddev
-    "norm_reward": True,                # whether to normalize rewards by running estimates of stddev of discounted returns
+WANDB_CONFIG = {
+    "no_wandb": False,
+    "project": "Awesim-ApppointmentWorld",
+    "experiment_name": "ApptWorld-20mins",
+    "notes": """From a random starting point, reach destination (lane #84) in 20 mins (rew = 1, 0 otherwise), else lost wage cost starts accumulating (in a seperate cost stream). Cost of gas and cost of crash also included in the cost stream. Episode ends at 60 mins and wage for entire 8-hour workday is lost if not reached. No cost constraint yet.""",
 }
 ENV_CONFIG = {
     "goal_lane": 84,
@@ -33,13 +28,17 @@ ENV_CONFIG = {
     "cost_gas_per_gallon": 4.0,         # in NYC (USD)
     "cost_car": 30000,                  # cost of the car (USD), incurred if crashed (irrespective of severity)
     "cost_lost_wage_per_hour": 40,      # of a decent job in NYC (USD)
+    "may_lose_entire_day_wage": True,   # lose entire 8-hour workday wage if not reached by the end of sim_duration
     "init_fuel_gallons": 3.0,           # initial fuel in gallons -- 1/4th of a 12-gallon tank car
     "goal_reward": 1.0,                 # A small positive number to incentivize reaching the goal
 }
-VEC_ENV_CONFIG = {"n_envs": 64}
+VEC_ENV_CONFIG = {
+    "n_envs": 64,
+    "async": True,
+}
 PPO_CONFIG = {
-    "iters": CONFIG["ppo_iters"],
-    "nsteps": CONFIG["n_totalsteps_per_batch"] // VEC_ENV_CONFIG["n_envs"],
+    "iters": 10000,
+    "nsteps": 512,
     "actor_lr": 0.0001,
     "critic_lr": 0.0001,
     "decay_lr": False,
@@ -49,7 +48,7 @@ PPO_CONFIG = {
     "lam": 0.95,
     "gamma": 0.999,
     "clipnorm": 0.5,
-    "norm_rewards": CONFIG["norm_reward"],
+    "norm_rewards": True,
     "cmdp_mode": False,
     "constrain_undiscounted_cost": True,
     "cost_threshold": 100.0,  # max cost per episode  # TODO: tune this
@@ -60,12 +59,10 @@ PPO_CONFIG = {
     "inference_device": "cuda" if torch.cuda.is_available() else "cpu",
 }
 POLICY_CONFIG = {
+    "norm_obs": True,
     "net_arch": [1024, 512, 256],
     "layernorm": True,
 }
-# Combined configuration for logging
-FULL_CONFIG = {**CONFIG, **ENV_CONFIG, **VEC_ENV_CONFIG, **PPO_CONFIG, **POLICY_CONFIG}
-
 
 def make_env(env_index: int = 0) -> AwesimEnv:
     """Create an AwesimEnv instance with specified configuration."""
@@ -73,21 +70,23 @@ def make_env(env_index: int = 0) -> AwesimEnv:
 
 
 def setup_training_env() -> VectorEnv:
-    return AsyncVectorEnv([lambda: make_env(i + 1) for i in range(VEC_ENV_CONFIG["n_envs"])], copy=False, autoreset_mode=AutoresetMode.SAME_STEP)
+    if VEC_ENV_CONFIG["async"]:
+        return AsyncVectorEnv([lambda: make_env(i + 1) for i in range(VEC_ENV_CONFIG["n_envs"])], copy=False, autoreset_mode=AutoresetMode.SAME_STEP)
+    else:
+        return SyncVectorEnv([lambda: make_env(i + 1) for i in range(VEC_ENV_CONFIG["n_envs"])], copy=False, autoreset_mode=AutoresetMode.SAME_STEP)
 
 
-def train_model(no_wandb=False) -> Tuple[Actor, Critic, PPO]:
+def train_model() -> Tuple[Actor, Critic, PPO]:
     """Train the PPO model with the specified configuration."""
 
     vec_env = setup_training_env()
 
-    project = "Awesim-ApppointmentWorld"
-    if not no_wandb:
+    if not WANDB_CONFIG["no_wandb"]:
         wandb.init(
-            project=project,
-            name=EXPERIMENT_NAME,
-            config=FULL_CONFIG,
-            notes=NOTES,
+            project=WANDB_CONFIG["project"],
+            name=WANDB_CONFIG["experiment_name"],
+            config={**ENV_CONFIG, **VEC_ENV_CONFIG, **PPO_CONFIG, **POLICY_CONFIG},
+            notes=WANDB_CONFIG["notes"],
             save_code=True,
         )
 
@@ -97,24 +96,24 @@ def train_model(no_wandb=False) -> Tuple[Actor, Critic, PPO]:
 
     actor_model = make_mlp(obs_dim, POLICY_CONFIG["net_arch"], action_dim, layernorm=POLICY_CONFIG["layernorm"])
     critic_model = make_mlp(obs_dim, POLICY_CONFIG["net_arch"], 1, layernorm=POLICY_CONFIG["layernorm"])
-    actor = Actor(actor_model, vec_env.single_action_space, norm_obs=CONFIG["norm_obs"])    # type: ignore
-    critic = Critic(critic_model, norm_obs=CONFIG["norm_obs"])
+    actor = Actor(actor_model, vec_env.single_action_space, norm_obs=POLICY_CONFIG["norm_obs"])    # type: ignore
+    critic = Critic(critic_model, norm_obs=POLICY_CONFIG["norm_obs"])
     if PPO_CONFIG["cmdp_mode"]:
         cost_critic_model = make_mlp(obs_dim, POLICY_CONFIG["net_arch"], 1, layernorm=POLICY_CONFIG["layernorm"])
-        cost_critic = Critic(cost_critic_model, norm_obs=CONFIG["norm_obs"])
+        cost_critic = Critic(cost_critic_model, norm_obs=POLICY_CONFIG["norm_obs"])
     else:
         cost_critic = None
 
     ppo = PPO(vec_env, actor, critic, cost_critic=cost_critic, **PPO_CONFIG, custom_info_keys_to_log_at_episode_end=['crashed', 'reached_goal', 'reached_in_time', 'reached_but_late', 'out_of_fuel', 'timeout', 'total_fuel_consumed', 'crashed_forward', 'crashed_backward', 'progress_m_during_crash', 'progress_m_during_front_crash', 'progress_m_during_back_crash', 'crashed_on_intersection', 'aeb_in_progress_during_crash'])  # type: ignore
 
     # make dir for saving models
-    model_dir = f"./models/{EXPERIMENT_NAME}"
+    model_dir = f"./models/{WANDB_CONFIG['experiment_name']}"
     os.makedirs(model_dir, exist_ok=True)
 
     # interleave eval, logging, model_saving
     while ppo.stats['iterations'] < ppo.iters:
         ppo.train(1)
-        if not no_wandb:
+        if not WANDB_CONFIG["no_wandb"]:
             wandb.log({
                 "global_step": ppo.stats['total_timesteps'],
                 "iteration": ppo.stats['iterations'],
@@ -151,13 +150,13 @@ def train_model(no_wandb=False) -> Tuple[Actor, Critic, PPO]:
                 "train/std": np.exp(ppo.stats["logstds"][-1]),
                 "train/logprob": ppo.stats["logprobs"][-1],
             })
-        if ppo.stats['iterations'] % 10 == 0:
+        if ppo.stats['iterations'] % 100 == 0:
             torch.save(actor.state_dict(), f"{model_dir}/actor_iter{ppo.stats['iterations']}.pth")
             torch.save(critic.state_dict(), f"{model_dir}/critic_iter{ppo.stats['iterations']}.pth")
             torch.save(actor.state_dict(), f"{model_dir}/actor_latest.pth")
             torch.save(critic.state_dict(), f"{model_dir}/critic_latest.pth")
 
-    if not no_wandb:
+    if not WANDB_CONFIG["no_wandb"]:
         wandb.finish()
 
     actor.cpu()
@@ -171,7 +170,43 @@ def train_model(no_wandb=False) -> Tuple[Actor, Critic, PPO]:
 
 
 if __name__ == "__main__":
-    actor, critic, ppo = train_model(False)
+
+    # --- override defaults with command line arguments in format key=value ---
+    for arg in sys.argv[1:]:
+        if "=" in arg:
+            k, v = arg.split("=", 1)
+            k = k.strip()
+            # try to interpret the value as Python literal (int, float, list, dict, bool, None)
+            try:
+                v = ast.literal_eval(v)
+            except Exception:
+                v = v  # keep as string if not literals
+            found_key = False
+            if k in ENV_CONFIG:
+                ENV_CONFIG[k] = v
+                found_key = True
+            if k in VEC_ENV_CONFIG:
+                VEC_ENV_CONFIG[k] = v   # type: ignore
+                found_key = True
+            if k in PPO_CONFIG:
+                PPO_CONFIG[k] = v
+                found_key = True
+            if k in POLICY_CONFIG:
+                POLICY_CONFIG[k] = v
+                found_key = True
+            if k in WANDB_CONFIG:
+                WANDB_CONFIG[k] = v
+                found_key = True
+            if not found_key:
+                # print in yellow color
+                print(f"\033[93mWarning: key {k} not found in any config, ignoring the override.\033[0m")
+
+    print("Final configuration:")
+    CONFIG = {**WANDB_CONFIG, **ENV_CONFIG, **VEC_ENV_CONFIG, **PPO_CONFIG, **POLICY_CONFIG}
+    for k, v in CONFIG.items():
+        print(f"  {k}: {v}")
+
+    actor, critic, ppo = train_model()
     print(ppo.stats['timestepss'])
     print(ppo.stats['mean_returns'])
     print(ppo.stats['mean_total_costs'])
@@ -179,10 +214,10 @@ if __name__ == "__main__":
     plt.xlabel("Total Timesteps")
     plt.ylabel("Mean Reward")
     plt.title("Training Curve -- Mean Reward (100-ep moving window) vs Timesteps")
-    plt.savefig(f"./models/{EXPERIMENT_NAME}/training_curve_returns.png")
+    plt.savefig(f"./models/{WANDB_CONFIG['experiment_name']}/training_curve_returns.png")
     plt.clf()
     plt.plot(ppo.stats['timestepss'], ppo.stats['mean_total_costs'])
     plt.xlabel("Total Timesteps")
     plt.ylabel("Mean Total Cost")
     plt.title("Training Curve -- Mean Total Cost (100-ep moving window) vs Timesteps")
-    plt.savefig(f"./models/{EXPERIMENT_NAME}/training_curve_total_costs.png")
+    plt.savefig(f"./models/{WANDB_CONFIG['experiment_name']}/training_curve_total_costs.png")

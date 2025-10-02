@@ -453,7 +453,7 @@ void lane_add_car(Lane* self, Car* car, Simulation* sim) {
         return;
     }
 
-    float new_progress = car_get_lane_progress(car);
+    double new_progress = car_get_lane_progress(car);
     int insert_pos = self->num_cars;
 
     // Find correct position to insert (keep descending order: highest progress first)
@@ -480,7 +480,7 @@ void lane_add_car(Lane* self, Car* car, Simulation* sim) {
 // move a car (after updated progress) within the lane, maintaining descending order by progress, assuming other cars are properly ordered
 void lane_move_car(Lane* self, Car* car, Simulation* sim) {
     CarId car_id = car_get_id(car);
-    float new_progress = car_get_lane_progress(car);
+    double new_progress = car_get_lane_progress(car);
 
     int index = car_get_lane_rank(car);  // use known rank
 

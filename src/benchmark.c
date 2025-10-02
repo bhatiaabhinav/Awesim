@@ -2,7 +2,6 @@
 #include "logging.h"
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/time.h>
 
 
 int main(int argc, char** argv) {
@@ -12,7 +11,7 @@ int main(int argc, char** argv) {
     Simulation* sim = (Simulation*)malloc(sizeof(Simulation));
     LOG_DEBUG("Allocated memory for simulation, size %.2f kilobytes.", sizeof(*sim) / 1024.0);
     awesim_setup(sim, city_width, num_cars, dt, clock_reading(0, 8, 0, 0), WEATHER_SUNNY);
-    const int benchmark_n_transitions = 1000000;
+    const int benchmark_n_transitions = 10000000;
 
     double t0 = get_sys_time_seconds();
     sim_integrate(sim, dt * benchmark_n_transitions);

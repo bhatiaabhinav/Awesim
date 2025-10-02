@@ -156,7 +156,7 @@ Road* straight_road_create_from_center_dir_len(Map* map, Coordinates center, Dir
     Vec2D perp_vector = direction_perpendicular_vector(direction);
 
     for (int i = 0; i < num_lanes; i++) {
-        double offset = (((float)num_lanes - 1) / 2 - i) * lane_width;
+        double offset = (((double)num_lanes - 1) / 2 - i) * lane_width;
         Coordinates lane_center = vec_add(center, vec_scale(perp_vector, offset));
         Lane* lane = linear_lane_create_from_center_dir_len(map, lane_center, direction, length, lane_width, speed_limit, grip, DEGRADATIONS_ZERO);
         road->lane_ids[i] = lane->id;

@@ -15,6 +15,7 @@ if [ $? -ne 0 ]; then
 fi
 
 gcc \
+    -O3 -flto -funroll-loops \
     -Iinclude \
     src/main.c src/utils/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c \
     -o ./bin/awesim \
@@ -40,6 +41,7 @@ if [ $? -ne 0 ]; then
 fi
 
 gcc \
+    -O3 -flto -funroll-loops \
     -Iinclude \
     src/render_server.c src/render/*.c src/utils/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c \
     -o ./bin/awesim_render_server \

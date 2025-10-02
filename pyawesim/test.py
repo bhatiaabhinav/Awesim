@@ -1,3 +1,4 @@
+import ast
 import sys
 import torch
 from gymenv import AwesimEnv
@@ -15,10 +16,12 @@ ENV_CONFIG = {
     "cost_gas_per_gallon": 4.0,         # in NYC (USD)
     "cost_car": 30000,                  # cost of the car (USD), incurred if crashed (irrespective of severity)
     "cost_lost_wage_per_hour": 40,      # of a decent job in NYC (USD)
+    "may_lose_entire_day_wage": True,   # lose entire 8-hour workday wage if not reached by the end of sim_duration
     "init_fuel_gallons": 3.0,           # initial fuel in gallons -- 1/4th of a 12-gallon tank car
     "goal_reward": 1.0,                 # A small positive number to incentivize reaching the goal
 }
 POLICY_CONFIG = {
+    "norm_obs": True,
     "net_arch": [1024, 512, 256],
     "layernorm": True,
 }
@@ -42,11 +45,33 @@ def test_model(model_path) -> None:
     action_dim = env.action_space.shape[0]     # type: ignore
 
     actor_model = make_mlp(obs_dim, POLICY_CONFIG["net_arch"], action_dim, layernorm=POLICY_CONFIG["layernorm"])
-    actor = Actor(actor_model, env.action_space, norm_obs=True)    # type: ignore
+    actor = Actor(actor_model, env.action_space, norm_obs=POLICY_CONFIG["norm_obs"])    # type: ignore
     actor.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
 
     actor.evaluate_policy(env, 100)
 
 
 if __name__ == "__main__":
+
+    # --- override defaults with command line arguments in format key=value ---
+    for arg in sys.argv[1:]:
+        if "=" in arg:
+            k, v = arg.split("=", 1)
+            k = k.strip()
+            # try to interpret the value as Python literal (int, float, list, dict, bool, None)
+            try:
+                v = ast.literal_eval(v)
+            except Exception:
+                v = v  # keep as string if not literals
+            found_key = False
+            if k in ENV_CONFIG:
+                ENV_CONFIG[k] = v
+                found_key = True
+            if k in POLICY_CONFIG:
+                POLICY_CONFIG[k] = v
+                found_key = True
+            if not found_key:
+                # print in yellow color
+                print(f"\033[93mWarning: key {k} not found in any config, ignoring the override.\033[0m")
+
     test_model(sys.argv[1])
