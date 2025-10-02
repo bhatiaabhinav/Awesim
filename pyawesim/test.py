@@ -5,7 +5,13 @@ from gymenv import AwesimEnv
 from gymenv_utils import make_mlp
 from ppo import Actor
 
-
+TEST_CONFIG = {
+    "speedup": 8.0,                     # simulation speedup factor
+    "render": True,                     # whether to render the environment
+    "synchronized": True,               # whether to run the simulation in synchronized mode (match sim with real wall time)
+    "render_server_ip": "127.0.0.1",    # IP address of the render server
+    "verbose": True,                    # whether to print detailed logs
+}
 ENV_CONFIG = {
     "goal_lane": 84,
     "city_width": 1000,                 # in meters
@@ -24,6 +30,7 @@ POLICY_CONFIG = {
     "norm_obs": True,
     "net_arch": [1024, 512, 256],
     "layernorm": True,
+    "deterministic": True,
 }
 
 
@@ -35,20 +42,22 @@ def make_env(env_index: int = 0) -> AwesimEnv:
 def test_model(model_path) -> None:
 
     env = make_env(0)
-    env.should_render = True
-    env.synchronized = True
-    env.synchronized_sim_speedup = 16.0
-    env.render_server_ip = "127.0.0.1"
-    env.verbose = True
+    env.should_render = TEST_CONFIG["render"]
+    env.synchronized = TEST_CONFIG["synchronized"]
+    env.synchronized_sim_speedup = TEST_CONFIG["speedup"]
+    env.render_server_ip = TEST_CONFIG["render_server_ip"]
+    env.verbose = TEST_CONFIG["verbose"]
 
     obs_dim = env.observation_space.shape[0]   # type: ignore
     action_dim = env.action_space.shape[0]     # type: ignore
 
     actor_model = make_mlp(obs_dim, POLICY_CONFIG["net_arch"], action_dim, layernorm=POLICY_CONFIG["layernorm"])
-    actor = Actor(actor_model, env.action_space, norm_obs=POLICY_CONFIG["norm_obs"])    # type: ignore
+    actor = Actor(actor_model, env.action_space, deterministic=POLICY_CONFIG["deterministic"], norm_obs=POLICY_CONFIG["norm_obs"])    # type: ignore
     actor.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
 
     actor.evaluate_policy(env, 100)
+
+    env.close()
 
 
 if __name__ == "__main__":
@@ -64,6 +73,9 @@ if __name__ == "__main__":
             except Exception:
                 v = v  # keep as string if not literals
             found_key = False
+            if k in TEST_CONFIG:
+                TEST_CONFIG[k] = v
+                found_key = True
             if k in ENV_CONFIG:
                 ENV_CONFIG[k] = v
                 found_key = True
