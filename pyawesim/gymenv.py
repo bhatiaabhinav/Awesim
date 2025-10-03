@@ -74,6 +74,7 @@ class AwesimEnv(gym.Env):
         may_lose_entire_day_wage: bool = MAY_LOSE_ENTIRE_DAY_WAGE,
         cost_car: float = COST_CAR,
         init_fuel_gallons: float = DEFAULT_INIT_FUEL_GALLONS,
+        deterministic_actions: bool = False,
         synchronized: bool = False,
         synchronized_sim_speedup: float = 1.0,
         should_render: bool = False,
@@ -99,6 +100,7 @@ class AwesimEnv(gym.Env):
             may_lose_entire_day_wage (bool): If True, lose entire 8-hour workday wage if not reached by the end of sim_duration.
             cost_car (float): Cost of the car ($), applied on total loss in a crash.
             init_fuel_gallons (float): Initial fuel level in gallons.
+            deterministic_actions (bool): If True, actions to select follow-mode vs stop-mode and turn/merge signals are deterministic instead of bernoulli-sampled.
             synchronized (bool): If True, synchronize simulation for rendering.
             synchronized_sim_speedup (float): Speedup factor for synchronized simulation.
             should_render (bool): If True, connect to rendering server.
@@ -123,6 +125,7 @@ class AwesimEnv(gym.Env):
         self.may_lose_entire_day_wage = may_lose_entire_day_wage
         self.cost_car = cost_car
         self.init_fuel_gallons = init_fuel_gallons
+        self.deterministic_actions = deterministic_actions
         self.sim_duration = sim_duration
         self.appointment_time = appointment_time
         self.steps = 0
@@ -593,7 +596,7 @@ class AwesimEnv(gym.Env):
 
 
         # decide mode.
-        follow_mode = self.np_random.random() < action_follow_mode_probability
+        follow_mode = action_follow_mode_probability > 0.5 if self.deterministic_actions else self.np_random.random() < action_follow_mode_probability
         stop_mode = not follow_mode
         if (stop_mode):
             # if there is no intersection or dead end upcoming, then stay in follow mode
@@ -666,7 +669,7 @@ class AwesimEnv(gym.Env):
             A.driving_assistant_configure_stop_mode(self.das, self.agent, self.sim, True)
 
         # Merge/turn intent
-        should_indicate = self.np_random.random() < abs(action_turn_signal_probability)
+        should_indicate = abs(action_turn_signal_probability) > 0.5 if self.deterministic_actions else self.np_random.random() < abs(action_turn_signal_probability)
         indicator_direction = (
             (A.INDICATOR_LEFT if action_turn_signal_probability < 0 else A.INDICATOR_RIGHT) if should_indicate else A.INDICATOR_NONE
         )
@@ -684,17 +687,18 @@ class AwesimEnv(gym.Env):
                 new_turn_intent = indicator_direction
             elif merge_makes_sense and not turn_makes_sense:
                 new_merge_intent = indicator_direction
-                if (
-                    sit.is_an_intersection_upcoming and sit.distance_to_end_of_lane_from_leading_edge < A.meters(10) and A.car_get_speed(self.agent) > A.from_mph(5)
-                ):
-                    new_merge_intent = A.INDICATOR_NONE  # Prevent last-moment lane changes near intersections
             elif not (turn_makes_sense or merge_makes_sense):
                 new_merge_intent = A.INDICATOR_NONE
                 new_turn_intent = A.INDICATOR_NONE
-            elif sit.is_approaching_end_of_lane:
-                new_turn_intent = indicator_direction
-            else:
+            else:   # both make sense
                 new_merge_intent = indicator_direction
+
+        if sit.is_an_intersection_upcoming and sit.is_approaching_end_of_lane:
+            # prevent last-moment lane changes or turn intent changes near intersections
+            new_merge_intent = A.INDICATOR_NONE
+            new_turn_intent = self.das.turn_intent
+            if self.verbose:
+                print(f"Locked turn intent = {'left' if new_turn_intent == A.INDICATOR_LEFT else ('right' if new_turn_intent == A.INDICATOR_RIGHT else 'none')} near intersection")
 
         A.driving_assistant_configure_merge_intent(self.das, self.agent, self.sim, new_merge_intent)
         A.driving_assistant_configure_turn_intent(self.das, self.agent, self.sim, new_turn_intent)

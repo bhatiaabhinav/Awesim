@@ -79,6 +79,10 @@ bool car_is_lane_change_dangerous(Car* car, Simulation* sim, const SituationalAw
         // We will be too close to the car behind
         return true;
     }
+    if (car->lane_progress_meters - car_get_length(car) / 2 < meters(15.0)) {
+        // We just entered the lane, do not change lanes immediately.
+        return true;
+    }
     return false;
 }
 

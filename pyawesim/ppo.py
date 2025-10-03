@@ -132,6 +132,7 @@ class Actor(nn.Module):
 
     def evaluate_policy(self, env: Env, num_episodes=100, deterministic=True) -> Tuple[List[float], List[int], List[bool]]:
         self.eval()
+        deterministic_before = self.deterministic
         self.deterministic = deterministic
         episode_rewards = []
         episode_lengths = []
@@ -153,7 +154,41 @@ class Actor(nn.Module):
             episode_rewards.append(total_reward)
             episode_lengths.append(length)
         print()
-        self.deterministic = False  # undo
+        self.deterministic = deterministic_before  # undo
+
+        return episode_rewards, episode_lengths, episode_successes
+    
+    def evaluate_policy_parallel(self, envs: VectorEnv, num_episodes=100, deterministic=True) -> Tuple[List[float], List[int], List[bool]]:
+        self.eval()
+        deterministic_before = self.deterministic
+        self.deterministic = deterministic
+        episode_rewards = []
+        episode_lengths = []
+        episode_successes = []
+        episode_rew_vec = np.zeros(envs.num_envs)
+        episode_len_vec = np.zeros(envs.num_envs, dtype=int)
+        num_envs = envs.num_envs
+        obs = envs.reset()[0]
+        while len(episode_rewards) < num_episodes:
+            action = self(obs)
+            obs, rewards, terminateds, truncateds, infos = envs.step(action)
+            episode_rew_vec += rewards
+            episode_len_vec += 1
+            for i in range(num_envs):
+                if terminateds[i] or truncateds[i]:
+                    episode_rewards.append(episode_rew_vec[i])
+                    episode_lengths.append(episode_len_vec[i])
+                    if 'is_success' in infos['final_info']:
+                        episode_successes.append(infos['final_info']['is_success'][i])  # type: ignore
+                    else:
+                        episode_successes.append(False)
+                    episode_rew_vec[i] = 0.0
+                    episode_len_vec[i] = 0
+            print(f"Evaluating episodes {len(episode_rewards)}/{num_episodes}", end='\r')
+            if len(episode_rewards) >= num_episodes:
+                break
+        print()
+        self.deterministic = deterministic_before  # undo
 
         return episode_rewards, episode_lengths, episode_successes
 

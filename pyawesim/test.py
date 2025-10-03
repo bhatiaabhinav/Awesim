@@ -1,9 +1,11 @@
 import ast
 import sys
+import numpy as np
 import torch
 from gymenv import AwesimEnv
 from gymenv_utils import make_mlp
 from ppo import Actor
+from gymnasium.vector import SyncVectorEnv, AsyncVectorEnv, AutoresetMode
 
 TEST_CONFIG = {
     "speedup": 8.0,                     # simulation speedup factor
@@ -11,6 +13,8 @@ TEST_CONFIG = {
     "synchronized": True,               # whether to run the simulation in synchronized mode (match sim with real wall time)
     "render_server_ip": "127.0.0.1",    # IP address of the render server
     "verbose": True,                    # whether to print detailed logs
+    "parallel": False,                  # whether to run multiple environments in parallel for evaluation
+    "episodes": 100,                    # number of episodes to run for evaluation
 }
 ENV_CONFIG = {
     "goal_lane": 84,
@@ -25,6 +29,11 @@ ENV_CONFIG = {
     "may_lose_entire_day_wage": True,   # lose entire 8-hour workday wage if not reached by the end of sim_duration
     "init_fuel_gallons": 3.0,           # initial fuel in gallons -- 1/4th of a 12-gallon tank car
     "goal_reward": 1.0,                 # A small positive number to incentivize reaching the goal
+    "deterministic_actions": True,      # If True, actions to select follow-mode vs stop-mode and turn/merge signals are deterministic instead of bernoulli-sampled
+}
+VEC_ENV_CONFIG = {
+    "n_envs": 8,
+    "async": True,
 }
 POLICY_CONFIG = {
     "norm_obs": True,
@@ -55,7 +64,15 @@ def test_model(model_path) -> None:
     actor = Actor(actor_model, env.action_space, deterministic=POLICY_CONFIG["deterministic"], norm_obs=POLICY_CONFIG["norm_obs"])    # type: ignore
     actor.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
 
-    actor.evaluate_policy(env, 100)
+    if TEST_CONFIG["parallel"]:
+        vec_cls = AsyncVectorEnv if VEC_ENV_CONFIG["async"] else SyncVectorEnv
+        vec_env = vec_cls([lambda: make_env(i + 1) for i in range(VEC_ENV_CONFIG["n_envs"])], copy=False, autoreset_mode=AutoresetMode.SAME_STEP)
+        rews, lens, succs = actor.evaluate_policy_parallel(vec_env, TEST_CONFIG["episodes"])
+        vec_env.close()
+    else:
+        rews, lens, succs = actor.evaluate_policy(env, TEST_CONFIG["episodes"])
+
+    print(f"Average Reward: {np.mean(rews)}, Average Length: {np.mean(lens)}, Success Rate: {np.mean(succs)}")
 
     env.close()
 
