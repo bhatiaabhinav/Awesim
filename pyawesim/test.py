@@ -66,7 +66,7 @@ def test_model(model_path) -> None:
 
     if TEST_CONFIG["parallel"]:
         vec_cls = AsyncVectorEnv if VEC_ENV_CONFIG["async"] else SyncVectorEnv
-        vec_env = vec_cls([lambda: make_env(i + 1) for i in range(VEC_ENV_CONFIG["n_envs"])], copy=False, autoreset_mode=AutoresetMode.SAME_STEP)
+        vec_env = vec_cls([(lambda i=i: make_env(i)) for i in range(VEC_ENV_CONFIG["n_envs"])], copy=False, autoreset_mode=AutoresetMode.SAME_STEP)
         rews, lens, succs = actor.evaluate_policy_parallel(vec_env, TEST_CONFIG["episodes"])
         vec_env.close()
     else:

@@ -146,6 +146,7 @@ class AwesimEnv(gym.Env):
         if self.verbose:
             print(f"Agent car ID: {self.agent.id}")
 
+        print("seeding rng with ", env_index + 1)
         A.seed_rng(env_index + 1)  # Seed random number generator for reproducibility
 
         # Define action space. # 5 continuous actions: follow mode vs stop at lane end mode, speed limit, follow mode THW, margin feet (for follow distance buffer (in addition to THW) in follow mode, or stopping margin from end of lane when in stop mode.)

@@ -71,9 +71,9 @@ def make_env(env_index: int = 0) -> AwesimEnv:
 
 def setup_training_env() -> VectorEnv:
     if VEC_ENV_CONFIG["async"]:
-        return AsyncVectorEnv([lambda: make_env(i + 1) for i in range(VEC_ENV_CONFIG["n_envs"])], copy=False, autoreset_mode=AutoresetMode.SAME_STEP)
+        return AsyncVectorEnv([lambda i=i: make_env(i + 1) for i in range(VEC_ENV_CONFIG["n_envs"])], copy=False, autoreset_mode=AutoresetMode.SAME_STEP)
     else:
-        return SyncVectorEnv([lambda: make_env(i + 1) for i in range(VEC_ENV_CONFIG["n_envs"])], copy=False, autoreset_mode=AutoresetMode.SAME_STEP)
+        return SyncVectorEnv([lambda i=i: make_env(i + 1) for i in range(VEC_ENV_CONFIG["n_envs"])], copy=False, autoreset_mode=AutoresetMode.SAME_STEP)
 
 
 def train_model() -> Tuple[Actor, Critic, PPO]:
