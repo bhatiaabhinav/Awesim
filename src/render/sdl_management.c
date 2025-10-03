@@ -237,6 +237,9 @@ SimCommand handle_sdl_events() {
         } else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_LEFT) {
             command = COMMAND_SIM_DECREASE_SPEED; // Slow down command
             LOG_DEBUG("Left arrow key pressed, decreasing speed");
+        } else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_1) {
+            command = COMMAND_SIM_RESET_SPEED; // Reset speed command
+            LOG_DEBUG("1 key pressed, resetting speed");
         } else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_SPACE) {
             command = COMMAND_SIM_PAUSE; // Pause command
             LOG_DEBUG("Space key pressed, toggling pause");

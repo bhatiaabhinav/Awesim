@@ -105,18 +105,22 @@ static void sim_sync_with_render_server(Simulation* self) {
         switch (command) {
             case COMMAND_SIM_PAUSE: // Pause the simulation
                 self->is_paused = !self->is_paused; // Toggle pause state
-                LOG_DEBUG("Received toggle pause command, simulation is now %s", 
+                LOG_TRACE("Received toggle pause command, simulation is now %s", 
                           self->is_paused ? "paused" : "resumed");
                 break;
             case COMMAND_SIM_DECREASE_SPEED: // Slow down
                 self->simulation_speedup -= self->simulation_speedup < 1.01 ? 0.1 : 1.0;
                 self->simulation_speedup = fmax(self->simulation_speedup, 0.02);
-                LOG_DEBUG("Received slow_down command, new speedup: %.1f", self->simulation_speedup);
+                LOG_TRACE("Received slow_down command, new speedup: %.1f", self->simulation_speedup);
                 break;
             case COMMAND_SIM_INCREASE_SPEED: // Speed up
                 self->simulation_speedup += self->simulation_speedup < 0.99 ? 0.1 : 1.0;
                 self->simulation_speedup = fmin(self->simulation_speedup, 100.0);
-                LOG_DEBUG("Received speed_up command, new speedup: %.1f", self->simulation_speedup);
+                LOG_TRACE("Received speed_up command, new speedup: %.1f", self->simulation_speedup);
+                break;
+            case COMMAND_SIM_RESET_SPEED: // Reset speed
+                self->simulation_speedup = 1.0;
+                LOG_TRACE("Received reset speed command, new speedup: %.1f", self->simulation_speedup);
                 break;
             case COMMAND_QUIT: // Quit
                 if (self->should_quit_when_rendering_window_closed) {

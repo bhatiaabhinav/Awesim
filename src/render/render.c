@@ -21,6 +21,7 @@ void render(Simulation *sim) {
 
     if (last_render_t > 0) {
         double render_time = get_sys_time_seconds() - last_render_t;
+        render_time = render_time > 0 ? render_time : 0;    // clamp to 0 if negative due to clock issues
 
         // if vsync if off, and render time is less than 1/60 second, delay to cap at 60 FPS
         if (!VSYNC_ENABLED) {
@@ -32,7 +33,7 @@ void render(Simulation *sim) {
             }
         }
 
-        render_fps = 0.9 * render_fps + 0.1 / render_time;
+        render_fps = 0.9 * render_fps + 0.1 / (render_time + 1e-6); // Exponential moving average of FPS
     }
     last_render_t = get_sys_time_seconds();
 }
