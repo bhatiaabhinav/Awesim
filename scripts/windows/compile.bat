@@ -7,7 +7,7 @@ echo Compiling source files...
 if not exist bin mkdir bin
 
 windres scripts/windows/resource.rc -O coff -o scripts/windows/resource.o
-gcc ^
+clang ^
     -O3 -flto -funroll-loops ^
     -Iinclude ^
     -D_WIN32_WINNT=0x0A00 ^
@@ -28,7 +28,7 @@ echo ✅ Compilation successful. Executable created at: .\bin\awesim.exe
 
 echo Compiling renderer server source files...
 
-gcc ^
+clang ^
     -O3 -flto -funroll-loops ^
     -Iinclude ^
     -D_WIN32_WINNT=0x0A00 ^

@@ -14,7 +14,7 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-gcc \
+clang \
     -O3 -flto -funroll-loops \
     -Iinclude \
     src/main.c src/utils/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c \
@@ -40,7 +40,7 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-gcc \
+clang \
     -O3 -flto -funroll-loops \
     -Iinclude \
     src/render_server.c src/render/*.c src/utils/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c \
