@@ -6,9 +6,11 @@
 
 Welcome to the Awesome 2D AV Simulator!
 
+Awesim is a city-scale traffic simulator with typed units, NPC traffic, SDL rendering, and Python bindings that let any C entry point be called from RL or other external controllers—and it can also be used to control the agent car from outside C code, e.g., using RL. The stock Gymnasium environment (AwesimEnv) wraps those bindings so an agent adjusts car 0’s driving-assistant knobs (follow vs stop modes, speed targets, headway buffers, turn/merge intents) while every other vehicle runs the built-in NPC policy; its 149-D observation vector blends vehicle state, ADAS configuration, situational awareness, traffic lights, and fuel/time context for long-horizon driving tasks. Each step advances the real simulator, so policies learn to complete full trips—merging, turning, and obeying intersections—alongside realistic traffic, while the environment tracks multi-term costs (fuel, crash damage, lost wages, time penalties, in-progress traffic-violation costs) suitable for CMDP-style safety and economic constraints. Because the bindings expose the complete C API, you can script your own Gym/MDP wrappers, custom maps, or safety monitors just as easily, making Awesim a flexible platform for research and prototyping.
+
 ## Installation
 
-First, ensure you have `gcc` and the SDL2 libraries installed. On Ubuntu, you can install the necessary dependencies with:
+First, ensure you have `clang` and the SDL2 libraries installed. On Ubuntu, you can install the necessary dependencies with:
 
 ```bash
 sudo apt install libsdl2-dev libsdl2-ttf-dev libsdl2-gfx-dev libsdl2-image-dev
@@ -67,7 +69,7 @@ Create a Python virtual environment and install the required dependencies with `
 
 Finally, run `sh pyawesim/generate_bindings.sh` (on Linux/macOS) or `pyawesim\generate_bindings.bat` (on Windows) to generate the Python bindings.
 
-See the `pyawesim/example.py` file for an example of how to use the bindings.
+See the `pyawesim/gymenv.py` file for an example of how to use the bindings to create a Gymnasium environment. `pyawesim/train.py` provides code to train a PPO agent to solve this environment.
 
 ## Todos
 
