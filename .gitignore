@@ -76,5 +76,8 @@ models/
 logs/
 map_info.txt
 
+videos/
+plots/
+
 
 wandb/
