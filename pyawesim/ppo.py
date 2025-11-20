@@ -1424,7 +1424,7 @@ class POMDPEnvWrapper(gymnasium.Wrapper):
         return obs_with_flag, reward, terminated, truncated, info
 
 
-suffix = "noframestack-lstm"
+suffix = "-default"
 # Example usage:
 #   python ppo_single_file.py <EnvName> <iters> [model_path]
 # If model_path is provided, load actor and evaluate; else train from scratch. For atari, specify env name starting with "ALE/".
@@ -1454,8 +1454,8 @@ if __name__ == "__main__":
     print(f"obs_shape: {env.observation_space.shape}, action_dim: {action_dim}")
 
     # vectorized env for training and common PPO kwargs (irrespective of atari vs others)
-    envs = AsyncVectorEnv([lambda i=i: make_env(envname) for i in range(32)], **autoreset_kwarg_samestep_newgymapi)
-    ppo_kwargs = dict(entropy_coef=0.01, nsteps=32, norm_rewards=True, training_device='cuda' if torch.cuda.is_available() else 'cpu')
+    envs = AsyncVectorEnv([lambda i=i: make_env(envname) for i in range(8)], **autoreset_kwarg_samestep_newgymapi)
+    ppo_kwargs = dict(entropy_coef=0.01, nsteps=256, norm_rewards=True, training_device='cuda' if torch.cuda.is_available() else 'cpu')
 
     # Model && PPO setup: branch for Atari (CNN) vs others (classic control / Mujoco / MLP).
     if envname.startswith("ALE/"):
@@ -1483,7 +1483,7 @@ if __name__ == "__main__":
             nn.ReLU(),
             nn.Linear(512, 1)                               # Output layer
         )
-        ppo_kwargs.update(dict(actor_lr=0.0001, critic_lr=0.0001, context_length=8, decay_lr=True, decay_entropy_coef=True, batch_size=256, nepochs=4, inference_device=ppo_kwargs['training_device']))
+        ppo_kwargs.update(dict(actor_lr=0.0001, critic_lr=0.0001, decay_lr=True, decay_entropy_coef=True, batch_size=64, nepochs=4, inference_device=ppo_kwargs['training_device']))
     else:
         obs_dim = env.observation_space.shape[0]    # type: ignore
         actor_model = nn.Sequential(
