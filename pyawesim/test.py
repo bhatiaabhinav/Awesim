@@ -61,18 +61,18 @@ def test_model(model_path) -> None:
     action_dim = env.action_space.shape[0]     # type: ignore
 
     actor_model = make_mlp(obs_dim, POLICY_CONFIG["net_arch"], action_dim, layernorm=POLICY_CONFIG["layernorm"])
-    actor = Actor(actor_model, env.action_space, deterministic=POLICY_CONFIG["deterministic"], norm_obs=POLICY_CONFIG["norm_obs"])    # type: ignore
+    actor = Actor(actor_model, env.observation_space, env.action_space, deterministic=POLICY_CONFIG["deterministic"], norm_obs=POLICY_CONFIG["norm_obs"])    # type: ignore
     actor.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
 
     if TEST_CONFIG["parallel"]:
         vec_cls = AsyncVectorEnv if VEC_ENV_CONFIG["async"] else SyncVectorEnv
         vec_env = vec_cls([(lambda i=i: make_env(i)) for i in range(VEC_ENV_CONFIG["n_envs"])], copy=False, autoreset_mode=AutoresetMode.SAME_STEP)
-        rews, lens, succs = actor.evaluate_policy_parallel(vec_env, TEST_CONFIG["episodes"])
+        rews, costs, lens, succs = actor.evaluate_policy_parallel(vec_env, TEST_CONFIG["episodes"])
         vec_env.close()
     else:
-        rews, lens, succs = actor.evaluate_policy(env, TEST_CONFIG["episodes"])
+        rews, costs, lens, succs = actor.evaluate_policy(env, TEST_CONFIG["episodes"])
 
-    print(f"Average Reward: {np.mean(rews)}, Average Length: {np.mean(lens)}, Success Rate: {np.mean(succs)}")
+    print(f"Average Reward: {np.mean(rews)}, Average Cost: {np.mean(costs)}, Average Length: {np.mean(lens)}, Success Rate: {np.mean(succs)}")
 
     env.close()
 

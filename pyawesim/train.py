@@ -9,14 +9,15 @@ import torch
 import wandb
 from gymenv import AwesimEnv
 from gymenv_utils import make_mlp
+from gymnasium.spaces import Box
 from gymnasium.vector import SyncVectorEnv, AsyncVectorEnv, AutoresetMode, VectorEnv
-from ppo import Actor, Critic, PPO
+from ppo import Actor, ActorBase, Critic, PPO
 
 WANDB_CONFIG = {
     "no_wandb": False,
     "project": "Awesim-ApppointmentWorld",
     "experiment_name": "ApptWorld-20mins",
-    "notes": """From a random starting point, reach destination (lane #84) in 20 mins (rew = 1, 0 otherwise), else lost wage cost starts accumulating (in a seperate cost stream). Cost of gas and cost of crash also included in the cost stream. Episode ends at 60 mins and wage for entire 8-hour workday is lost if not reached. No cost constraint yet.""",
+    "notes": """From a random starting point, reach destination (lane #84) in 20 mins (rew = 1, 0 otherwise), else lost wage cost starts accumulating (in a seperate cost stream). Cost of gas and cost of crash also included in the cost stream. Episode ends at 60 mins and wage for entire 8-hour workday is lost if not reached.""",
 }
 ENV_CONFIG = {
     "goal_lane": 84,
@@ -64,6 +65,7 @@ POLICY_CONFIG = {
     "layernorm": True,
 }
 
+
 def make_env(env_index: int = 0) -> AwesimEnv:
     """Create an AwesimEnv instance with specified configuration."""
     return AwesimEnv(**ENV_CONFIG, env_index=env_index)  # type: ignore
@@ -76,7 +78,7 @@ def setup_training_env() -> VectorEnv:
         return SyncVectorEnv([lambda i=i: make_env(i + 1) for i in range(VEC_ENV_CONFIG["n_envs"])], copy=False, autoreset_mode=AutoresetMode.SAME_STEP)
 
 
-def train_model() -> Tuple[Actor, Critic, PPO]:
+def train_model() -> Tuple[ActorBase, Critic, PPO]:
     """Train the PPO model with the specified configuration."""
 
     vec_env = setup_training_env()
@@ -90,17 +92,19 @@ def train_model() -> Tuple[Actor, Critic, PPO]:
             save_code=True,
         )
 
-    obs_dim = vec_env.single_observation_space.shape[0]   # type: ignore
-    action_dim = vec_env.single_action_space.shape[0]     # type: ignore
+    obs_space: Box = vec_env.single_observation_space       # type: ignore
+    action_space: Box = vec_env.single_action_space         # type: ignore
+    obs_dim = vec_env.single_observation_space.shape[0]     # type: ignore
+    action_dim = vec_env.single_action_space.shape[0]       # type: ignore
     print(f"Observation space dim: {obs_dim}, Action space dim: {action_dim}")
 
     actor_model = make_mlp(obs_dim, POLICY_CONFIG["net_arch"], action_dim, layernorm=POLICY_CONFIG["layernorm"])
     critic_model = make_mlp(obs_dim, POLICY_CONFIG["net_arch"], 1, layernorm=POLICY_CONFIG["layernorm"])
-    actor = Actor(actor_model, vec_env.single_action_space, norm_obs=POLICY_CONFIG["norm_obs"])    # type: ignore
-    critic = Critic(critic_model, norm_obs=POLICY_CONFIG["norm_obs"])
+    actor = Actor(actor_model, obs_space, action_space, norm_obs=POLICY_CONFIG["norm_obs"])    # type: ignore
+    critic = Critic(critic_model, obs_space, norm_obs=POLICY_CONFIG["norm_obs"])
     if PPO_CONFIG["cmdp_mode"]:
         cost_critic_model = make_mlp(obs_dim, POLICY_CONFIG["net_arch"], 1, layernorm=POLICY_CONFIG["layernorm"])
-        cost_critic = Critic(cost_critic_model, norm_obs=POLICY_CONFIG["norm_obs"])
+        cost_critic = Critic(cost_critic_model, obs_space, norm_obs=POLICY_CONFIG["norm_obs"])
     else:
         cost_critic = None
 
