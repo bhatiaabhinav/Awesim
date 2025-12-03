@@ -4,7 +4,6 @@ import sys
 from typing import Tuple
 
 import matplotlib.pyplot as plt
-import numpy as np
 import torch
 import wandb
 from gymenv import AwesimEnv
@@ -58,11 +57,13 @@ PPO_CONFIG = {
     # "verbose": 1,
     "training_device": "cuda" if torch.cuda.is_available() else "cpu",
     "inference_device": "cuda" if torch.cuda.is_available() else "cpu",
+    "verbose": False
 }
 POLICY_CONFIG = {
     "norm_obs": True,
     "net_arch": [1024, 512, 256],
     "layernorm": True,
+    "state_dependent_std": True,
 }
 
 
@@ -98,9 +99,9 @@ def train_model() -> Tuple[ActorBase, Critic, PPO]:
     action_dim = vec_env.single_action_space.shape[0]       # type: ignore
     print(f"Observation space dim: {obs_dim}, Action space dim: {action_dim}")
 
-    actor_model = make_mlp(obs_dim, POLICY_CONFIG["net_arch"], action_dim, layernorm=POLICY_CONFIG["layernorm"])
+    actor_model = make_mlp(obs_dim, POLICY_CONFIG["net_arch"], 2 * action_dim if POLICY_CONFIG["state_dependent_std"] else action_dim, layernorm=POLICY_CONFIG["layernorm"])
     critic_model = make_mlp(obs_dim, POLICY_CONFIG["net_arch"], 1, layernorm=POLICY_CONFIG["layernorm"])
-    actor = Actor(actor_model, obs_space, action_space, norm_obs=POLICY_CONFIG["norm_obs"])    # type: ignore
+    actor = Actor(actor_model, obs_space, action_space, norm_obs=POLICY_CONFIG["norm_obs"], state_dependent_std=POLICY_CONFIG["state_dependent_std"])    # type: ignore
     critic = Critic(critic_model, obs_space, norm_obs=POLICY_CONFIG["norm_obs"])
     if PPO_CONFIG["cmdp_mode"]:
         cost_critic_model = make_mlp(obs_dim, POLICY_CONFIG["net_arch"], 1, layernorm=POLICY_CONFIG["layernorm"])
@@ -151,7 +152,6 @@ def train_model() -> Tuple[ActorBase, Critic, PPO]:
                 "train/lagrange": ppo.stats['lagranges'][-1],
                 "train/entropy_loss": -ppo.stats["entropies"][-1],
                 "train/approx_kl": ppo.stats["kl_divs"][-1],
-                "train/std": np.exp(ppo.stats["logstds"][-1]),
                 "train/logprob": ppo.stats["logprobs"][-1],
             })
         if ppo.stats['iterations'] % 100 == 0:

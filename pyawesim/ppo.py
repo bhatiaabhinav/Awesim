@@ -534,10 +534,10 @@ class ActorContinuous(ActorBase):
             logstd = mean[..., action_dim:]
             mean = mean[..., :action_dim]
         else:
-            logstd: Tensor = self.logstd # type: ignore
+            logstd: Tensor = self.logstd  # type: ignore
         logstd = self._logstd_post_process(logstd)
         return mean, logstd
-    
+
     def _get_logstd(self, x: Tensor) -> Tensor:
         """Get the logstd (from the network if state-dependent)."""
         if self.state_dependent_std:
@@ -546,10 +546,10 @@ class ActorContinuous(ActorBase):
             action_dim = mean.shape[-1] // 2
             logstd = mean[..., action_dim:]
         else:
-            logstd: Tensor = self.logstd # type: ignore
+            logstd: Tensor = self.logstd  # type: ignore
         logstd = self._logstd_post_process(logstd)
         return logstd
-    
+
     def _logstd_post_process(self, logstd: Tensor) -> Tensor:
         """Clamp logstd to avoid numerical issues."""
         if self.deterministic:
@@ -776,6 +776,7 @@ class PPO:
                  base_seed: int = 42,  # base seed for envs, the envs will be seeded: base_seed, base_seed+1, base_seed+2, ... etc.
                  inference_device: str = 'cpu',
                  training_device: str = 'cpu',
+                 verbose: bool = True,
                  custom_info_keys_to_log_at_episode_end: List[str] = [],):  # keys in info dict to log at episode end
         """
         Initialize the PPO trainer with environments, networks, and hyperparameters.
@@ -889,6 +890,7 @@ class PPO:
         self.moving_cost_estimate_step_size = moving_cost_estimate_step_size
         self.lagrange = 0.0  # Lagrange multiplier
         self.moving_average_cost = 0.0  # moving average estimate of cost per episode, discounted or undiscounted depending on constrain_undiscounted_cost
+        self.verbose = verbose
 
         # stats
         self.stats = {
@@ -1089,9 +1091,11 @@ class PPO:
                                     print(f"Warning: info key '{key}' not found in env info dictionary. Ignoring it. This warning will not be repeated.", file=sys.stderr)
                                 self.stats['info_keys'][key].append(np.nan)
 
-                print(f"Collected steps {(t + 1) * self.envs.num_envs}/{self.nsteps * self.envs.num_envs}", end='\r')
-        terminal_width = shutil.get_terminal_size((80, 20)).columns
-        print(' ' * terminal_width, end='\r')  # erase the progress log
+                if self.verbose:
+                    print(f"Collected steps {(t + 1) * self.envs.num_envs}/{self.nsteps * self.envs.num_envs}", end='\r')
+        if self.verbose:
+            terminal_width = shutil.get_terminal_size((80, 20)).columns
+            print(' ' * terminal_width, end='\r')  # erase the progress log
 
         # if using different device for inference, copy data to training device
         if self.inference_device != self.training_device:
@@ -1244,7 +1248,8 @@ class PPO:
             # flatten the (N_envs, nsteps, ...) data to (N_envs * nsteps, ...)
             obs_buf, actions_buf, values_buf, advantages_buf, log_probs_buf, cost_values_buf, cost_advantages_buf = (self.obs_buf.reshape(-1, *self.obs_buf.shape[2:]), self.actions_buf.reshape(-1, *self.actions_buf.shape[2:]), self.values_buf.reshape(-1, 1), self.advantages_buf.reshape(-1, 1), self.log_probs_buf.reshape(-1, 1), self.cost_values_buf.reshape(-1, 1), self.cost_advantages_buf.reshape(-1, 1))
         for epoch in range(self.nepochs):
-            print(f"Training epoch {epoch + 1}/{self.nepochs}", end='\r')
+            if self.verbose:
+                print(f"Training epoch {epoch + 1}/{self.nepochs}", end='\r')
             self.actor.train()
             self.critic.train()
             if self.cmdp_mode:
@@ -1320,8 +1325,9 @@ class PPO:
                         if self.early_stop_critic:
                             break
 
-        terminal_width = shutil.get_terminal_size((80, 20)).columns
-        print(' ' * terminal_width, end='\r')  # erase the progress log
+        if self.verbose:
+            terminal_width = shutil.get_terminal_size((80, 20)).columns
+            print(' ' * terminal_width, end='\r')  # erase the progress log
 
         # compute loss on all data for logging. This will also forward the caches for RNNs to the end of the data and set it up for next iteration.
         with torch.no_grad():
@@ -1476,7 +1482,7 @@ if __name__ == "__main__":
 
     # vectorized env for training and common PPO kwargs (irrespective of atari vs others)
     envs = AsyncVectorEnv([lambda i=i: make_env(envname) for i in range(8)], **autoreset_kwarg_samestep_newgymapi)
-    ppo_kwargs = dict(entropy_coef=0.01, nsteps=256, norm_rewards=True, training_device='cuda' if torch.cuda.is_available() else 'cpu')
+    ppo_kwargs = dict(entropy_coef=0.01, nsteps=256, norm_rewards=True, training_device='cuda' if torch.cuda.is_available() else 'cpu', verbose=True)
 
     # Model && PPO setup: branch for Atari (CNN) vs others (classic control / Mujoco / MLP).
     if envname.startswith("ALE/"):
