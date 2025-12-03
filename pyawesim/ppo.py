@@ -476,18 +476,18 @@ class ActorContinuous(ActorBase):
     Log-probabilities are adjusted for the tanh transformation and scaling.
     """
 
-    def __init__(self, model, observation_space: Box, action_space: Box, deterministic: bool = False, device='cpu', norm_obs: bool = False):
+    def __init__(self, model, observation_space: Box, action_space: Box, deterministic: bool = False, device='cpu', norm_obs: bool = False, state_dependent_std: bool = False):
         super(ActorContinuous, self).__init__(model, observation_space, action_space, deterministic, device, norm_obs)
         assert np.all(np.isfinite(action_space.low)) and np.all(np.isfinite(action_space.high))
-        self.logstd = nn.Parameter(torch.zeros(action_space.shape[0], dtype=torch.float32, device=device), requires_grad=True)
+        self.state_dependent_std = state_dependent_std
+        self.logstd = nn.Parameter(torch.zeros(1, action_space.shape[0], dtype=torch.float32, device=device), requires_grad=True) if not state_dependent_std else None
         # shift/scale to affine map from [-1, 1] to [low, high] => a = tanh(raw) * scale + shift:
         self.shift = nn.Parameter(torch.tensor(action_space.low + action_space.high, dtype=torch.float32, device=device) / 2.0, requires_grad=False)
         self.scale = nn.Parameter(torch.tensor((action_space.high - action_space.low) / 2.0, dtype=torch.float32, device=device), requires_grad=False)
 
     def sample_action(self, x: Tensor) -> Tuple[Tensor, Dict[str, Tensor]]:
         """Sample continuous actions: reparameterize, tanh-squash, and scale to bounds."""
-        mean = self._get_mean(x)
-        logstd = self._get_logstd(x)
+        mean, logstd = self._get_mean_logstd(x)
         std = torch.exp(logstd)
         # Reparameterized sample with noise, then tanh-squash and scale to bounds.
         noise = torch.randn_like(mean)
@@ -502,13 +502,20 @@ class ActorContinuous(ActorBase):
 
     def get_entropy(self, x):
         """Compute entropy of the squashed Gaussian policy."""
-        logstd = self._get_logstd(x)
-        return gaussian_entropy(logstd)
+        if self.state_dependent_std:
+            # sampling based estimate of entropy
+            _, info = self.sample_action(x)
+            log_prob = info['log_prob']
+            # print("Logprobs for entropy estimation:", log_prob)
+            entropy = -log_prob
+            return entropy
+        else:
+            logstd = self._get_logstd(x)
+            return gaussian_entropy(logstd)  # technically not exact for squashed Gaussian, but close enough
 
     def get_logprob(self, x: Tensor, action: Tensor) -> Tensor:
         """Compute log-prob of actions under the squashed Gaussian policy."""
-        mean = self._get_mean(x)
-        logstd = self._get_logstd(x)
+        mean, logstd = self._get_mean_logstd(x)
         std = torch.exp(logstd)
         # Rescale action to [-1, 1]
         action_unshifted_unscaled = (action - self.shift) / (self.scale + 1e-6)
@@ -518,17 +525,36 @@ class ActorContinuous(ActorBase):
         log_prob -= torch.sum(torch.log(1 - action_unshifted_unscaled.pow(2) + 1e-6), dim=-1, keepdim=True)
         return log_prob
 
-    def _get_mean(self, x: Tensor) -> Tensor:
-        """Get the policy mean from the network."""
+    def _get_mean_logstd(self, x: Tensor) -> Tuple[Tensor, Tensor]:
+        """Get the policy mean and logstd from the network."""
         mean = self.forward_model(x)
-        return mean
-
+        if self.state_dependent_std:
+            assert mean.shape[-1] % 2 == 0, "For state-dependent std, model output dim must be 2x action dim."
+            action_dim = mean.shape[-1] // 2
+            logstd = mean[..., action_dim:]
+            mean = mean[..., :action_dim]
+        else:
+            logstd: Tensor = self.logstd # type: ignore
+        logstd = self._logstd_post_process(logstd)
+        return mean, logstd
+    
     def _get_logstd(self, x: Tensor) -> Tensor:
-        """Get the log-standard deviation (-inf in deterministic mode; clamped for stability)."""
-        logstd = self.logstd
+        """Get the logstd (from the network if state-dependent)."""
+        if self.state_dependent_std:
+            mean = self.forward_model(x)
+            assert mean.shape[-1] % 2 == 0, "For state-dependent std, model output dim must be 2x action dim."
+            action_dim = mean.shape[-1] // 2
+            logstd = mean[..., action_dim:]
+        else:
+            logstd: Tensor = self.logstd # type: ignore
+        logstd = self._logstd_post_process(logstd)
+        return logstd
+    
+    def _logstd_post_process(self, logstd: Tensor) -> Tensor:
+        """Clamp logstd to avoid numerical issues."""
         if self.deterministic:
             logstd = logstd - torch.inf
-        logstd = torch.clamp(logstd, -20, 2)  # to avoid numerical issues
+        logstd = torch.clamp(logstd, -20, 2)    # avoid extreme std values
         return logstd
 
 
@@ -577,13 +603,13 @@ class ActorDiscrete(ActorBase):
         return probs_all, logprobs_all
 
 
-def Actor(model, observation_space: Box, action_space: Union[Box, Discrete], deterministic: bool = False, device='cpu', norm_obs: bool = False) -> ActorBase:
+def Actor(model, observation_space: Box, action_space: Union[Box, Discrete], deterministic: bool = False, device='cpu', norm_obs: bool = False, state_dependent_std: bool = False) -> ActorBase:
     """Factory function to create an appropriate Actor subclass based on the action space."""
     # raise a warning if norm_obs is True and the model is a SequenceModel
     if norm_obs and isinstance(model, SequenceModel):
         print("Warning: Observation normalization is enabled for a SequenceModel. In POMDPs, this may leak information across timesteps.", file=sys.stderr)
     if isinstance(action_space, Box):
-        return ActorContinuous(model, observation_space, action_space, deterministic, device, norm_obs)
+        return ActorContinuous(model, observation_space, action_space, deterministic, device, norm_obs, state_dependent_std=state_dependent_std)
     elif isinstance(action_space, Discrete):
         return ActorDiscrete(model, observation_space, action_space, deterministic, device, norm_obs)
     else:
@@ -1287,11 +1313,12 @@ class PPO:
                 self.actor.eval()
                 self.actor.cache = copy.deepcopy(cache_move_to_device(self.actor_inference_context_initial, self.training_device))  # set context for RNNs
                 # Early stop if measured KL exceeds 1.5 * target_kl to avoid over-updating.
-                kl = self.actor.get_kl_div(obs_buf, actions_buf, log_probs_buf).item()
-                if kl > 1.5 * self.target_kl:
-                    stop_actor_training = True
-                    if self.early_stop_critic:
-                        break
+                with torch.no_grad():
+                    kl = self.actor.get_kl_div(obs_buf, actions_buf, log_probs_buf).item()
+                    if kl > 1.5 * self.target_kl:
+                        stop_actor_training = True
+                        if self.early_stop_critic:
+                            break
 
         terminal_width = shutil.get_terminal_size((80, 20)).columns
         print(' ' * terminal_width, end='\r')  # erase the progress log
@@ -1312,12 +1339,6 @@ class PPO:
             self.actor.cache = self.actor_inference_context_initial  # reset context before calling get_logprob
             logprobs = self.actor.get_logprob(obs_buf, actions_buf)
             mean_logprob = logprobs.mean().item()
-            if isinstance(self.actor, ActorContinuous):
-                self.actor.cache = copy.deepcopy(cache_move_to_device(self.actor_inference_context_initial, self.training_device))
-                logstd = self.actor._get_logstd(obs_buf).mean(dim=0)
-                mean_logstd = logstd.mean().item()
-            else:
-                mean_logstd = 0.0
 
             # record cached contexts for RNNs for next iteration
             self.actor_inference_context_initial = copy.deepcopy(cache_move_to_device(cache_detach(self.actor.cache), self.inference_device))
@@ -1346,7 +1367,6 @@ class PPO:
         self.stats['kl_divs'].append(kl)
         self.stats['values'].append(value)
         self.stats['cost_values'].append(mean_cost)
-        self.stats['logstds'].append(mean_logstd)
         self.stats['logprobs'].append(mean_logprob)
         self.stats['actor_lrs'].append(actor_lr)
         self.stats['critic_lrs'].append(critic_lr)
@@ -1451,6 +1471,7 @@ if __name__ == "__main__":
     env = make_env(envname, render_mode="rgb_array")
     env = wrappers.RecordVideo(env, f"videos/{envname.replace('/', '-')}{suffix}", name_prefix='train', episode_trigger=lambda x: True)
     action_dim: int = env.action_space.n if isinstance(env.action_space, Discrete) else env.action_space.shape[0]  # type: ignore
+    actor_out_dim = action_dim if isinstance(env.action_space, Discrete) else 2 * action_dim    # mean and logstd for continuous actions
     print(f"obs_shape: {env.observation_space.shape}, action_dim: {action_dim}")
 
     # vectorized env for training and common PPO kwargs (irrespective of atari vs others)
@@ -1469,7 +1490,7 @@ if __name__ == "__main__":
             nn.Flatten(),                                   # 3136
             nn.Linear(3136, 512),                           # 512
             nn.ReLU(),
-            nn.Linear(512, action_dim)                      # Output layer
+            nn.Linear(512, actor_out_dim)                      # Output layer
         )
         critic_model = nn.Sequential(
             nn.Conv2d(4, 32, kernel_size=8, stride=4),      # 32 x 20 x 20
@@ -1491,7 +1512,7 @@ if __name__ == "__main__":
             nn.ReLU(),
             nn.Linear(64, 64),
             nn.ReLU(),
-            nn.Linear(64, action_dim)
+            nn.Linear(64, actor_out_dim)
         )
         critic_model = nn.Sequential(
             nn.Linear(obs_dim, 64),
@@ -1501,7 +1522,7 @@ if __name__ == "__main__":
             nn.Linear(64, 1)
         )
 
-    actor = Actor(actor_model, env.observation_space, env.action_space, deterministic=False, norm_obs=True)  # type: ignore
+    actor = Actor(actor_model, env.observation_space, env.action_space, deterministic=False, norm_obs=True, state_dependent_std=True)  # type: ignore
     critic = Critic(critic_model, env.observation_space, norm_obs=True)  # type: ignore
     ppo = PPO(envs, actor, critic, iters, **ppo_kwargs)  # type: ignore
 
