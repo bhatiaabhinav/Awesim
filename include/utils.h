@@ -136,6 +136,9 @@ LineSegment line_segment_from_center(Vec2D center, Vec2D direction, double lengt
 // Returns the unit direction vector of a line segment.
 Vec2D line_segment_unit_vector(LineSegment line);
 
+// Returns the intersection point of two line segments, if they intersect. Returns true if they intersect, false otherwise.
+bool line_segments_intersect(LineSegment line1, LineSegment line2, Coordinates* intersection_point);
+
 
 //
 // Typed units
@@ -201,6 +204,37 @@ JoulesPerLiter joules_per_liter(double value);
 
 // Initializes a LitersPerSecond value.
 LitersPerSecond liters_per_second(double value);
+
+
+// Angles:
+
+//
+// Quadrants
+//
+
+// Enum representing 2D Cartesian quadrants.
+typedef enum {
+    QUADRANT_TOP_RIGHT,
+    QUADRANT_TOP_LEFT,
+    QUADRANT_BOTTOM_LEFT,
+    QUADRANT_BOTTOM_RIGHT,
+} Quadrant;
+
+
+// Returns the sum of two angles in radians in [0, 2π).
+Radians angles_add(Radians theta1, Radians theta2);
+
+// Returns the difference between two angles in radians in [0, 2π).
+Radians angles_sub(Radians theta1, Radians theta2);
+
+// Normalizes an angle to the range [0, 2π).
+Radians angle_normalize(Radians theta);
+
+// Returns the quadrant of a given angle in radians.
+Quadrant angle_get_quadrant(Radians theta);
+
+// Returns the unit vector corresponding to an angle in radians.
+Vec2D angle_to_unit_vector(Radians theta);
 
 
 //
@@ -302,14 +336,3 @@ Vec2D direction_perpendicular_vector(Direction direction);
 Direction direction_opposite(Direction direction);
 
 
-//
-// Quadrants
-//
-
-// Enum representing 2D Cartesian quadrants.
-typedef enum {
-    QUADRANT_TOP_RIGHT,
-    QUADRANT_TOP_LEFT,
-    QUADRANT_BOTTOM_LEFT,
-    QUADRANT_BOTTOM_RIGHT,
-} Quadrant;

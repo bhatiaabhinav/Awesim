@@ -8,6 +8,7 @@
 typedef struct Simulation Simulation;
 Seconds sim_get_dt(const Simulation* self);
 Map* sim_get_map(Simulation* self);
+int sim_get_num_cars(const Simulation* self);
 
 // Traffic light in context of an intented turn
 typedef enum {
@@ -97,6 +98,49 @@ Meters nearby_vehicles_flattened_get_distance(const NearbyVehiclesFlattened* fla
 Seconds nearby_vehicles_flattened_get_time_to_collision(const NearbyVehiclesFlattened* flattened, int index);
 Seconds nearby_vehicles_flattened_get_time_headway(const NearbyVehiclesFlattened* flattened, int index);
 int nearby_vehicles_flattened_get_count(const NearbyVehiclesFlattened* flattened);
+
+
+struct RGB {
+    uint8_t r;         // Red channel (0-255)
+    uint8_t g;         // Green channel (0-255)
+    uint8_t b;         // Blue channel (0-255)
+};
+typedef struct RGB RGB;
+struct RGBCamera {
+    Coordinates position; // Position of the camera
+    Radians orientation;  // Orientation of the camera
+    int width;           // Width of the frame
+    int height;          // Height of the frame
+    Radians fov;         // Field of view in radians
+    uint8_t* data;       // Pointer to the RGB data in CHW format, linearized
+};
+typedef struct RGBCamera RGBCamera;
+struct Lidar {
+    Coordinates position; // Position of the LiDAR
+    Radians orientation;  // Orientation of the LiDAR
+    int num_points;      // Number of points in the LiDAR frame
+    Radians fov;         // Field of view in radians
+    Meters max_depth;    // Maximum depth range of the LiDAR (in meters)
+    double* data;        // Pointer to the depth data (in meters)
+};
+typedef struct Lidar Lidar;
+
+RGBCamera* rgbcam_malloc(Coordinates position, Radians orientation, int width, int height, Radians fov);
+Lidar* lidar_malloc(Coordinates position, Radians orientation, int num_points, Radians fov, Meters max_depth);
+void rgbcam_free(RGBCamera* frame);
+void lidar_free(Lidar* frame);
+void rgbcam_clear(RGBCamera* frame);
+void lidar_clear(Lidar* frame);
+uint8_t rgbcam_get_value_at(const RGBCamera* frame, int channel, int row, int col);
+double lidar_get_value_at(const Lidar* frame, int index);
+void rgbcam_set_value_at(RGBCamera* frame, int channel, int row, int col, uint8_t value);
+void lidar_set_value_at(Lidar* frame, int index, double value);
+RGB rgbcam_get_pixel_at(const RGBCamera* frame, int row, int col);
+void rgbcam_set_pixel_at(RGBCamera* frame, int row, int col, const RGB pixel);
+void rgbcam_copy(const RGBCamera* src, RGBCamera* dest);
+void lidar_copy(const Lidar* src, Lidar* dest);
+void rgbcam_capture(RGBCamera* frame, Simulation* sim, void** exclude_objects);
+void lidar_capture(Lidar* frame, Simulation* sim, void** exclude_objects);
 
 
 struct SituationalAwareness {

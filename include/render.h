@@ -100,6 +100,9 @@ void drawQuarterCircleOutline(SDL_Renderer *renderer, const int center_x, const 
 // Renders a car based on its current lane and position.
 void render_car(SDL_Renderer* renderer, const Car* car, Map* map, const bool paint_id, const bool paint_speed);
 
+// Renders a lidar
+void render_lidar(SDL_Renderer* renderer, const Lidar* lidar);
+
 // Renders the entire simulation state: roads, cars, lanes, traffic.
 void render_sim(SDL_Renderer* renderer, Simulation* sim, const bool draw_lanes, const bool draw_cars, const bool draw_track_lines, const bool draw_traffic_lights, const bool draw_car_ids, const bool draw_car_speeds, const bool draw_lane_ids, const bool draw_road_names, int hud_font_size, const bool benchmark);
 

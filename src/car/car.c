@@ -54,8 +54,16 @@ Meters car_get_lane_progress_meters(const Car* self) { return self->lane_progres
 int car_get_lane_rank(const Car* self) { return self->lane_rank; }
 MetersPerSecond car_get_speed(const Car* self) { return self->speed; }
 double car_get_damage(const Car* self) { return self->damage; }
-MetersPerSecondSquared car_get_acceleration(const Car* self) { return self->acceleration; }
 Liters car_get_fuel_level(const Car* self) { return self->fuel_level; }
+Coordinates car_get_center(const Car* self) { return self->center; }
+Radians car_get_orientation(const Car* self) { return self->orientation; }
+Coordinates* car_get_corners(const Car* self) { return (Coordinates*)self->corners; }
+Coordinates car_get_corner_front_right(const Car* self) { return self->corners[0]; }
+Coordinates car_get_corner_front_left(const Car* self) { return self->corners[1]; }
+Coordinates car_get_corner_rear_left(const Car* self) { return self->corners[2]; }
+Coordinates car_get_corner_rear_right(const Car* self) { return self->corners[3]; }
+
+MetersPerSecondSquared car_get_acceleration(const Car* self) { return self->acceleration; }
 CarIndicator car_get_indicator_turn(const Car* self) { return self->indicator_turn; }
 CarIndicator car_get_indicator_lane(const Car* self) { return self->indicator_lane; }
 bool car_get_request_indicated_lane(const Car* self) { return self->request_indicated_lane; }

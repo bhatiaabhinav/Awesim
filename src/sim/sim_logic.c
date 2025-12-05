@@ -7,7 +7,41 @@
 #include <assert.h>
 #include <math.h>
 
-void car_handle_movement_or_lane_change(Simulation* sim, Car* car, Lane* new_lane) {
+static void car_update_geometry(Simulation* sim, Car* car) {
+    Lane* lane = car_get_lane(car, sim_get_map(sim));
+    if (lane->type == LINEAR_LANE) {
+        Vec2D start = lane->start_point;
+        Vec2D end = lane->end_point;
+        Vec2D delta = vec_sub(end, start);
+        car->center = vec_add(start, vec_scale(delta, car->lane_progress));
+        car->orientation = angle_normalize(atan2(delta.y, delta.x));
+    } else if (lane->type == QUARTER_ARC_LANE) {
+        double theta = lane->start_angle + car->lane_progress * (lane->end_angle - lane->start_angle);
+        theta = angle_normalize(theta);
+        car->center.x = lane->center.x + lane->radius * cos(theta);
+        car->center.y = lane->center.y + lane->radius * sin(theta);
+        car->orientation = angles_add(theta, M_PI / 2); // tangent to the arc
+    } else {
+        LOG_ERROR("Cannot update geometry for car %d: unknown lane type.", car->id);
+        return;
+    }
+
+    double width = car->dimensions.x;
+    double length = car->dimensions.y;
+    // Define car corners in local coordinates. Car is facing right (0 radians).
+    Vec2D local_corners[4] = {
+        {length / 2, -width / 2},   // Front-right (0)
+        {length / 2, width / 2},  // Front-left (1)
+        {-length / 2, width / 2}, // Rear-left (2)
+        {-length / 2, -width / 2}   // Rear-right (3)
+    };
+    // Transform corners to world coordinates
+    for (int i = 0; i < 4; i++) {
+        car->corners[i] = vec_add(car_get_center(car), vec_rotate(local_corners[i], car->orientation));
+    }
+}
+
+static void car_handle_movement_or_lane_change(Simulation* sim, Car* car, Lane* new_lane) {
     Map* map = sim_get_map(sim);
     Lane* current_lane = car_get_lane(car, map);
     if (current_lane == new_lane) {
@@ -242,6 +276,7 @@ void sim_integrate(Simulation* self, Seconds time_period) {
             car_set_speed(car, v);
             car_set_fuel_level(car, fuel_remaining);
             car_handle_movement_or_lane_change(self, car, lane);
+            car_update_geometry(self, car);
             if (lane_changed) { 
                 car_set_request_indicated_lane(car, false); // Reset lane change request after successful lane change
                 if (car_get_auto_turn_off_indicators(car)) {

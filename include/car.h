@@ -87,6 +87,11 @@ struct Car {
     double damage;                      // damage level of the car. 0.0 for no damage and 1.0 for total damage.
     Liters fuel_level;                  // fuel level of the car in liters. If fuel level is 0.0, the car cannot accelerate in the direction of motion, but can decelerate (brake). The fuel level will be set by the simulation engine.
 
+    // geometry variables, set by the engine
+    Coordinates center;
+    Radians orientation;
+    Coordinates corners[4];     // front-right, front-left, rear-left, rear-right. (i.e., all anticlockwise)
+
     // control variables:
     MetersPerSecondSquared acceleration;    // current acceleration. Should be determined by the car's decision-making logic when car_make_decision() is called.
     CarIndicator indicator_lane;                  // Lane change indicator. This is purely an intent signal and does not request the sim to execute the lane change. Should be set by the car's decision-making logic when car_make_decision() is called.
@@ -126,6 +131,13 @@ int car_get_lane_rank(const Car* self);
 MetersPerSecond car_get_speed(const Car* self);
 double car_get_damage(const Car* self);
 Liters car_get_fuel_level(const Car* self);
+Coordinates car_get_center(const Car* self);
+Radians car_get_orientation(const Car* self);
+Coordinates* car_get_corners(const Car* self);
+Coordinates car_get_corner_front_right(const Car* self);
+Coordinates car_get_corner_front_left(const Car* self);
+Coordinates car_get_corner_rear_left(const Car* self);
+Coordinates car_get_corner_rear_right(const Car* self);
 
 MetersPerSecondSquared car_get_acceleration(const Car* self);
 CarIndicator car_get_indicator_turn(const Car* self);

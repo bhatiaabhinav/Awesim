@@ -39,42 +39,7 @@ static bool should_highlight_as_a_forward_vehicle_when_aeb_engaged(const Car* ca
     return false;
 }
 
-typedef struct {
-    Coordinates position;
-    double angle;
-} CarPose;
-
-CarPose get_car_pose(const Car* car, Map* map) {
-    Lane* lane = car_get_lane(car, map);
-    CarPose pose;
-
-    if (lane->type == LINEAR_LANE) {
-        Vec2D start = lane->start_point;
-        Vec2D end = lane->end_point;
-        Vec2D delta = vec_sub(end, start);
-        pose.position = vec_add(start, vec_scale(delta, car->lane_progress));
-        pose.angle = atan2(delta.y, delta.x);
-    } else if (lane->type == QUARTER_ARC_LANE) {
-        double theta = lane->start_angle + car->lane_progress * (lane->end_angle - lane->start_angle);
-        pose.position.x = lane->center.x + lane->radius * cos(theta);
-        pose.position.y = lane->center.y + lane->radius * sin(theta);
-        if (lane->direction == DIRECTION_CCW) {
-            pose.angle = theta + M_PI / 2;
-        } else if (lane->direction == DIRECTION_CW) {
-            pose.angle = theta - M_PI / 2;
-        } else {
-            LOG_ERROR("Error: Invalid direction for arc lane!");
-            pose.angle = 0;
-        }
-    } else {
-        LOG_ERROR("Error: Unknown lane type for car ID %d!", car->id);
-        pose.position = coordinates_create(0, 0);
-        pose.angle = 0;
-    }
-    return pose;
-}
-
-static void render_indicator(SDL_Renderer* renderer, const Car* car, CarIndicator indicator, const CarPose pose, double length, double width, int screen_width, int screen_height, int light_thickness, double cos_a, double sin_a, Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
+static void render_indicator(SDL_Renderer* renderer, const Car* car, CarIndicator indicator, double length, double width, int screen_width, int screen_height, int light_thickness, double cos_a, double sin_a, Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
 
     if (indicator == INDICATOR_NONE) return; // No indicator to render
 
@@ -126,38 +91,38 @@ static void render_indicator(SDL_Renderer* renderer, const Car* car, CarIndicato
     // Front side start
     double x_local = local_front_side_start.x;
     double y_local = local_front_side_start.y;
-    world_front_side_start.x = pose.position.x + x_local * cos_a - y_local * sin_a;
-    world_front_side_start.y = pose.position.y + x_local * sin_a + y_local * cos_a;
+    world_front_side_start.x = car->center.x + x_local * cos_a - y_local * sin_a;
+    world_front_side_start.y = car->center.y + x_local * sin_a + y_local * cos_a;
 
     // Front side end
     x_local = local_front_side_end.x;
     y_local = local_front_side_end.y;
-    world_front_side_end.x = pose.position.x + x_local * cos_a - y_local * sin_a;
-    world_front_side_end.y = pose.position.y + x_local * sin_a + y_local * cos_a;
+    world_front_side_end.x = car->center.x + x_local * cos_a - y_local * sin_a;
+    world_front_side_end.y = car->center.y + x_local * sin_a + y_local * cos_a;
 
     // Back start
     x_local = local_back_start.x;
     y_local = local_back_start.y;
-    world_back_start.x = pose.position.x + x_local * cos_a - y_local * sin_a;
-    world_back_start.y = pose.position.y + x_local * sin_a + y_local * cos_a;
+    world_back_start.x = car->center.x + x_local * cos_a - y_local * sin_a;
+    world_back_start.y = car->center.y + x_local * sin_a + y_local * cos_a;
 
     // Back end
     x_local = local_back_end.x;
     y_local = local_back_end.y;
-    world_back_end.x = pose.position.x + x_local * cos_a - y_local * sin_a;
-    world_back_end.y = pose.position.y + x_local * sin_a + y_local * cos_a;
+    world_back_end.x = car->center.x + x_local * cos_a - y_local * sin_a;
+    world_back_end.y = car->center.y + x_local * sin_a + y_local * cos_a;
 
     // Original front edge start
     x_local = local_front_edge_start.x;
     y_local = local_front_edge_start.y;
-    world_front_edge_start.x = pose.position.x + x_local * cos_a - y_local * sin_a;
-    world_front_edge_start.y = pose.position.y + x_local * sin_a + y_local * cos_a;
+    world_front_edge_start.x = car->center.x + x_local * cos_a - y_local * sin_a;
+    world_front_edge_start.y = car->center.y + x_local * sin_a + y_local * cos_a;
 
     // Original front edge end
     x_local = local_front_edge_end.x;
     y_local = local_front_edge_end.y;
-    world_front_edge_end.x = pose.position.x + x_local * cos_a - y_local * sin_a;
-    world_front_edge_end.y = pose.position.y + x_local * sin_a + y_local * cos_a;
+    world_front_edge_end.x = car->center.x + x_local * cos_a - y_local * sin_a;
+    world_front_edge_end.y = car->center.y + x_local * sin_a + y_local * cos_a;
 
     // Convert to screen coordinates
     SDL_Point screen_front_side_start = to_screen_coords(world_front_side_start, screen_width, screen_height);
@@ -181,43 +146,23 @@ static void render_indicator(SDL_Renderer* renderer, const Car* car, CarIndicato
 
 
 void render_car(SDL_Renderer* renderer, const Car* car, Map* map, const bool paint_id, const bool paint_speed) {
-    CarPose pose = get_car_pose(car, map);
 
     if (CAMERA_CENTERED_ON_CAR_ENABLED && car->id == CAMERA_CENTERED_ON_CAR_ID) {
-        PAN_X = (int)(pose.position.x * SCALE);
-        PAN_Y = (int)(-pose.position.y * SCALE);
+        PAN_X = (int)(car->center.x * SCALE);
+        PAN_Y = (int)(-car->center.y * SCALE);
     }
 
     double width = car->dimensions.x;
     double length = car->dimensions.y;
-
-    // Define car corners in local coordinates (front at +length/2, rear at -length/2)
-    Vec2D local_corners[4] = {
-        {length / 2, width / 2},   // Front-right (0)
-        {length / 2, -width / 2},  // Front-left (1)
-        {-length / 2, -width / 2}, // Rear-left (2)
-        {-length / 2, width / 2}   // Rear-right (3)
-    };
-
-    // Transform corners to world coordinates
-    Coordinates world_corners[4];
-    double cos_a = cos(pose.angle);
-    double sin_a = sin(pose.angle);
-    for (int i = 0; i < 4; i++) {
-        double x_local = local_corners[i].x;
-        double y_local = local_corners[i].y;
-        double x_rot = x_local * cos_a - y_local * sin_a;
-        double y_rot = x_local * sin_a + y_local * cos_a;
-        world_corners[i].x = pose.position.x + x_rot;
-        world_corners[i].y = pose.position.y + y_rot;
-    }
+    double cos_a = cos(car->orientation);
+    double sin_a = sin(car->orientation);
 
     // Convert to screen coordinates
     int screen_width = WINDOW_SIZE_WIDTH;
     int screen_height = WINDOW_SIZE_HEIGHT;
     SDL_Point screen_corners[4];
     for (int i = 0; i < 4; i++) {
-        screen_corners[i] = to_screen_coords(world_corners[i], screen_width, screen_height);
+        screen_corners[i] = to_screen_coords(car->corners[i], screen_width, screen_height);
     }
 
     // Draw car body
@@ -267,23 +212,23 @@ void render_car(SDL_Renderer* renderer, const Car* car, Map* map, const bool pai
 
         double x_local = local_left_headlight_start.x;
         double y_local = local_left_headlight_start.y;
-        world_left_headlight_start.x = pose.position.x + x_local * cos_a - y_local * sin_a;
-        world_left_headlight_start.y = pose.position.y + x_local * sin_a + y_local * cos_a;
+        world_left_headlight_start.x = car->center.x + x_local * cos_a - y_local * sin_a;
+        world_left_headlight_start.y = car->center.y + x_local * sin_a + y_local * cos_a;
 
         x_local = local_left_headlight_end.x;
         y_local = local_left_headlight_end.y;
-        world_left_headlight_end.x = pose.position.x + x_local * cos_a - y_local * sin_a;
-        world_left_headlight_end.y = pose.position.y + x_local * sin_a + y_local * cos_a;
+        world_left_headlight_end.x = car->center.x + x_local * cos_a - y_local * sin_a;
+        world_left_headlight_end.y = car->center.y + x_local * sin_a + y_local * cos_a;
 
         x_local = local_right_headlight_start.x;
         y_local = local_right_headlight_start.y;
-        world_right_headlight_start.x = pose.position.x + x_local * cos_a - y_local * sin_a;
-        world_right_headlight_start.y = pose.position.y + x_local * sin_a + y_local * cos_a;
+        world_right_headlight_start.x = car->center.x + x_local * cos_a - y_local * sin_a;
+        world_right_headlight_start.y = car->center.y + x_local * sin_a + y_local * cos_a;
 
         x_local = local_right_headlight_end.x;
         y_local = local_right_headlight_end.y;
-        world_right_headlight_end.x = pose.position.x + x_local * cos_a - y_local * sin_a;
-        world_right_headlight_end.y = pose.position.y + x_local * sin_a + y_local * cos_a;
+        world_right_headlight_end.x = car->center.x + x_local * cos_a - y_local * sin_a;
+        world_right_headlight_end.y = car->center.y + x_local * sin_a + y_local * cos_a;
 
         // Convert to screen coordinates
         SDL_Point screen_left_headlight_start = to_screen_coords(world_left_headlight_start, screen_width, screen_height);
@@ -325,23 +270,23 @@ void render_car(SDL_Renderer* renderer, const Car* car, Map* map, const bool pai
 
         double x_local = local_left_taillight_start.x;
         double y_local = local_left_taillight_start.y;
-        world_left_taillight_start.x = pose.position.x + x_local * cos_a - y_local * sin_a;
-        world_left_taillight_start.y = pose.position.y + x_local * sin_a + y_local * cos_a;
+        world_left_taillight_start.x = car->center.x + x_local * cos_a - y_local * sin_a;
+        world_left_taillight_start.y = car->center.y + x_local * sin_a + y_local * cos_a;
 
         x_local = local_left_taillight_end.x;
         y_local = local_left_taillight_end.y;
-        world_left_taillight_end.x = pose.position.x + x_local * cos_a - y_local * sin_a;
-        world_left_taillight_end.y = pose.position.y + x_local * sin_a + y_local * cos_a;
+        world_left_taillight_end.x = car->center.x + x_local * cos_a - y_local * sin_a;
+        world_left_taillight_end.y = car->center.y + x_local * sin_a + y_local * cos_a;
 
         x_local = local_right_taillight_start.x;
         y_local = local_right_taillight_start.y;
-        world_right_taillight_start.x = pose.position.x + x_local * cos_a - y_local * sin_a;
-        world_right_taillight_start.y = pose.position.y + x_local * sin_a + y_local * cos_a;
+        world_right_taillight_start.x = car->center.x + x_local * cos_a - y_local * sin_a;
+        world_right_taillight_start.y = car->center.y + x_local * sin_a + y_local * cos_a;
 
         x_local = local_right_taillight_end.x;
         y_local = local_right_taillight_end.y;
-        world_right_taillight_end.x = pose.position.x + x_local * cos_a - y_local * sin_a;
-        world_right_taillight_end.y = pose.position.y + x_local * sin_a + y_local * cos_a;
+        world_right_taillight_end.x = car->center.x + x_local * cos_a - y_local * sin_a;
+        world_right_taillight_end.y = car->center.y + x_local * sin_a + y_local * cos_a;
 
         // Convert to screen coordinates
         SDL_Point screen_left_taillight_start = to_screen_coords(world_left_taillight_start, screen_width, screen_height);
@@ -377,8 +322,8 @@ void render_car(SDL_Renderer* renderer, const Car* car, Map* map, const bool pai
     }
 
     // render turn indicator with red, and lane change indicator with dark orange. turn indicator draws over lane change indicator.
-    render_indicator(renderer, car, car->indicator_lane, pose, length, width, screen_width, screen_height, light_thickness, cos_a, sin_a, 255, 140, 0, 255); // Lane change indicator in dark orange
-    render_indicator(renderer, car, car->indicator_turn, pose, length, width, screen_width, screen_height, light_thickness, cos_a, sin_a, 255, 0, 0, 255); // Turn indicator in red
+    render_indicator(renderer, car, car->indicator_lane, length, width, screen_width, screen_height, light_thickness, cos_a, sin_a, 255, 140, 0, 255); // Lane change indicator in dark orange
+    render_indicator(renderer, car, car->indicator_turn, length, width, screen_width, screen_height, light_thickness, cos_a, sin_a, 255, 0, 0, 255); // Turn indicator in red
     
 
     // Render car ID
@@ -386,7 +331,7 @@ void render_car(SDL_Renderer* renderer, const Car* car, Map* map, const bool pai
         char id_str[10];
         snprintf(id_str, sizeof(id_str), "%d", car->id);
         int font_size = (int)(meters(1.0) * SCALE);     // font size = 1 meter
-        SDL_Point car_center_screen = to_screen_coords(pose.position, screen_width, screen_height);
+        SDL_Point car_center_screen = to_screen_coords( car->center, screen_width, screen_height);
         int text_x = car_center_screen.x;
         int text_y = car_center_screen.y;
         render_text(renderer, id_str, text_x, text_y, 255, 255, 255, 255, font_size, ALIGN_CENTER, false, car_id_texture_cache[car->id]);
@@ -400,7 +345,7 @@ void render_car(SDL_Renderer* renderer, const Car* car, Map* map, const bool pai
         int font_size = (int)(meters(0.75) * SCALE);     // font size = 0.75 meter
 
         // offset in direction of the back of the car
-        Vec2D speed_position = pose.position;
+        Vec2D speed_position = car->center;
         speed_position.x -= (length / 2 - 0.75) * cos_a; // 0.75 meters from the back of the car
         speed_position.y -= (length / 2 - 0.75) * sin_a; // 0.75 meters from the back of the car
 

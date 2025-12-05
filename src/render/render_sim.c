@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <stdint.h>
 
+static Lidar* highlighted_car_lidar = NULL;
+
 void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, const bool draw_cars,
                 const bool draw_track_lines, const bool draw_traffic_lights, const bool draw_car_ids, const bool draw_car_speeds, const bool draw_lane_ids, const bool draw_road_names, int hud_font_size, const bool benchmark)
 {
@@ -209,6 +211,21 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
         end = SDL_GetPerformanceCounter();
         elapsed_us = (double)(end - start) * 1e6 / SDL_GetPerformanceFrequency();
         if (benchmark) printf("Cars: %.2f us\n", elapsed_us);
+    }
+
+    // render lidar of the car that the camera is centered on
+    if (HIGHLIGHTED_CARS[0] != ID_NULL) {
+        Car* highlighted_car = sim_get_car(sim, HIGHLIGHTED_CARS[0]);
+        if (highlighted_car_lidar == NULL) {
+            highlighted_car_lidar = lidar_malloc((Coordinates){0,0}, 0.0, 360, 2 * M_PI, from_feet(255.0)); // 255 feet max depth
+        }
+        if (highlighted_car && highlighted_car_lidar) {
+            highlighted_car_lidar->position = highlighted_car->center;
+            highlighted_car_lidar->orientation = highlighted_car->orientation;
+            void* exclude_objects[] = {(void*)highlighted_car, NULL};
+            lidar_capture(highlighted_car_lidar, sim, exclude_objects);
+            render_lidar(renderer, highlighted_car_lidar);
+        }
     }
 
     // Render time stats
