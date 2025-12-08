@@ -57,7 +57,7 @@
 #define TL_YELLOW_RGB (RGB){220, 180, 20}
 
 // HUD
-#define HUD_HEIGHT 30
+#define HUD_HEIGHT 20
 #define HUD_TEXT_SCALE 2
 #define HUD_BG_RGB (RGB){0, 0, 0}
 #define HUD_TICK_RGB (RGB){255, 255, 255}
@@ -568,7 +568,7 @@ static void draw_hud(RGBCamera* camera) {
                 else if (i == 18) label = 'S';
                 
                 RGB c = (label == 'N') ? north_color : text_color;
-                draw_char_scaled(camera, x - 5, hud_height - 25, label, c, HUD_TEXT_SCALE);
+                draw_char_scaled(camera, x - 5, 5, label, c, HUD_TEXT_SCALE);
             } else if (i % 3 == 0) {
                 // Intercardinal (NE, SE, SW, NW) -> Pipe
                 draw_line_2d(camera, x, hud_height - 12, x, hud_height - 4, tick_color);

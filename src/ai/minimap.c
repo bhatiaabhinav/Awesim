@@ -261,11 +261,97 @@ void minimap_free(MiniMap* minimap) {
     }
 }
 
+#define MINIMAP_CONGESTION_SEGMENT_LENGTH 25.0
+
 void minimap_render(MiniMap* minimap, Simulation* sim) {
     if (!minimap || !minimap->data || !minimap->static_data) return;
 
     // Copy static background
     memcpy(minimap->data, minimap->static_data, 3 * minimap->width * minimap->height);
+
+    // Draw traffic congestion on straight roads
+    for (int i = 0; i < sim->map.num_roads; i++) {
+        Road* road = map_get_road(&sim->map, i);
+        if (road->type != STRAIGHT) continue;
+
+        int num_segments = (int)ceil(road->length / MINIMAP_CONGESTION_SEGMENT_LENGTH);
+        if (num_segments == 0) continue;
+
+        double* speed_sum = (double*)calloc(num_segments, sizeof(double));
+        int* car_count = (int*)calloc(num_segments, sizeof(int));
+
+        if (!speed_sum || !car_count) {
+            if (speed_sum) free(speed_sum);
+            if (car_count) free(car_count);
+            continue;
+        }
+
+        for (int l = 0; l < road->num_lanes; l++) {
+            Lane* lane = road_get_lane(road, &sim->map, l);
+            if (!lane) continue;
+
+            for (int c = 0; c < lane->num_cars; c++) {
+                CarId cid = lane->cars_ids[c];
+                Car* car = sim_get_car(sim, cid);
+                if (!car) continue;
+
+                // Calculate distance from start of road
+                double dist = car->lane_progress_meters;
+                
+                // Clamp distance to road length just in case
+                if (dist < 0) dist = 0;
+                if (dist >= road->length) dist = road->length - 0.1;
+
+                int seg_idx = (int)(dist / MINIMAP_CONGESTION_SEGMENT_LENGTH);
+                if (seg_idx >= 0 && seg_idx < num_segments) {
+                    speed_sum[seg_idx] += car->speed;
+                    car_count[seg_idx]++;
+                }
+            }
+        }
+
+        for (int s = 0; s < num_segments; s++) {
+            double avg_speed = (car_count[s] > 0) ? (speed_sum[s] / car_count[s]) : road->speed_limit;
+            double flow = avg_speed / road->speed_limit;
+            if (flow > 1.0) flow = 1.0;
+            if (flow < 0.0) flow = 0.0;
+            
+            // Congestion = 1 - flow
+            // Red (congestion=1) to Green (congestion=0)
+            RGB color;
+            color.r = (uint8_t)(255 * (1.0 - flow));
+            color.g = (uint8_t)(255 * flow);
+            color.b = 0;
+            // mute them a little bit:
+            color.r = (uint8_t)(color.r * 0.7);
+            color.g = (uint8_t)(color.g * 0.7);
+
+            double t1 = (double)s * MINIMAP_CONGESTION_SEGMENT_LENGTH / road->length;
+            double t2 = (double)(s + 1) * MINIMAP_CONGESTION_SEGMENT_LENGTH / road->length;
+            if (t2 > 1.0) t2 = 1.0;
+
+            Coordinates p1 = {
+                road->start_point.x + t1 * (road->end_point.x - road->start_point.x),
+                road->start_point.y + t1 * (road->end_point.y - road->start_point.y)
+            };
+            Coordinates p2 = {
+                road->start_point.x + t2 * (road->end_point.x - road->start_point.x),
+                road->start_point.y + t2 * (road->end_point.y - road->start_point.y)
+            };
+
+            int x1, y1, x2, y2;
+            world_to_pixel(minimap, p1, &x1, &y1);
+            world_to_pixel(minimap, p2, &x2, &y2);
+            
+            int thickness = (int)(minimap->scale_x * 4.0); 
+            if (thickness < 1) thickness = 1;
+
+            draw_line(minimap->data, minimap->width, minimap->height, x1, y1, x2, y2, color, thickness);
+        }
+
+        free(speed_sum);
+        free(car_count);
+    }
 
     // Draw landmarks
     for (int i = 0; i < 8; i++) {

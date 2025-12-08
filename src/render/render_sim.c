@@ -235,8 +235,8 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
     if (HIGHLIGHTED_CARS[0] != ID_NULL) {
         Car* highlighted_car = sim_get_car(sim, HIGHLIGHTED_CARS[0]);
         if (highlighted_car_camera == NULL) {
-            // Create a camera with 256x256 resolution, 90 degree fov, 250 meter max depth
-            highlighted_car_camera = rgbcam_malloc((Coordinates){0,0}, 1.0, 0.0, 256, 256, from_degrees(90), meters(500.0));
+            // Create a camera with 128x128 resolution, 90 degree fov, 500 meter max depth
+            highlighted_car_camera = rgbcam_malloc((Coordinates){0,0}, 1.0, 0.0, 128, 128, from_degrees(90), meters(500.0));
             highlighted_car_camera->aa_type = AA_SSAA;
             highlighted_car_camera->aa_level = 2;
         }
