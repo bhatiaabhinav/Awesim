@@ -57,7 +57,7 @@
 #define TL_YELLOW_RGB (RGB){220, 180, 20}
 
 // HUD
-#define HUD_HEIGHT 40
+#define HUD_HEIGHT 30
 #define HUD_TEXT_SCALE 2
 #define HUD_BG_RGB (RGB){0, 0, 0}
 #define HUD_TICK_RGB (RGB){255, 255, 255}
@@ -568,13 +568,15 @@ static void draw_hud(RGBCamera* camera) {
                 else if (i == 18) label = 'S';
                 
                 RGB c = (label == 'N') ? north_color : text_color;
-                draw_char_scaled(camera, x - 5, hud_height - 30, label, c, HUD_TEXT_SCALE);
+                draw_char_scaled(camera, x - 5, hud_height - 25, label, c, HUD_TEXT_SCALE);
             } else if (i % 3 == 0) {
                 // Intercardinal (NE, SE, SW, NW) -> Pipe
-                draw_line_2d(camera, x, hud_height - 15, x, hud_height - 5, tick_color);
+                draw_line_2d(camera, x, hud_height - 12, x, hud_height - 4, tick_color);
+                draw_line_2d(camera, x+1, hud_height - 12, x+1, hud_height - 4, tick_color);
             } else {
                 // Minor tick -> Period
-                draw_line_2d(camera, x, hud_height - 7, x, hud_height - 5, tick_color);
+                draw_line_2d(camera, x, hud_height - 6, x, hud_height - 4, tick_color);
+                draw_line_2d(camera, x+1, hud_height - 6, x+1, hud_height - 4, tick_color);
             }
         }
     }
@@ -1076,6 +1078,116 @@ static void render_scene_internal(RGBCamera* camera, Simulation* sim, void** exc
     }
 }
 
+// Simple FXAA implementation
+static void apply_fxaa(RGBCamera* camera) {
+    int w = camera->width;
+    int h = camera->height;
+    uint8_t* data = camera->data;
+    
+    // We need a copy of the source to read from while writing to destination
+    // Since we want to modify in-place effectively, we'll allocate a temp buffer for the result
+    // or just read from 'data' and write to 'data' carefully? 
+    // Standard way: Read from src, write to dst.
+    uint8_t* src = (uint8_t*)malloc(3 * w * h);
+    if (!src) return;
+    memcpy(src, data, 3 * w * h);
+
+    // Luma coefficients
+    // const float lumaR = 0.299f;
+    // const float lumaG = 0.587f;
+    // const float lumaB = 0.114f;
+    // Integer approximation for speed: Y = (R*77 + G*150 + B*29) >> 8
+    #define GET_LUMA(r, g, b) ((r*77 + g*150 + b*29) >> 8)
+    #define IDX(x, y) (((y) * w + (x)) * 3)
+
+    // Thresholds
+    const int EDGE_THRESHOLD_MIN = 32;
+
+    for (int y = 1; y < h - 1; y++) {
+        for (int x = 1; x < w - 1; x++) {
+            int idx = IDX(x, y);
+            uint8_t r = src[idx+0];
+            uint8_t g = src[idx+1];
+            uint8_t b = src[idx+2];
+            int lumaM = GET_LUMA(r, g, b);
+
+            // Neighbors
+            int lumaN = GET_LUMA(src[IDX(x, y-1)+0], src[IDX(x, y-1)+1], src[IDX(x, y-1)+2]);
+            int lumaS = GET_LUMA(src[IDX(x, y+1)+0], src[IDX(x, y+1)+1], src[IDX(x, y+1)+2]);
+            int lumaW = GET_LUMA(src[IDX(x-1, y)+0], src[IDX(x-1, y)+1], src[IDX(x-1, y)+2]);
+            int lumaE = GET_LUMA(src[IDX(x+1, y)+0], src[IDX(x+1, y)+1], src[IDX(x+1, y)+2]);
+
+            int minLuma = lumaM;
+            if (lumaN < minLuma) minLuma = lumaN;
+            if (lumaS < minLuma) minLuma = lumaS;
+            if (lumaW < minLuma) minLuma = lumaW;
+            if (lumaE < minLuma) minLuma = lumaE;
+
+            int maxLuma = lumaM;
+            if (lumaN > maxLuma) maxLuma = lumaN;
+            if (lumaS > maxLuma) maxLuma = lumaS;
+            if (lumaW > maxLuma) maxLuma = lumaW;
+            if (lumaE > maxLuma) maxLuma = lumaE;
+
+            int range = maxLuma - minLuma;
+            if (range < EDGE_THRESHOLD_MIN) continue; // Not an edge
+
+            // Determine edge direction
+            // Calculate luma of corners for better direction estimation
+            int lumaNW = GET_LUMA(src[IDX(x-1, y-1)+0], src[IDX(x-1, y-1)+1], src[IDX(x-1, y-1)+2]);
+            int lumaNE = GET_LUMA(src[IDX(x+1, y-1)+0], src[IDX(x+1, y-1)+1], src[IDX(x+1, y-1)+2]);
+            int lumaSW = GET_LUMA(src[IDX(x-1, y+1)+0], src[IDX(x-1, y+1)+1], src[IDX(x-1, y+1)+2]);
+            int lumaSE = GET_LUMA(src[IDX(x+1, y+1)+0], src[IDX(x+1, y+1)+1], src[IDX(x+1, y+1)+2]);
+
+            int edgeVert = 
+                abs((1 * lumaNW + (-2) * lumaN + 1 * lumaNE)) +
+                2 * abs((1 * lumaW  + (-2) * lumaM + 1 * lumaE)) +
+                abs((1 * lumaSW + (-2) * lumaS + 1 * lumaSE));
+            
+            int edgeHorz = 
+                abs((1 * lumaNW + (-2) * lumaW + 1 * lumaSW)) +
+                2 * abs((1 * lumaN  + (-2) * lumaM + 1 * lumaS)) +
+                abs((1 * lumaNE + (-2) * lumaE + 1 * lumaSE));
+            
+            bool isHorz = edgeHorz >= edgeVert;
+
+            // Simple blending: average with the neighbor in the direction of the edge gradient
+            // If horizontal edge, gradient is vertical (compare N and S)
+            // If vertical edge, gradient is horizontal (compare W and E)
+            
+            int luma1, luma2;
+            if (isHorz) {
+                luma1 = lumaN;
+                luma2 = lumaS;
+            } else {
+                luma1 = lumaW;
+                luma2 = lumaE;
+            }
+
+            int grad1 = abs(luma1 - lumaM);
+            int grad2 = abs(luma2 - lumaM);
+            
+            int offX = 0, offY = 0;
+            if (isHorz) {
+                offY = (grad1 >= grad2) ? -1 : 1;
+            } else {
+                offX = (grad1 >= grad2) ? -1 : 1;
+            }
+            
+            int neighborIdx = IDX(x + offX, y + offY);
+            
+            // Reduced blend strength to preserve sharpness (25% blend instead of 50%)
+            data[idx+0] = (src[idx+0] * 3 + src[neighborIdx+0]) / 4;
+            data[idx+1] = (src[idx+1] * 3 + src[neighborIdx+1]) / 4;
+            data[idx+2] = (src[idx+2] * 3 + src[neighborIdx+2]) / 4;
+        }
+    }
+    
+    free(src);
+    #undef GET_LUMA
+    #undef IDX
+}
+
 void rgbcam_capture_efficient(RGBCamera* camera, Simulation* sim, void** exclude_objects) {
     if (camera->aa_type == AA_SSAA && camera->aa_level > 1) {
         int scale = camera->aa_level;
@@ -1094,6 +1206,9 @@ void rgbcam_capture_efficient(RGBCamera* camera, Simulation* sim, void** exclude
         }
     } else {
         render_scene_internal(camera, sim, exclude_objects);
+        if (camera->aa_type == AA_FXAA) {
+            apply_fxaa(camera);
+        }
     }
     
     draw_hud(camera);

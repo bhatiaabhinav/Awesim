@@ -1,0 +1,63 @@
+#include "utils.h"
+#include "render.h"
+#include "logging.h"
+#include <SDL2/SDL2_gfxPrimitives.h>
+#include <math.h>
+#include <stdio.h>
+#include <stdint.h>
+
+// Render at top right corner of the screen
+void render_minimap(SDL_Renderer* renderer, const MiniMap* minimap) {
+    if (!minimap || !minimap->data) return;
+
+    // Create surface from pixel data
+    Uint32 rmask, gmask, bmask, amask;
+    #if SDL_BYTEORDER == SDL_BIG_ENDIAN
+        rmask = 0xff0000;
+        gmask = 0x00ff00;
+        bmask = 0x0000ff;
+        amask = 0;
+    #else
+        rmask = 0x0000ff;
+        gmask = 0x00ff00;
+        bmask = 0xff0000;
+        amask = 0;
+    #endif
+
+    SDL_Surface* surface = SDL_CreateRGBSurfaceFrom(
+        (void*)minimap->data,
+        minimap->width,
+        minimap->height,
+        24,                 // depth
+        minimap->width * 3, // pitch
+        rmask, gmask, bmask, amask
+    );
+
+    if (!surface) {
+        LOG_ERROR("Failed to create surface for minimap render: %s", SDL_GetError());
+        return;
+    }
+
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+    SDL_FreeSurface(surface);
+
+    if (!texture) {
+        LOG_ERROR("Failed to create texture for minimap render: %s", SDL_GetError());
+        return;
+    }
+
+    // Render to bottom right
+    SDL_Rect dest_rect;
+    dest_rect.w = minimap->width;
+    dest_rect.h = minimap->height;
+    dest_rect.x = WINDOW_SIZE_WIDTH - minimap->width - 20; // 20px padding from right
+    dest_rect.y = WINDOW_SIZE_HEIGHT - minimap->height - 20; // 20px padding from bottom
+
+    // Draw a border
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255); // White border
+    SDL_Rect border_rect = { dest_rect.x - 2, dest_rect.y - 2, dest_rect.w + 4, dest_rect.h + 4 };
+    SDL_RenderDrawRect(renderer, &border_rect);
+
+    SDL_RenderCopy(renderer, texture, NULL, &dest_rect);
+    SDL_DestroyTexture(texture);
+}

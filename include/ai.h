@@ -109,7 +109,8 @@ typedef struct RGB RGB;
 
 typedef enum {
     AA_NONE = 0,
-    AA_SSAA = 1
+    AA_SSAA = 1,
+    AA_FXAA = 2
 } AAType;
 
 struct RGBCamera {
@@ -125,6 +126,49 @@ struct RGBCamera {
     int aa_level;        // Level of anti-aliasing (e.g., 2 for 2x SSAA)
 };
 typedef struct RGBCamera RGBCamera;
+
+#define MAX_INFOS_ROWS 8
+
+struct InfosDisplay {
+    int width;
+    int height;
+    int num_rows;
+    uint8_t* data; // RGB data in HWC format
+    uint8_t* static_data; // Pre-rendered layout with full intensity
+    double left_info[MAX_INFOS_ROWS];
+    double middle_info[MAX_INFOS_ROWS];
+    double right_info[MAX_INFOS_ROWS];
+};
+typedef struct InfosDisplay InfosDisplay;
+
+InfosDisplay* infos_display_malloc(int width, int height, int num_rows);
+void infos_display_reset_num_rows(InfosDisplay* display, int num_rows);
+void infos_display_free(InfosDisplay* display);
+void infos_display_clear(InfosDisplay* display);
+void infos_display_render(InfosDisplay* display);
+
+struct MiniMap {
+    int width;
+    int height;
+    uint8_t* data; // RGB data in HWC format
+    uint8_t* static_data; // Pre-rendered layout with full intensity
+    
+    // Map extent
+    Coordinates min_coord;
+    Coordinates max_coord;
+    double scale_x; // pixels per meter
+    double scale_y; // pixels per meter
+    
+    CarId marked_car_id;
+    Coordinates marked_landmarks[8];
+    RGB marked_landmark_colors[8];
+};
+typedef struct MiniMap MiniMap;
+
+MiniMap* minimap_malloc(int width, int height, Map* map);
+void minimap_free(MiniMap* minimap);
+void minimap_render(MiniMap* minimap, Simulation* sim);
+
 struct Lidar {
     Coordinates position; // Position of the LiDAR
     Radians orientation;  // Orientation of the LiDAR

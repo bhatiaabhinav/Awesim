@@ -7,6 +7,8 @@
 
 static Lidar* highlighted_car_lidar = NULL;
 static RGBCamera* highlighted_car_camera = NULL;
+static InfosDisplay* highlighted_car_infos_display = NULL;
+static MiniMap* highlighted_car_minimap = NULL;
 
 void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, const bool draw_cars,
                 const bool draw_track_lines, const bool draw_traffic_lights, const bool draw_car_ids, const bool draw_car_speeds, const bool draw_lane_ids, const bool draw_road_names, int hud_font_size, const bool benchmark)
@@ -252,10 +254,80 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
         }
     }
 
+        // Render infos display for highlighted car
+    if (HIGHLIGHTED_CARS[0] != ID_NULL) {
+        Car* highlighted_car = sim_get_car(sim, HIGHLIGHTED_CARS[0]);
+        if (highlighted_car_infos_display == NULL) {
+            highlighted_car_infos_display = infos_display_malloc(128, 128, 3);
+        }
+        
+        if (highlighted_car && highlighted_car_infos_display) {
+            infos_display_clear(highlighted_car_infos_display);
+            
+            // Populate data
+            // Speed (normalized to ~120mph)
+            double speed_mph = to_mph(highlighted_car->speed);
+            highlighted_car_infos_display->middle_info[2] = fmin(1.0, fmax(0.0, speed_mph / 120.0));
+            
+            // Acceleration (normalized from -10 to 10 m/s^2)
+            double accel_norm = (highlighted_car->acceleration + 10.0) / 20.0;
+            highlighted_car_infos_display->middle_info[1] = fmin(1.0, fmax(0.0, accel_norm));
+            
+            // Fuel
+            if (highlighted_car->fuel_tank_capacity > 0) {
+                highlighted_car_infos_display->middle_info[0] = highlighted_car->fuel_level / highlighted_car->fuel_tank_capacity;
+            }
+            
+            // Indicators
+            // Turn
+            if (highlighted_car->indicator_turn == INDICATOR_LEFT) {
+                highlighted_car_infos_display->left_info[2] = 1.0;
+                highlighted_car_infos_display->right_info[2] = 0.0;
+            } else if (highlighted_car->indicator_turn == INDICATOR_RIGHT) {
+                highlighted_car_infos_display->left_info[2] = 0.0;
+                highlighted_car_infos_display->right_info[2] = 1.0;
+            }
+            
+            // Merge
+            if (highlighted_car->indicator_lane == INDICATOR_LEFT) {
+                highlighted_car_infos_display->left_info[1] = 1.0;
+                highlighted_car_infos_display->right_info[1] = 0.0;
+            } else if (highlighted_car->indicator_lane == INDICATOR_RIGHT) {
+                highlighted_car_infos_display->left_info[1] = 0.0;
+                highlighted_car_infos_display->right_info[1] = 1.0;
+            }
+            
+            infos_display_render(highlighted_car_infos_display);
+            render_infos_display(renderer, highlighted_car_infos_display);
+        }
+    }
+
+    // Render minimap for highlighted car
+    if (HIGHLIGHTED_CARS[0] != ID_NULL) {
+        Car* highlighted_car = sim_get_car(sim, HIGHLIGHTED_CARS[0]);
+        if (highlighted_car_minimap == NULL) {
+            highlighted_car_minimap = minimap_malloc(128, 128, map);
+        }
+        
+        if (highlighted_car && highlighted_car_minimap) {
+            highlighted_car_minimap->marked_car_id = highlighted_car->id;
+            
+            // Mark landmark: center of lane #84 in blue
+            Lane* lane84 = map_get_lane(map, 84);
+            if (lane84) {
+                highlighted_car_minimap->marked_landmarks[0] = lane84->center;
+                highlighted_car_minimap->marked_landmark_colors[0] = (RGB){0, 0, 255};
+            }
+            
+            minimap_render(highlighted_car_minimap, sim);
+            render_minimap(renderer, highlighted_car_minimap);
+        }
+    }
+
     // Render time stats
     char time_stats[40];
     ClockReading clock_reading = sim_get_clock_reading(sim);
-snprintf(time_stats, sizeof(time_stats), "%s %02d:%02d:%02d  (%s %.1fx)",
+    snprintf(time_stats, sizeof(time_stats), "%s %02d:%02d:%02d  (%s %.1fx)",
          day_of_week_strings[clock_reading.day_of_week],
          clock_reading.hours, clock_reading.minutes, (int)clock_reading.seconds,
          sim->is_paused ? "⏸" : (approxeq(sim->simulation_speedup, 1.0, 1e-6) ? "⏵" : "⏩"),
