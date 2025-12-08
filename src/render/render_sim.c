@@ -233,8 +233,8 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
     if (HIGHLIGHTED_CARS[0] != ID_NULL) {
         Car* highlighted_car = sim_get_car(sim, HIGHLIGHTED_CARS[0]);
         if (highlighted_car_camera == NULL) {
-            // Create a camera with 256x256 resolution, 90 degree fov, 1000 meter max depth
-            highlighted_car_camera = rgbcam_malloc((Coordinates){0,0}, 1.0, 0.0, 256, 256, from_degrees(90), meters(1000.0));
+            // Create a camera with 256x256 resolution, 90 degree fov, 250 meter max depth
+            highlighted_car_camera = rgbcam_malloc((Coordinates){0,0}, 1.0, 0.0, 256, 256, from_degrees(90), meters(250.0));
         }
         if (highlighted_car && highlighted_car_camera) {
             // Attach to front-center of the car. Front is at +length/2 along orientation.

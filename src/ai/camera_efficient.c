@@ -220,6 +220,323 @@ static void rasterize_cube(RGBCamera* camera, Coordinates3D center, double size,
     rasterize_quad(camera, to_cam(p1, cam_pos, cos_o, sin_o), to_cam(p2, cam_pos, cos_o, sin_o), to_cam(p6, cam_pos, cos_o, sin_o), to_cam(p5, cam_pos, cos_o, sin_o), color_right);
 }
 
+static void rasterize_box(RGBCamera* camera, Coordinates3D center, double size_x, double size_y, double size_z, RGB color, Coordinates3D cam_pos, double cos_o, double sin_o) {
+    double sx = size_x / 2.0;
+    double sy = size_y / 2.0;
+    double sz = size_z / 2.0;
+    
+    Coordinates3D p0 = {center.x - sx, center.y - sy, center.z - sz};
+    Coordinates3D p1 = {center.x + sx, center.y - sy, center.z - sz};
+    Coordinates3D p2 = {center.x + sx, center.y + sy, center.z - sz};
+    Coordinates3D p3 = {center.x - sx, center.y + sy, center.z - sz};
+    Coordinates3D p4 = {center.x - sx, center.y - sy, center.z + sz};
+    Coordinates3D p5 = {center.x + sx, center.y - sy, center.z + sz};
+    Coordinates3D p6 = {center.x + sx, center.y + sy, center.z + sz};
+    Coordinates3D p7 = {center.x - sx, center.y + sy, center.z + sz};
+
+    // Top
+    rasterize_quad(camera, to_cam(p4, cam_pos, cos_o, sin_o), to_cam(p5, cam_pos, cos_o, sin_o), to_cam(p6, cam_pos, cos_o, sin_o), to_cam(p7, cam_pos, cos_o, sin_o), color);
+    // Bottom
+    rasterize_quad(camera, to_cam(p0, cam_pos, cos_o, sin_o), to_cam(p3, cam_pos, cos_o, sin_o), to_cam(p2, cam_pos, cos_o, sin_o), to_cam(p1, cam_pos, cos_o, sin_o), color);
+    // Front (y-sy)
+    rasterize_quad(camera, to_cam(p0, cam_pos, cos_o, sin_o), to_cam(p1, cam_pos, cos_o, sin_o), to_cam(p5, cam_pos, cos_o, sin_o), to_cam(p4, cam_pos, cos_o, sin_o), color);
+    // Back (y+sy)
+    rasterize_quad(camera, to_cam(p2, cam_pos, cos_o, sin_o), to_cam(p3, cam_pos, cos_o, sin_o), to_cam(p7, cam_pos, cos_o, sin_o), to_cam(p6, cam_pos, cos_o, sin_o), color);
+    // Left (x-sx)
+    rasterize_quad(camera, to_cam(p3, cam_pos, cos_o, sin_o), to_cam(p0, cam_pos, cos_o, sin_o), to_cam(p4, cam_pos, cos_o, sin_o), to_cam(p7, cam_pos, cos_o, sin_o), color);
+    // Right (x+sx)
+    rasterize_quad(camera, to_cam(p1, cam_pos, cos_o, sin_o), to_cam(p2, cam_pos, cos_o, sin_o), to_cam(p6, cam_pos, cos_o, sin_o), to_cam(p5, cam_pos, cos_o, sin_o), color);
+}
+
+#define LANE_MARKING_WIDTH 0.15
+#define LANE_MARKING_Z 0.1
+#define LANE_MARKING_THICKNESS 0.1
+#define DASH_LENGTH 3.0
+#define DASH_GAP 9.0
+
+static void rasterize_line_segment(RGBCamera* camera, Coordinates3D p0, Coordinates3D p1, double width, RGB color, Coordinates3D cam_pos, double cos_o, double sin_o) {
+    double dx = p1.x - p0.x;
+    double dy = p1.y - p0.y;
+    double len = sqrt(dx*dx + dy*dy);
+    if (len < EPSILON) return;
+    
+    double nx = -dy / len * (width / 2.0);
+    double ny = dx / len * (width / 2.0);
+    
+    Coordinates3D v0 = {p0.x + nx, p0.y + ny, p0.z};
+    Coordinates3D v1 = {p1.x + nx, p1.y + ny, p1.z};
+    Coordinates3D v2 = {p1.x - nx, p1.y - ny, p1.z};
+    Coordinates3D v3 = {p0.x - nx, p0.y - ny, p0.z};
+    
+    // Top
+    rasterize_quad(camera, to_cam(v0, cam_pos, cos_o, sin_o), to_cam(v1, cam_pos, cos_o, sin_o), to_cam(v2, cam_pos, cos_o, sin_o), to_cam(v3, cam_pos, cos_o, sin_o), color);
+
+    // Bottom vertices (World Space)
+    Coordinates3D v0_b = {v0.x, v0.y, v0.z - LANE_MARKING_THICKNESS};
+    Coordinates3D v1_b = {v1.x, v1.y, v1.z - LANE_MARKING_THICKNESS};
+    Coordinates3D v2_b = {v2.x, v2.y, v2.z - LANE_MARKING_THICKNESS};
+    Coordinates3D v3_b = {v3.x, v3.y, v3.z - LANE_MARKING_THICKNESS};
+
+    // Sides
+    rasterize_quad(camera, to_cam(v0, cam_pos, cos_o, sin_o), to_cam(v1, cam_pos, cos_o, sin_o), to_cam(v1_b, cam_pos, cos_o, sin_o), to_cam(v0_b, cam_pos, cos_o, sin_o), color);
+    rasterize_quad(camera, to_cam(v1, cam_pos, cos_o, sin_o), to_cam(v2, cam_pos, cos_o, sin_o), to_cam(v2_b, cam_pos, cos_o, sin_o), to_cam(v1_b, cam_pos, cos_o, sin_o), color);
+    rasterize_quad(camera, to_cam(v2, cam_pos, cos_o, sin_o), to_cam(v3, cam_pos, cos_o, sin_o), to_cam(v3_b, cam_pos, cos_o, sin_o), to_cam(v2_b, cam_pos, cos_o, sin_o), color);
+    rasterize_quad(camera, to_cam(v3, cam_pos, cos_o, sin_o), to_cam(v0, cam_pos, cos_o, sin_o), to_cam(v0_b, cam_pos, cos_o, sin_o), to_cam(v3_b, cam_pos, cos_o, sin_o), color);
+}
+
+static void rasterize_dashed_line(RGBCamera* camera, Coordinates3D start, Coordinates3D end, double width, RGB color, Coordinates3D cam_pos, double cos_o, double sin_o) {
+    double dx = end.x - start.x;
+    double dy = end.y - start.y;
+    double len = sqrt(dx*dx + dy*dy);
+    if (len < EPSILON) return;
+    
+    double ux = dx / len;
+    double uy = dy / len;
+    
+    double current_dist = 0;
+    while (current_dist < len) {
+        double seg_len = fmin(DASH_LENGTH, len - current_dist);
+        Coordinates3D p0 = {start.x + ux * current_dist, start.y + uy * current_dist, start.z};
+        Coordinates3D p1 = {start.x + ux * (current_dist + seg_len), start.y + uy * (current_dist + seg_len), start.z};
+        
+        rasterize_line_segment(camera, p0, p1, width, color, cam_pos, cos_o, sin_o);
+        
+        current_dist += DASH_LENGTH + DASH_GAP;
+    }
+}
+
+static void render_lane_markings(RGBCamera* camera, Lane* lane, Map* map, Coordinates3D cam_pos, double cos_o, double sin_o) {
+    RGB white = {255, 255, 255};
+    RGB yellow = {255, 255, 0};
+    
+    Lane* adj_left = lane_get_adjacent_left(lane, map);
+    bool draw_left = false;
+    bool dashed_left = false;
+    RGB color_left = white;
+    
+    if (adj_left && adj_left->direction != lane->direction) {
+        draw_left = true; color_left = yellow; dashed_left = false;
+    } else if (!adj_left) {
+        draw_left = true; color_left = white; dashed_left = false;
+    } else {
+        draw_left = true; color_left = white; dashed_left = true;
+    }
+    
+    Lane* adj_right = lane_get_adjacent_right(lane, map);
+    bool draw_right = false;
+    bool dashed_right = false;
+    RGB color_right = white;
+    
+    if (!adj_right) {
+        draw_right = true; color_right = white; dashed_right = false;
+    } else if (adj_right->direction == lane->direction) {
+        draw_right = true; color_right = white; dashed_right = true;
+    }
+
+    if (lane->type == LINEAR_LANE) {
+        Coordinates start = lane->start_point;
+        Coordinates end = lane->end_point;
+        double dx = end.x - start.x;
+        double dy = end.y - start.y;
+        double len = sqrt(dx*dx + dy*dy);
+        if (len < EPSILON) return;
+        
+        double ux = dx / len;
+        double uy = dy / len;
+        double px = -uy; 
+        double py = ux;
+        
+        double offset_left = dashed_left ? 0.0 : LANE_MARKING_WIDTH / 2.0;
+        double offset_right = dashed_right ? 0.0 : LANE_MARKING_WIDTH / 2.0;
+
+        if (draw_left) {
+            Coordinates3D p0 = {start.x + px * (lane->width/2 - offset_left), start.y + py * (lane->width/2 - offset_left), LANE_MARKING_Z};
+            Coordinates3D p1 = {end.x + px * (lane->width/2 - offset_left), end.y + py * (lane->width/2 - offset_left), LANE_MARKING_Z};
+            if (dashed_left) rasterize_dashed_line(camera, p0, p1, LANE_MARKING_WIDTH, color_left, cam_pos, cos_o, sin_o);
+            else rasterize_line_segment(camera, p0, p1, LANE_MARKING_WIDTH, color_left, cam_pos, cos_o, sin_o);
+        }
+        
+        if (draw_right) {
+            Coordinates3D p0 = {start.x - px * (lane->width/2 - offset_right), start.y - py * (lane->width/2 - offset_right), LANE_MARKING_Z};
+            Coordinates3D p1 = {end.x - px * (lane->width/2 - offset_right), end.y - py * (lane->width/2 - offset_right), LANE_MARKING_Z};
+            if (dashed_right) rasterize_dashed_line(camera, p0, p1, LANE_MARKING_WIDTH, color_right, cam_pos, cos_o, sin_o);
+            else rasterize_line_segment(camera, p0, p1, LANE_MARKING_WIDTH, color_right, cam_pos, cos_o, sin_o);
+        }
+    } else if (lane->type == QUARTER_ARC_LANE) {
+        double r_left, r_right;
+        double offset_left = dashed_left ? 0.0 : LANE_MARKING_WIDTH / 2.0;
+        double offset_right = dashed_right ? 0.0 : LANE_MARKING_WIDTH / 2.0;
+
+        if (lane->direction == DIRECTION_CW) {
+            r_left = lane->radius + lane->width/2 - offset_left;
+            r_right = lane->radius - lane->width/2 + offset_right;
+        } else {
+            r_left = lane->radius - lane->width/2 + offset_left;
+            r_right = lane->radius + lane->width/2 - offset_right;
+        }
+        
+        int segments = TURN_SEGMENTS * 2;
+        double step = (lane->end_angle - lane->start_angle) / segments;
+        
+        if (draw_left) {
+             double dist_accum = 0;
+             bool drawing = true;
+             for(int i=0; i<segments; i++) {
+                double a1 = lane->start_angle + i * step;
+                double a2 = lane->start_angle + (i+1) * step;
+                double seg_len = fabs(step * r_left);
+                
+                if (!dashed_left || drawing) {
+                    Coordinates3D p0 = {lane->center.x + r_left * cos(a1), lane->center.y + r_left * sin(a1), LANE_MARKING_Z};
+                    Coordinates3D p1 = {lane->center.x + r_left * cos(a2), lane->center.y + r_left * sin(a2), LANE_MARKING_Z};
+                    rasterize_line_segment(camera, p0, p1, LANE_MARKING_WIDTH, color_left, cam_pos, cos_o, sin_o);
+                }
+                
+                if (dashed_left) {
+                    dist_accum += seg_len;
+                    if (drawing && dist_accum >= DASH_LENGTH) { drawing = false; dist_accum = 0; }
+                    else if (!drawing && dist_accum >= DASH_GAP) { drawing = true; dist_accum = 0; }
+                }
+             }
+        }
+        
+        if (draw_right) {
+             double dist_accum = 0;
+             bool drawing = true;
+             for(int i=0; i<segments; i++) {
+                double a1 = lane->start_angle + i * step;
+                double a2 = lane->start_angle + (i+1) * step;
+                double seg_len = fabs(step * r_right);
+                
+                if (!dashed_right || drawing) {
+                    Coordinates3D p0 = {lane->center.x + r_right * cos(a1), lane->center.y + r_right * sin(a1), LANE_MARKING_Z};
+                    Coordinates3D p1 = {lane->center.x + r_right * cos(a2), lane->center.y + r_right * sin(a2), LANE_MARKING_Z};
+                    rasterize_line_segment(camera, p0, p1, LANE_MARKING_WIDTH, color_right, cam_pos, cos_o, sin_o);
+                }
+                
+                if (dashed_right) {
+                    dist_accum += seg_len;
+                    if (drawing && dist_accum >= DASH_LENGTH) { drawing = false; dist_accum = 0; }
+                    else if (!drawing && dist_accum >= DASH_GAP) { drawing = true; dist_accum = 0; }
+                }
+             }
+        }
+    }
+}
+
+#ifndef M_PI_4
+#define M_PI_4 0.78539816339744830962
+#endif
+
+static void draw_pixel_safe(RGBCamera* camera, int x, int y, RGB color) {
+    if (x >= 0 && x < camera->width && y >= 0 && y < camera->height) {
+        rgbcam_set_pixel_at(camera, y, x, color);
+    }
+}
+
+static void draw_line_2d(RGBCamera* camera, int x0, int y0, int x1, int y1, RGB color) {
+    int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+    int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+    int err = dx + dy, e2;
+    while (1) {
+        draw_pixel_safe(camera, x0, y0, color);
+        if (x0 == x1 && y0 == y1) break;
+        e2 = 2 * err;
+        if (e2 >= dy) { err += dy; x0 += sx; }
+        if (e2 <= dx) { err += dx; y0 += sy; }
+    }
+}
+
+static void draw_char_scaled(RGBCamera* camera, int x, int y, char c, RGB color, int scale) {
+    // 5x5 bitmaps
+    static const uint8_t font[][5] = {
+        {0x11, 0x19, 0x15, 0x13, 0x11}, // N
+        {0x1F, 0x10, 0x1F, 0x10, 0x1F}, // E
+        {0x0E, 0x10, 0x0E, 0x01, 0x0E}, // S
+        {0x11, 0x11, 0x15, 0x15, 0x0A}  // W
+    };
+    
+    int idx = -1;
+    if (c == 'N') idx = 0;
+    else if (c == 'E') idx = 1;
+    else if (c == 'S') idx = 2;
+    else if (c == 'W') idx = 3;
+    
+    if (idx == -1) return;
+    
+    for(int r=0; r<5; r++) {
+        for(int c=0; c<5; c++) {
+            if ((font[idx][r] >> (4-c)) & 1) {
+                for(int dy=0; dy<scale; dy++) {
+                    for(int dx=0; dx<scale; dx++) {
+                        draw_pixel_safe(camera, x + c*scale + dx, y + r*scale + dy, color);
+                    }
+                }
+            }
+        }
+    }
+}
+
+static void draw_hud(RGBCamera* camera) {
+    int hud_height = 40;
+    RGB hud_bg = {0, 0, 0};
+    RGB tick_color = {255, 255, 255};
+    RGB text_color = {255, 255, 255};
+    RGB north_color = {255, 50, 50};
+
+    // Background strip
+    for(int y=0; y<hud_height; y++) {
+        for(int x=0; x<camera->width; x++) {
+            int idx = (y * camera->width + x) * 3;
+            camera->data[idx+0] = camera->data[idx+0] / 2;
+            camera->data[idx+1] = camera->data[idx+1] / 2;
+            camera->data[idx+2] = camera->data[idx+2] / 2;
+        }
+    }
+
+    double fov = camera->fov;
+    double center_x = camera->width / 2.0;
+    double pixels_per_rad = camera->width / fov;
+    
+    double orientation = fmod(camera->orientation, 2*M_PI);
+    if (orientation < 0) orientation += 2*M_PI;
+
+    double step = M_PI / 12.0; // 15 degrees
+
+    for (int i = 0; i < 24; i++) {
+        double angle = i * step;
+        
+        double diff = angle - orientation;
+        while (diff <= -M_PI) diff += 2*M_PI;
+        while (diff > M_PI) diff -= 2*M_PI;
+        
+        if (fabs(diff) < fov / 2.0) {
+            int x = (int)(center_x - diff * pixels_per_rad);
+            
+            if (i % 6 == 0) {
+                // Cardinal (N, E, S, W)
+                char label = '?';
+                if (i == 0) label = 'E';
+                else if (i == 6) label = 'N';
+                else if (i == 12) label = 'W';
+                else if (i == 18) label = 'S';
+                
+                RGB c = (label == 'N') ? north_color : text_color;
+                draw_char_scaled(camera, x - 5, hud_height - 30, label, c, 2);
+            } else if (i % 3 == 0) {
+                // Intercardinal (NE, SE, SW, NW) -> Pipe
+                draw_line_2d(camera, x, hud_height - 15, x, hud_height - 5, tick_color);
+            } else {
+                // Minor tick -> Period
+                draw_line_2d(camera, x, hud_height - 7, x, hud_height - 5, tick_color);
+            }
+        }
+    }
+    
+    // Center marker (Needle)
+    draw_line_2d(camera, (int)center_x, hud_height - 10, (int)center_x, hud_height, (RGB){255, 255, 0});
+}
+
 void rgbcam_capture_efficient(RGBCamera* camera, Simulation* sim, void** exclude_objects) {
     // Clear to sky color (gradient from top to horizon)
     RGB sky_top = {135, 206, 235}; // Sky Blue
@@ -390,6 +707,12 @@ void rgbcam_capture_efficient(RGBCamera* camera, Simulation* sim, void** exclude
                 rasterize_thick_quad(camera, p0, p1, p2, p3, color, cam_pos, cos_o, sin_o);
             }
         }
+
+        // Render Lanes
+        for (int i = 0; i < road->num_lanes; i++) {
+            Lane* lane = map_get_lane(map, road->lane_ids[i]);
+            render_lane_markings(camera, lane, map, cam_pos, cos_o, sin_o);
+        }
     }
 
     // 3. Intersections
@@ -404,7 +727,37 @@ void rgbcam_capture_efficient(RGBCamera* camera, Simulation* sim, void** exclude
         Coordinates3D i2 = { intersection_center.x + dims.x / 2.0, intersection_center.y + dims.y / 2.0, 0.0 };
         Coordinates3D i3 = { intersection_center.x - dims.x / 2.0, intersection_center.y + dims.y / 2.0, 0.0 };
 
-        rasterize_thick_quad(camera, i0, i1, i2, i3, (RGB){150, 150, 150}, cam_pos, cos_o, sin_o);
+        rasterize_thick_quad(camera, i0, i1, i2, i3, (RGB){175, 175, 175}, cam_pos, cos_o, sin_o);
+
+        // Intersection Edges
+        RGB edge_color = {255, 255, 255};
+        double edge_width = 0.3;
+        double half_w = edge_width / 2.0;
+
+        // Bottom (y is min)
+        Coordinates3D b0 = {i0.x, i0.y + half_w, LANE_MARKING_Z};
+        Coordinates3D b1 = {i1.x, i1.y + half_w, LANE_MARKING_Z};
+        rasterize_line_segment(camera, b0, b1, edge_width, edge_color, cam_pos, cos_o, sin_o);
+
+        // Right (x is max)
+        Coordinates3D r0 = {i1.x - half_w, i1.y, LANE_MARKING_Z};
+        Coordinates3D r1 = {i2.x - half_w, i2.y, LANE_MARKING_Z};
+        rasterize_line_segment(camera, r0, r1, edge_width, edge_color, cam_pos, cos_o, sin_o);
+
+        // Top (y is max)
+        Coordinates3D t0 = {i2.x, i2.y - half_w, LANE_MARKING_Z};
+        Coordinates3D t1 = {i3.x, i3.y - half_w, LANE_MARKING_Z};
+        rasterize_line_segment(camera, t0, t1, edge_width, edge_color, cam_pos, cos_o, sin_o);
+
+        // Left (x is min)
+        Coordinates3D l0 = {i3.x + half_w, i3.y, LANE_MARKING_Z};
+        Coordinates3D l1 = {i0.x + half_w, i0.y, LANE_MARKING_Z};
+        rasterize_line_segment(camera, l0, l1, edge_width, edge_color, cam_pos, cos_o, sin_o);
+
+        // Traffic Light Pole
+        double pole_height = TRAFFIC_LIGHT_HEIGHT - TRAFFIC_LIGHT_SIZE / 2.0;
+        Coordinates3D pole_center = { intersection_center.x, intersection_center.y, pole_height / 2.0 };
+        rasterize_box(camera, pole_center, 0.4, 0.4, pole_height, (RGB){100, 100, 100}, cam_pos, cos_o, sin_o);
 
         // Traffic Light
         Coordinates3D tl_center = { intersection_center.x, intersection_center.y, TRAFFIC_LIGHT_HEIGHT };
@@ -438,4 +791,6 @@ void rgbcam_capture_efficient(RGBCamera* camera, Simulation* sim, void** exclude
             c_ew, c_ew, // Left (W), Right (E) -> EW lights
             cam_pos, cos_o, sin_o);
     }
+
+    draw_hud(camera);
 }

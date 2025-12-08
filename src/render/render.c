@@ -2,6 +2,8 @@
 #include "render.h"
 
 #define INV_60  0.01666666666666667
+#define INV_120 0.00833333333333333
+#define TARGET_INV_FPS INV_60
 
 static double last_render_t = 0.0;  // Last render time for FPS calculation
 static double render_fps = 0.0;     // Render FPS
@@ -26,7 +28,7 @@ void render(Simulation *sim) {
         // if vsync if off, and render time is less than 1/60 second, delay to cap at 60 FPS
         if (!VSYNC_ENABLED) {
             Seconds to_delay = -1;  // no delay by default
-            if (render_time < INV_60) to_delay = INV_60 - render_time;
+            if (render_time < TARGET_INV_FPS) to_delay = TARGET_INV_FPS - render_time;
             if (to_delay > 0) {
                 SDL_Delay((Uint32)(to_delay * 1000));
                 render_time = get_sys_time_seconds() - last_render_t;
