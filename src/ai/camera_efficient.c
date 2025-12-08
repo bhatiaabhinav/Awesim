@@ -5,12 +5,69 @@
 #include <math.h>
 #include <float.h>
 
+// --- Configuration Constants ---
+
+// Camera & Rendering
 #define MIN_Z_NEAR 0.1
-#define TURN_SEGMENTS 10
 #define EPSILON 1e-9
+#define TURN_SEGMENTS 10
+
+// Sky
+#define SKY_TOP_RGB (RGB){135, 206, 235}
+#define SKY_HORIZON_RGB (RGB){255, 255, 255}
+
+// Ground
+#define GROUND_SIZE 2500.0
+#define GROUND_Z -0.33
+#define GROUND_RGB (RGB){34, 139, 34}
+
+// Roads & Lanes
 #define ROAD_THICKNESS 0.5
+#define LANE_MARKING_WIDTH 0.15
+#define LANE_MARKING_Z 0.1
+#define LANE_MARKING_THICKNESS 0.1
+#define DASH_LENGTH 3.0
+#define DASH_GAP 9.0
+#define ROAD_COLOR_DARK_RGB (RGB){100, 100, 100}
+#define ROAD_COLOR_LIGHT_RGB (RGB){128, 128, 128}
+
+// Cars
+#define CAR_RENDER_DIST_OFFSET 10.0
+#define CAR_BODY_RGB (RGB){74, 103, 65}
+#define CAR_HEADLIGHT_RGB (RGB){255, 255, 100}
+#define CAR_INDICATOR_RED_RGB (RGB){255, 0, 0}
+#define CAR_INDICATOR_ORANGE_RGB (RGB){255, 140, 0}
+#define CAR_BRAKE_RGB (RGB){255, 0, 0}
+#define CAR_TAILLIGHT_RGB (RGB){100, 0, 0}
+#define CAR_SIDE_RIGHT_RGB (RGB){0, 0, 255}
+
+// Intersections
+#define INTERSECTION_RGB (RGB){175, 175, 175}
+#define INTERSECTION_EDGE_WIDTH 0.3
+#define INTERSECTION_EDGE_RGB (RGB){255, 255, 255}
+
+// Traffic Lights
 #define TRAFFIC_LIGHT_SIZE 2.0
 #define TRAFFIC_LIGHT_HEIGHT 8.0
+#define TL_POLE_WIDTH 0.4
+#define TL_POLE_RGB (RGB){100, 100, 100}
+#define TL_BODY_RGB (RGB){50, 50, 50}
+#define TL_RED_RGB (RGB){255, 30, 30}
+#define TL_GREEN_RGB (RGB){50, 250, 50}
+#define TL_YELLOW_RGB (RGB){220, 180, 20}
+
+// HUD
+#define HUD_HEIGHT 40
+#define HUD_TEXT_SCALE 2
+#define HUD_BG_RGB (RGB){0, 0, 0}
+#define HUD_TICK_RGB (RGB){255, 255, 255}
+#define HUD_TEXT_RGB (RGB){255, 255, 255}
+#define HUD_NORTH_RGB (RGB){255, 50, 50}
+#define HUD_NEEDLE_RGB (RGB){255, 255, 0}
+
+#ifndef M_PI_4
+#define M_PI_4 0.78539816339744830962
+#endif
 
 typedef struct {
     double x, y, z;
@@ -248,12 +305,6 @@ static void rasterize_box(RGBCamera* camera, Coordinates3D center, double size_x
     rasterize_quad(camera, to_cam(p1, cam_pos, cos_o, sin_o), to_cam(p2, cam_pos, cos_o, sin_o), to_cam(p6, cam_pos, cos_o, sin_o), to_cam(p5, cam_pos, cos_o, sin_o), color);
 }
 
-#define LANE_MARKING_WIDTH 0.15
-#define LANE_MARKING_Z 0.1
-#define LANE_MARKING_THICKNESS 0.1
-#define DASH_LENGTH 3.0
-#define DASH_GAP 9.0
-
 static void rasterize_line_segment(RGBCamera* camera, Coordinates3D p0, Coordinates3D p1, double width, RGB color, Coordinates3D cam_pos, double cos_o, double sin_o) {
     double dx = p1.x - p0.x;
     double dy = p1.y - p0.y;
@@ -424,10 +475,6 @@ static void render_lane_markings(RGBCamera* camera, Lane* lane, Map* map, Coordi
     }
 }
 
-#ifndef M_PI_4
-#define M_PI_4 0.78539816339744830962
-#endif
-
 static void draw_pixel_safe(RGBCamera* camera, int x, int y, RGB color) {
     if (x >= 0 && x < camera->width && y >= 0 && y < camera->height) {
         rgbcam_set_pixel_at(camera, y, x, color);
@@ -478,11 +525,11 @@ static void draw_char_scaled(RGBCamera* camera, int x, int y, char c, RGB color,
 }
 
 static void draw_hud(RGBCamera* camera) {
-    int hud_height = 40;
-    RGB hud_bg = {0, 0, 0};
-    RGB tick_color = {255, 255, 255};
-    RGB text_color = {255, 255, 255};
-    RGB north_color = {255, 50, 50};
+    int hud_height = HUD_HEIGHT;
+    RGB hud_bg = HUD_BG_RGB;
+    RGB tick_color = HUD_TICK_RGB;
+    RGB text_color = HUD_TEXT_RGB;
+    RGB north_color = HUD_NORTH_RGB;
 
     // Background strip
     for(int y=0; y<hud_height; y++) {
@@ -522,7 +569,7 @@ static void draw_hud(RGBCamera* camera) {
                 else if (i == 18) label = 'S';
                 
                 RGB c = (label == 'N') ? north_color : text_color;
-                draw_char_scaled(camera, x - 5, hud_height - 30, label, c, 2);
+                draw_char_scaled(camera, x - 5, hud_height - 30, label, c, HUD_TEXT_SCALE);
             } else if (i % 3 == 0) {
                 // Intercardinal (NE, SE, SW, NW) -> Pipe
                 draw_line_2d(camera, x, hud_height - 15, x, hud_height - 5, tick_color);
@@ -534,13 +581,13 @@ static void draw_hud(RGBCamera* camera) {
     }
     
     // Center marker (Needle)
-    draw_line_2d(camera, (int)center_x, hud_height - 10, (int)center_x, hud_height, (RGB){255, 255, 0});
+    draw_line_2d(camera, (int)center_x, hud_height - 10, (int)center_x, hud_height, HUD_NEEDLE_RGB);
 }
 
 void rgbcam_capture_efficient(RGBCamera* camera, Simulation* sim, void** exclude_objects) {
     // Clear to sky color (gradient from top to horizon)
-    RGB sky_top = {135, 206, 235}; // Sky Blue
-    RGB sky_horizon = {255, 255, 255}; // White at horizon
+    RGB sky_top = SKY_TOP_RGB; // Sky Blue
+    RGB sky_horizon = SKY_HORIZON_RGB; // White at horizon
 
     for (int y = 0; y < camera->height; y++) {
         double t = (double)y / (camera->height / 2.0);
@@ -567,14 +614,14 @@ void rgbcam_capture_efficient(RGBCamera* camera, Simulation* sim, void** exclude
 
     // 0. Ground
     {
-        double ground_half_size = 2500.0;
-        double ground_z = -0.33; // Slightly below 0 to avoid z-fighting with road surface
+        double ground_half_size = GROUND_SIZE;
+        double ground_z = GROUND_Z; // Slightly below 0 to avoid z-fighting with road surface
         Coordinates3D g0 = { camera->position.x - ground_half_size, camera->position.y - ground_half_size, ground_z };
         Coordinates3D g1 = { camera->position.x + ground_half_size, camera->position.y - ground_half_size, ground_z };
         Coordinates3D g2 = { camera->position.x + ground_half_size, camera->position.y + ground_half_size, ground_z };
         Coordinates3D g3 = { camera->position.x - ground_half_size, camera->position.y + ground_half_size, ground_z };
         
-        RGB ground_color = {34, 139, 34}; // Forest Green
+        RGB ground_color = GROUND_RGB; // Forest Green
         rasterize_quad(camera, to_cam(g0, cam_pos, cos_o, sin_o), to_cam(g1, cam_pos, cos_o, sin_o), to_cam(g2, cam_pos, cos_o, sin_o), to_cam(g3, cam_pos, cos_o, sin_o), ground_color);
     }
 
@@ -584,7 +631,7 @@ void rgbcam_capture_efficient(RGBCamera* camera, Simulation* sim, void** exclude
         if (object_array_contains_object(exclude_objects, car)) continue;
 
         Meters center_distance = vec_distance(camera->position, car->center);
-        if (center_distance > camera->max_distance + 10.0) continue;
+        if (center_distance > camera->max_distance + CAR_RENDER_DIST_OFFSET) continue;
 
         Coordinates3D b[4], t[4];
         for(int i=0; i<4; i++) {
@@ -610,16 +657,16 @@ void rgbcam_capture_efficient(RGBCamera* camera, Simulation* sim, void** exclude
         // Colors
         RGB colors[6];
         // Bottom (not visible usually, but set to car color)
-        colors[0] = (RGB){74, 103, 65}; 
+        colors[0] = CAR_BODY_RGB; 
         // Top
-        colors[1] = (RGB){74, 103, 65};
+        colors[1] = CAR_BODY_RGB;
         // Front (Headlights)
-        colors[2] = (RGB){255, 255, 100};
+        colors[2] = CAR_HEADLIGHT_RGB;
         // Left
         {
-            RGB side_color = {74, 103, 65};
+            RGB side_color = CAR_BODY_RGB;
             if (car->indicator_turn == INDICATOR_LEFT || car->indicator_lane == INDICATOR_LEFT) {
-                RGB ind_color = (car->indicator_turn == INDICATOR_LEFT) ? (RGB){255, 0, 0} : (RGB){255, 140, 0};
+                RGB ind_color = (car->indicator_turn == INDICATOR_LEFT) ? CAR_INDICATOR_RED_RGB : CAR_INDICATOR_ORANGE_RGB;
                 side_color.r = (side_color.r + ind_color.r) / 2;
                 side_color.g = (side_color.g + ind_color.g) / 2;
                 side_color.b = (side_color.b + ind_color.b) / 2;
@@ -629,13 +676,13 @@ void rgbcam_capture_efficient(RGBCamera* camera, Simulation* sim, void** exclude
         // Back
         {
             bool is_braking = (car->speed > 0 && car->acceleration < -0.01) || (car->speed < 0 && car->acceleration > 0.01);
-            colors[4] = is_braking ? (RGB){255, 0, 0} : (RGB){100, 0, 0};
+            colors[4] = is_braking ? CAR_BRAKE_RGB : CAR_TAILLIGHT_RGB;
         }
         // Right
         {
-            RGB side_color = {0, 0, 255};
+            RGB side_color = CAR_SIDE_RIGHT_RGB;
             if (car->indicator_turn == INDICATOR_RIGHT || car->indicator_lane == INDICATOR_RIGHT) {
-                RGB ind_color = (car->indicator_turn == INDICATOR_RIGHT) ? (RGB){255, 0, 0} : (RGB){255, 140, 0};
+                RGB ind_color = (car->indicator_turn == INDICATOR_RIGHT) ? CAR_INDICATOR_RED_RGB : CAR_INDICATOR_ORANGE_RGB;
                 side_color.r = (side_color.r + ind_color.r) / 2;
                 side_color.g = (side_color.g + ind_color.g) / 2;
                 side_color.b = (side_color.b + ind_color.b) / 2;
@@ -675,7 +722,7 @@ void rgbcam_capture_efficient(RGBCamera* camera, Simulation* sim, void** exclude
             Coordinates3D r3 = { road_center.x - delta_x, road_center.y + delta_y, 0.0 };
 
             RGB color = (road_get_direction(road) == DIRECTION_WEST || road_get_direction(road) == DIRECTION_SOUTH) ? 
-                        (RGB){100, 100, 100} : (RGB){128, 128, 128};
+                        ROAD_COLOR_DARK_RGB : ROAD_COLOR_LIGHT_RGB;
             
             rasterize_thick_quad(camera, r0, r1, r2, r3, color, cam_pos, cos_o, sin_o);
 
@@ -693,7 +740,7 @@ void rgbcam_capture_efficient(RGBCamera* camera, Simulation* sim, void** exclude
             else if (quad == QUADRANT_BOTTOM_LEFT) { start_angle = M_PI; end_angle = 3*M_PI_2; }
             else { start_angle = 3*M_PI_2; end_angle = 2*M_PI; }
 
-            RGB color = (road_get_direction(road) == DIRECTION_CW) ? (RGB){100, 100, 100} : (RGB){128, 128, 128};
+            RGB color = (road_get_direction(road) == DIRECTION_CW) ? ROAD_COLOR_DARK_RGB : ROAD_COLOR_LIGHT_RGB;
 
             for (int i = 0; i < TURN_SEGMENTS; i++) {
                 double a1 = start_angle + (end_angle - start_angle) * i / (double)TURN_SEGMENTS;
@@ -727,11 +774,11 @@ void rgbcam_capture_efficient(RGBCamera* camera, Simulation* sim, void** exclude
         Coordinates3D i2 = { intersection_center.x + dims.x / 2.0, intersection_center.y + dims.y / 2.0, 0.0 };
         Coordinates3D i3 = { intersection_center.x - dims.x / 2.0, intersection_center.y + dims.y / 2.0, 0.0 };
 
-        rasterize_thick_quad(camera, i0, i1, i2, i3, (RGB){175, 175, 175}, cam_pos, cos_o, sin_o);
+        rasterize_thick_quad(camera, i0, i1, i2, i3, INTERSECTION_RGB, cam_pos, cos_o, sin_o);
 
         // Intersection Edges
-        RGB edge_color = {255, 255, 255};
-        double edge_width = 0.3;
+        RGB edge_color = INTERSECTION_EDGE_RGB;
+        double edge_width = INTERSECTION_EDGE_WIDTH;
         double half_w = edge_width / 2.0;
 
         // Bottom (y is min)
@@ -757,7 +804,7 @@ void rgbcam_capture_efficient(RGBCamera* camera, Simulation* sim, void** exclude
         // Traffic Light Pole
         double pole_height = TRAFFIC_LIGHT_HEIGHT - TRAFFIC_LIGHT_SIZE / 2.0;
         Coordinates3D pole_center = { intersection_center.x, intersection_center.y, pole_height / 2.0 };
-        rasterize_box(camera, pole_center, 0.4, 0.4, pole_height, (RGB){100, 100, 100}, cam_pos, cos_o, sin_o);
+        rasterize_box(camera, pole_center, TL_POLE_WIDTH, TL_POLE_WIDTH, pole_height, TL_POLE_RGB, cam_pos, cos_o, sin_o);
 
         // Traffic Light
         Coordinates3D tl_center = { intersection_center.x, intersection_center.y, TRAFFIC_LIGHT_HEIGHT };
@@ -766,27 +813,27 @@ void rgbcam_capture_efficient(RGBCamera* camera, Simulation* sim, void** exclude
         
         IntersectionState state = intersection_get_state(intersection);
         if (state == NS_GREEN_EW_RED) {
-            c_ns = (RGB){0, 255, 0}; // Green
-            c_ew = (RGB){255, 0, 0}; // Red
+            c_ns = TL_GREEN_RGB; // Green
+            c_ew = TL_RED_RGB; // Red
         } else if (state == NS_YELLOW_EW_RED) {
-            c_ns = (RGB){255, 255, 0}; // Yellow
-            c_ew = (RGB){255, 0, 0}; // Red
+            c_ns = TL_YELLOW_RGB; // Yellow
+            c_ew = TL_RED_RGB; // Red
         } else if (state == NS_RED_EW_GREEN) {
-            c_ns = (RGB){255, 0, 0}; // Red
-            c_ew = (RGB){0, 255, 0}; // Green
+            c_ns = TL_RED_RGB; // Red
+            c_ew = TL_GREEN_RGB; // Green
         } else if (state == EW_YELLOW_NS_RED) {
-            c_ns = (RGB){255, 0, 0}; // Red
-            c_ew = (RGB){255, 255, 0}; // Yellow
+            c_ns = TL_RED_RGB; // Red
+            c_ew = TL_YELLOW_RGB; // Yellow
         } else if (state == ALL_RED_BEFORE_NS_GREEN || state == ALL_RED_BEFORE_EW_GREEN || state == FOUR_WAY_STOP) {
-            c_ns = (RGB){255, 0, 0}; // Red
-            c_ew = (RGB){255, 0, 0}; // Red
+            c_ns = TL_RED_RGB; // Red
+            c_ew = TL_RED_RGB; // Red
         }
 
         // Cube faces: Top, Bottom, Front (S), Back (N), Left (W), Right (E)
         // Note: Front is -Y (South), Back is +Y (North), Left is -X (West), Right is +X (East)
         // So Front/Back are NS facing, Left/Right are EW facing.
         rasterize_cube(camera, tl_center, TRAFFIC_LIGHT_SIZE, 
-            (RGB){50, 50, 50}, (RGB){50, 50, 50}, // Top, Bottom (Dark Grey)
+            TL_BODY_RGB, TL_BODY_RGB, // Top, Bottom (Dark Grey)
             c_ns, c_ns, // Front (S), Back (N) -> NS lights
             c_ew, c_ew, // Left (W), Right (E) -> EW lights
             cam_pos, cos_o, sin_o);
