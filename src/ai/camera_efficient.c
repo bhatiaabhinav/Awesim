@@ -39,7 +39,7 @@
 #define CAR_INDICATOR_ORANGE_RGB (RGB){255, 140, 0}
 #define CAR_BRAKE_RGB (RGB){255, 0, 0}
 #define CAR_TAILLIGHT_RGB (RGB){100, 0, 0}
-#define CAR_SIDE_RIGHT_RGB (RGB){0, 0, 255}
+#define CAR_SIDE_RIGHT_RGB (RGB){74, 103, 128} // more blueish to differentiate from left side
 
 // Intersections
 #define INTERSECTION_RGB (RGB){175, 175, 175}
@@ -526,7 +526,6 @@ static void draw_char_scaled(RGBCamera* camera, int x, int y, char c, RGB color,
 
 static void draw_hud(RGBCamera* camera) {
     int hud_height = HUD_HEIGHT;
-    RGB hud_bg = HUD_BG_RGB;
     RGB tick_color = HUD_TICK_RGB;
     RGB text_color = HUD_TEXT_RGB;
     RGB north_color = HUD_NORTH_RGB;
@@ -661,34 +660,18 @@ void rgbcam_capture_efficient(RGBCamera* camera, Simulation* sim, void** exclude
         // Top
         colors[1] = CAR_BODY_RGB;
         // Front (Headlights)
-        colors[2] = CAR_HEADLIGHT_RGB;
+        colors[2] = CAR_BODY_RGB;
         // Left
-        {
-            RGB side_color = CAR_BODY_RGB;
-            if (car->indicator_turn == INDICATOR_LEFT || car->indicator_lane == INDICATOR_LEFT) {
-                RGB ind_color = (car->indicator_turn == INDICATOR_LEFT) ? CAR_INDICATOR_RED_RGB : CAR_INDICATOR_ORANGE_RGB;
-                side_color.r = (side_color.r + ind_color.r) / 2;
-                side_color.g = (side_color.g + ind_color.g) / 2;
-                side_color.b = (side_color.b + ind_color.b) / 2;
-            }
-            colors[3] = side_color;
-        }
+        colors[3] = CAR_BODY_RGB;
         // Back
+        RGB taillight_color;
         {
             bool is_braking = (car->speed > 0 && car->acceleration < -0.01) || (car->speed < 0 && car->acceleration > 0.01);
-            colors[4] = is_braking ? CAR_BRAKE_RGB : CAR_TAILLIGHT_RGB;
+            taillight_color = is_braking ? CAR_BRAKE_RGB : CAR_TAILLIGHT_RGB;
+            colors[4] = CAR_BODY_RGB;
         }
         // Right
-        {
-            RGB side_color = CAR_SIDE_RIGHT_RGB;
-            if (car->indicator_turn == INDICATOR_RIGHT || car->indicator_lane == INDICATOR_RIGHT) {
-                RGB ind_color = (car->indicator_turn == INDICATOR_RIGHT) ? CAR_INDICATOR_RED_RGB : CAR_INDICATOR_ORANGE_RGB;
-                side_color.r = (side_color.r + ind_color.r) / 2;
-                side_color.g = (side_color.g + ind_color.g) / 2;
-                side_color.b = (side_color.b + ind_color.b) / 2;
-            }
-            colors[5] = side_color;
-        }
+        colors[5] = CAR_SIDE_RIGHT_RGB;
 
         // Rasterize sides
         rasterize_quad(camera, vb[0], vb[3], vb[2], vb[1], colors[0]); // Bottom
@@ -697,6 +680,236 @@ void rgbcam_capture_efficient(RGBCamera* camera, Simulation* sim, void** exclude
         rasterize_quad(camera, vb[1], vb[2], vt[2], vt[1], colors[3]); // Left
         rasterize_quad(camera, vb[2], vb[3], vt[3], vt[2], colors[4]); // Back
         rasterize_quad(camera, vb[3], vb[0], vt[0], vt[3], colors[5]); // Right
+
+        // Calculate normals for lights (extrusion)
+        #define V3_SUB(a, b) (Vec3){a.x - b.x, a.y - b.y, a.z - b.z}
+        #define V3_CROSS(a, b) (Vec3){ \
+            a.y * b.z - a.z * b.y, \
+            a.z * b.x - a.x * b.z, \
+            a.x * b.y - a.y * b.x \
+        }
+        #define V3_LEN(v) sqrt(v.x*v.x + v.y*v.y + v.z*v.z)
+        #define V3_NORM(v) do { \
+            double _l = V3_LEN(v); \
+            if (_l > 1e-9) { v.x /= _l; v.y /= _l; v.z /= _l; } \
+        } while(0)
+
+        Vec3 n_front, n_back, n_left, n_right;
+        {
+            // Front: vb[0], vb[1], vt[1], vt[0] (Right to Left)
+            Vec3 v_right_to_left = V3_SUB(vb[1], vb[0]);
+            Vec3 v_up = V3_SUB(vt[0], vb[0]);
+            Vec3 c = V3_CROSS(v_right_to_left, v_up);
+            V3_NORM(c);
+            n_front = c;
+        }
+        {
+            // Back: vb[2], vb[3], vt[3], vt[2] (Left to Right)
+            Vec3 v_left_to_right = V3_SUB(vb[3], vb[2]);
+            Vec3 v_up = V3_SUB(vt[2], vb[2]);
+            Vec3 c = V3_CROSS(v_left_to_right, v_up);
+            V3_NORM(c);
+            n_back = c;
+        }
+        {
+            // Left: vb[1], vb[2], vt[2], vt[1] (Front to Back)
+            Vec3 v_front_to_back = V3_SUB(vb[2], vb[1]);
+            Vec3 v_up = V3_SUB(vt[1], vb[1]);
+            Vec3 c = V3_CROSS(v_front_to_back, v_up);
+            V3_NORM(c);
+            n_left = c;
+        }
+        {
+            // Right: vb[3], vb[0], vt[0], vt[3] (Back to Front)
+            Vec3 v_back_to_front = V3_SUB(vb[0], vb[3]);
+            Vec3 v_up = V3_SUB(vt[3], vb[3]);
+            Vec3 c = V3_CROSS(v_back_to_front, v_up);
+            V3_NORM(c);
+            n_right = c;
+        }
+
+        #define RASTERIZE_THICK_QUAD(p0, p1, p2, p3, normal, thickness, color) do { \
+            Vec3 _n = normal; \
+            double _t = thickness; \
+            Vec3 _q0 = {p0.x + _n.x*_t, p0.y + _n.y*_t, p0.z + _n.z*_t}; \
+            Vec3 _q1 = {p1.x + _n.x*_t, p1.y + _n.y*_t, p1.z + _n.z*_t}; \
+            Vec3 _q2 = {p2.x + _n.x*_t, p2.y + _n.y*_t, p2.z + _n.z*_t}; \
+            Vec3 _q3 = {p3.x + _n.x*_t, p3.y + _n.y*_t, p3.z + _n.z*_t}; \
+            rasterize_quad(camera, _q0, _q1, _q2, _q3, color); \
+            rasterize_quad(camera, p0, p1, _q1, _q0, color); \
+            rasterize_quad(camera, p1, p2, _q2, _q1, color); \
+            rasterize_quad(camera, p2, p3, _q3, _q2, color); \
+            rasterize_quad(camera, p3, p0, _q0, _q3, color); \
+        } while(0)
+
+        double light_thickness = 0.05;
+
+        // Render Tail Lights (on top of Back)
+        {
+            Vec3 bl = vb[2];
+            Vec3 br = vb[3];
+            Vec3 tl = vt[2];
+            Vec3 tr = vt[3];
+
+            // Helper macro for interpolation
+            #define LERP_V3(a, b, t) (Vec3){ \
+                a.x + (b.x - a.x) * t, \
+                a.y + (b.y - a.y) * t, \
+                a.z + (b.z - a.z) * t \
+            }
+            
+            // Bilinear interpolation
+            #define POINT_ON_BACK(u, v) LERP_V3( \
+                LERP_V3(bl, br, u), \
+                LERP_V3(tl, tr, u), \
+                v \
+            )
+
+            // Left Light
+            Vec3 ll_p0 = POINT_ON_BACK(0.05, 0.5);
+            Vec3 ll_p1 = POINT_ON_BACK(0.25, 0.5);
+            Vec3 ll_p2 = POINT_ON_BACK(0.25, 0.8);
+            Vec3 ll_p3 = POINT_ON_BACK(0.05, 0.8);
+            RASTERIZE_THICK_QUAD(ll_p0, ll_p1, ll_p2, ll_p3, n_back, light_thickness, taillight_color);
+
+            // Right Light
+            Vec3 rl_p0 = POINT_ON_BACK(0.75, 0.5);
+            Vec3 rl_p1 = POINT_ON_BACK(0.95, 0.5);
+            Vec3 rl_p2 = POINT_ON_BACK(0.95, 0.8);
+            Vec3 rl_p3 = POINT_ON_BACK(0.75, 0.8);
+            RASTERIZE_THICK_QUAD(rl_p0, rl_p1, rl_p2, rl_p3, n_back, light_thickness, taillight_color);
+            
+            #undef POINT_ON_BACK
+            #undef LERP_V3
+        }
+
+        // Render Headlights (on top of Front)
+        {
+            Vec3 bl = vb[0];
+            Vec3 br = vb[1];
+            Vec3 tl = vt[0];
+            Vec3 tr = vt[1];
+
+            #define LERP_V3(a, b, t) (Vec3){ \
+                a.x + (b.x - a.x) * t, \
+                a.y + (b.y - a.y) * t, \
+                a.z + (b.z - a.z) * t \
+            }
+            
+            #define POINT_ON_FACE(u, v) LERP_V3( \
+                LERP_V3(bl, br, u), \
+                LERP_V3(tl, tr, u), \
+                v \
+            )
+
+            // Left Headlight
+            Vec3 ll_p0 = POINT_ON_FACE(0.05, 0.5);
+            Vec3 ll_p1 = POINT_ON_FACE(0.25, 0.5);
+            Vec3 ll_p2 = POINT_ON_FACE(0.25, 0.8);
+            Vec3 ll_p3 = POINT_ON_FACE(0.05, 0.8);
+            RASTERIZE_THICK_QUAD(ll_p0, ll_p1, ll_p2, ll_p3, n_front, light_thickness, CAR_HEADLIGHT_RGB);
+
+            // Right Headlight
+            Vec3 rl_p0 = POINT_ON_FACE(0.75, 0.5);
+            Vec3 rl_p1 = POINT_ON_FACE(0.95, 0.5);
+            Vec3 rl_p2 = POINT_ON_FACE(0.95, 0.8);
+            Vec3 rl_p3 = POINT_ON_FACE(0.75, 0.8);
+            RASTERIZE_THICK_QUAD(rl_p0, rl_p1, rl_p2, rl_p3, n_front, light_thickness, CAR_HEADLIGHT_RGB);
+            
+            #undef POINT_ON_FACE
+            #undef LERP_V3
+        }
+
+        // Render Indicators
+        {
+            bool left_on = (car->indicator_turn == INDICATOR_LEFT || car->indicator_lane == INDICATOR_LEFT);
+            bool right_on = (car->indicator_turn == INDICATOR_RIGHT || car->indicator_lane == INDICATOR_RIGHT);
+            
+            if (left_on || right_on) {
+                RGB ind_color_left = (car->indicator_turn == INDICATOR_LEFT) ? CAR_INDICATOR_RED_RGB : CAR_INDICATOR_ORANGE_RGB;
+                RGB ind_color_right = (car->indicator_turn == INDICATOR_RIGHT) ? CAR_INDICATOR_RED_RGB : CAR_INDICATOR_ORANGE_RGB;
+                
+                #define LERP_V3(a, b, t) (Vec3){ \
+                    a.x + (b.x - a.x) * t, \
+                    a.y + (b.y - a.y) * t, \
+                    a.z + (b.z - a.z) * t \
+                }
+                #define POINT_ON_QUAD(bl, br, tl, tr, u, v) LERP_V3( \
+                    LERP_V3(bl, br, u), \
+                    LERP_V3(tl, tr, u), \
+                    v \
+                )
+
+                if (left_on) {
+                    // 1. Back (Left side is u near 0)
+                    {
+                        Vec3 bl = vb[2], br = vb[3], tl = vt[2], tr = vt[3];
+                        Vec3 p0 = POINT_ON_QUAD(bl, br, tl, tr, 0.0, 0.35);
+                        Vec3 p1 = POINT_ON_QUAD(bl, br, tl, tr, 0.2, 0.35);
+                        Vec3 p2 = POINT_ON_QUAD(bl, br, tl, tr, 0.2, 0.45);
+                        Vec3 p3 = POINT_ON_QUAD(bl, br, tl, tr, 0.0, 0.45);
+                        RASTERIZE_THICK_QUAD(p0, p1, p2, p3, n_back, light_thickness, ind_color_left);
+                    }
+                    // 2. Front (Left side is u near 1)
+                    {
+                        Vec3 bl = vb[0], br = vb[1], tl = vt[0], tr = vt[1];
+                        Vec3 p0 = POINT_ON_QUAD(bl, br, tl, tr, 0.8, 0.35);
+                        Vec3 p1 = POINT_ON_QUAD(bl, br, tl, tr, 1.0, 0.35);
+                        Vec3 p2 = POINT_ON_QUAD(bl, br, tl, tr, 1.0, 0.45);
+                        Vec3 p3 = POINT_ON_QUAD(bl, br, tl, tr, 0.8, 0.45);
+                        RASTERIZE_THICK_QUAD(p0, p1, p2, p3, n_front, light_thickness, ind_color_left);
+                    }
+                    // 3. Side (Left Face: b1, b2, t2, t1. u=0 is Front)
+                    {
+                        Vec3 bl = vb[1], br = vb[2], tl = vt[1], tr = vt[2];
+                        Vec3 p0 = POINT_ON_QUAD(bl, br, tl, tr, 0.1, 0.4);
+                        Vec3 p1 = POINT_ON_QUAD(bl, br, tl, tr, 0.2, 0.4);
+                        Vec3 p2 = POINT_ON_QUAD(bl, br, tl, tr, 0.2, 0.5);
+                        Vec3 p3 = POINT_ON_QUAD(bl, br, tl, tr, 0.1, 0.5);
+                        RASTERIZE_THICK_QUAD(p0, p1, p2, p3, n_left, light_thickness, ind_color_left);
+                    }
+                }
+
+                if (right_on) {
+                    // 1. Back (Right side is u near 1)
+                    {
+                        Vec3 bl = vb[2], br = vb[3], tl = vt[2], tr = vt[3];
+                        Vec3 p0 = POINT_ON_QUAD(bl, br, tl, tr, 0.8, 0.35);
+                        Vec3 p1 = POINT_ON_QUAD(bl, br, tl, tr, 1.0, 0.35);
+                        Vec3 p2 = POINT_ON_QUAD(bl, br, tl, tr, 1.0, 0.45);
+                        Vec3 p3 = POINT_ON_QUAD(bl, br, tl, tr, 0.8, 0.45);
+                        RASTERIZE_THICK_QUAD(p0, p1, p2, p3, n_back, light_thickness, ind_color_right);
+                    }
+                    // 2. Front (Right side is u near 0)
+                    {
+                        Vec3 bl = vb[0], br = vb[1], tl = vt[0], tr = vt[1];
+                        Vec3 p0 = POINT_ON_QUAD(bl, br, tl, tr, 0.0, 0.35);
+                        Vec3 p1 = POINT_ON_QUAD(bl, br, tl, tr, 0.2, 0.35);
+                        Vec3 p2 = POINT_ON_QUAD(bl, br, tl, tr, 0.2, 0.45);
+                        Vec3 p3 = POINT_ON_QUAD(bl, br, tl, tr, 0.0, 0.45);
+                        RASTERIZE_THICK_QUAD(p0, p1, p2, p3, n_front, light_thickness, ind_color_right);
+                    }
+                    // 3. Side (Right Face: b3, b0, t0, t3. u=0 is Rear, u=1 is Front)
+                    {
+                        Vec3 bl = vb[3], br = vb[0], tl = vt[3], tr = vt[0];
+                        Vec3 p0 = POINT_ON_QUAD(bl, br, tl, tr, 0.8, 0.4);
+                        Vec3 p1 = POINT_ON_QUAD(bl, br, tl, tr, 0.9, 0.4);
+                        Vec3 p2 = POINT_ON_QUAD(bl, br, tl, tr, 0.9, 0.5);
+                        Vec3 p3 = POINT_ON_QUAD(bl, br, tl, tr, 0.8, 0.5);
+                        RASTERIZE_THICK_QUAD(p0, p1, p2, p3, n_right, light_thickness, ind_color_right);
+                    }
+                }
+                
+                #undef POINT_ON_QUAD
+                #undef LERP_V3
+            }
+        }
+        
+        #undef V3_SUB
+        #undef V3_CROSS
+        #undef V3_LEN
+        #undef V3_NORM
+        #undef RASTERIZE_THICK_QUAD
     }
 
     // 2. Roads
