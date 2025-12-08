@@ -71,8 +71,8 @@ Coordinates coordinates_create(double x, double y) {
     return vec_create(x, y);
 }
 
-Dimensions dimensions_create(double width, double height) {
-    return vec_create(width, height);
+Dimensions dimensions_create(double width, double length) {
+    return vec_create(width, length);
 }
 
 //
@@ -211,6 +211,14 @@ Quadrant angle_get_quadrant(Radians theta) {
 
 Vec2D angle_to_unit_vector(Radians theta) {
     return vec_create(cos(theta), sin(theta));
+}
+
+Radians from_degrees(Degrees theta) {
+    return theta * (M_PI / 180.0);
+}
+
+Degrees to_degrees(Radians theta) {
+    return theta * (180.0 / M_PI);
 }
 
 //

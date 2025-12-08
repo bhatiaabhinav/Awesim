@@ -113,8 +113,8 @@ Coordinates coordinates_create(double x, double y);
 // Represents 2D dimensions (alias for Vec2D).
 typedef Vec2D Dimensions;
 
-// Creates dimensions from width and height.
-Dimensions dimensions_create(double width, double height);
+// Creates dimensions from width and length.
+Dimensions dimensions_create(double width, double length);
 
 
 //
@@ -149,6 +149,7 @@ typedef double Seconds;                     // time
 typedef double MetersPerSecond;             // speed
 typedef double MetersPerSecondSquared;      // acceleration
 typedef double Radians;                     // angle in radians
+typedef double Degrees;                     // angle in degrees
 typedef double Kilograms;                   // mass
 typedef double Liters;                      // volume of fluid
 typedef double Watts;                       // power
@@ -174,6 +175,9 @@ MetersPerSecondSquared mpss(double value);
 
 // Initializes a Radians value.
 Radians radians(double value);
+
+// Initializes a Degrees value.
+Degrees degrees(double value);
 
 // Initializes a Kilograms value.
 Kilograms kilograms(double value);
@@ -235,6 +239,12 @@ Quadrant angle_get_quadrant(Radians theta);
 
 // Returns the unit vector corresponding to an angle in radians.
 Vec2D angle_to_unit_vector(Radians theta);
+
+// constructs an angle in radians from degrees.
+Radians from_degrees(Degrees theta);
+
+// converts an angle in radians to degrees.
+Degrees to_degrees(Radians theta);
 
 
 //
@@ -336,3 +346,101 @@ Vec2D direction_perpendicular_vector(Direction direction);
 Direction direction_opposite(Direction direction);
 
 
+
+
+//
+// Vec 3D
+///
+
+// Represents a 3D vector or point in space.
+struct Vec3D {
+    double x;
+    double y;
+    double z;
+};
+typedef struct Vec3D Vec3D;
+
+// Creates a 3D vector with given x, y, and z.
+Vec3D vec3d_create(double x, double y, double z);
+
+// Adds two 3D vectors.
+Vec3D vec3d_add(Vec3D v1, Vec3D v2);
+
+// Subtracts second 3D vector from first.
+Vec3D vec3d_sub(Vec3D v1, Vec3D v2);
+
+// Multiplies a 3D vector by a scalar.
+Vec3D vec3d_scale(Vec3D v, double scalar);
+
+// Divides a 3D vector by a scalar.
+Vec3D vec3d_div(Vec3D v, double scalar);
+
+// Returns the dot product of two 3D vectors.
+double vec3d_dot(Vec3D v1, Vec3D v2);
+
+// Returns the cross product of two 3D vectors.
+Vec3D vec3d_cross(Vec3D v1, Vec3D v2);
+
+// Returns the magnitude (length) of a 3D vector.
+double vec3d_magnitude(Vec3D v);
+
+// Returns the unit (normalized) 3D vector.
+Vec3D vec3d_normalize(Vec3D v);
+
+// Returns the distance between two 3D vectors (points).
+double vec3d_distance(Vec3D v1, Vec3D v2);
+
+// Returns the midpoint between two 3D vectors (points).
+Vec3D vec3d_midpoint(Vec3D v1, Vec3D v2);
+
+// Returns true if 3D vectors are approximately equal (within epsilon).
+bool vec3d_approx_equal(Vec3D a, Vec3D b, double epsilon);
+
+
+typedef Vec3D Coordinates3D;
+
+// Creates 3D coordinates from x, y, and z values.
+Coordinates3D coordinates3d_create(double x, double y, double z);
+
+typedef Vec3D Dimensions3D;
+
+// Creates 3D dimensions from width, length, and height. (as seen from a top-down view, height is the Z dimension)
+Dimensions3D dimensions3d_create(double width, double length, double height); // assume map is in the X-Y plane, Z is altitude
+
+
+// 3D Quad
+
+typedef struct Quad3D {
+    Coordinates3D corners[4]; // such that corners[i] to corners[(i+1)%4] forms an edge
+} Quad3D;
+
+//
+// 3D Line segments
+//
+
+// Represents a 3D line segment between two points.
+typedef struct LineSegment3D {
+    Coordinates3D start;
+    Coordinates3D end;
+} LineSegment3D;
+
+// Creates a 3D line segment from start and end points.
+LineSegment3D line_segment3d_create(Coordinates3D start, Coordinates3D end);
+
+// Creates a 3D line segment centered at a point, pointing in a direction, with specified length.
+LineSegment3D line_segment3d_from_center(Coordinates3D center, Vec3D direction, double length);
+
+// Returns the unit direction vector of a 3D line segment.
+Vec3D line_segment3d_unit_vector(LineSegment3D line);
+
+
+// Returns the intersection point of a 3D line segment and a Quad3D, if they intersect. Returns true if they intersect, false otherwise.
+bool line_segment3d_intersect_quad(LineSegment3D line, Quad3D quad, Coordinates3D* intersection_point);
+
+
+//
+// Misc utilities
+//
+
+// Checks if an object is present in an array of object pointers (null-terminated).
+bool object_array_contains_object(void** objects_array, const void* object);

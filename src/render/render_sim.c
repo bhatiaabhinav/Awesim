@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 static Lidar* highlighted_car_lidar = NULL;
+static RGBCamera* highlighted_car_camera = NULL;
 
 void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, const bool draw_cars,
                 const bool draw_track_lines, const bool draw_traffic_lights, const bool draw_car_ids, const bool draw_car_speeds, const bool draw_lane_ids, const bool draw_road_names, int hud_font_size, const bool benchmark)
@@ -217,7 +218,7 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
     if (HIGHLIGHTED_CARS[0] != ID_NULL) {
         Car* highlighted_car = sim_get_car(sim, HIGHLIGHTED_CARS[0]);
         if (highlighted_car_lidar == NULL) {
-            highlighted_car_lidar = lidar_malloc((Coordinates){0,0}, 0.0, 360, 2 * M_PI, from_feet(255.0)); // 255 feet max depth
+            highlighted_car_lidar = lidar_malloc((Coordinates){0,0}, 0.0, 360, from_degrees(360), from_feet(255.0)); // 255 feet max depth
         }
         if (highlighted_car && highlighted_car_lidar) {
             highlighted_car_lidar->position = highlighted_car->center;
@@ -225,6 +226,27 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
             void* exclude_objects[] = {(void*)highlighted_car, NULL};
             lidar_capture(highlighted_car_lidar, sim, exclude_objects);
             render_lidar(renderer, highlighted_car_lidar);
+        }
+    }
+
+    // here render the camera (attached to the highlighted car) bonut.
+    if (HIGHLIGHTED_CARS[0] != ID_NULL) {
+        Car* highlighted_car = sim_get_car(sim, HIGHLIGHTED_CARS[0]);
+        if (highlighted_car_camera == NULL) {
+            // Create a camera with 256x256 resolution, 90 degree fov, 1000 meter max depth
+            highlighted_car_camera = rgbcam_malloc((Coordinates){0,0}, 1.0, 0.0, 256, 256, from_degrees(90), meters(1000.0));
+        }
+        if (highlighted_car && highlighted_car_camera) {
+            // Attach to front-center of the car. Front is at +length/2 along orientation.
+            Vec2D front_pos_2d = vec_add(highlighted_car->center, vec_scale(angle_to_unit_vector(highlighted_car->orientation), car_get_length(highlighted_car) / 2.0));
+            
+            highlighted_car_camera->position = front_pos_2d;
+            highlighted_car_camera->z_altitude = highlighted_car->dimensions.z * 0.9; // slightly below roof height
+            highlighted_car_camera->orientation = highlighted_car->orientation;
+            
+            void* exclude_objects[] = {(void*)highlighted_car, NULL};
+            rgbcam_capture_efficient(highlighted_car_camera, sim, exclude_objects);
+            render_camera(renderer, highlighted_car_camera);
         }
     }
 
@@ -289,6 +311,14 @@ snprintf(time_stats, sizeof(time_stats), "%s %02d:%02d:%02d  (%s %.1fx)",
 
             snprintf(indicator_stats, sizeof(indicator_stats), "%s (%s) %s", indicator == INDICATOR_LEFT ? "⬅" : "", indicating_anything ? (is_turn_indicator ? "Turn" : "Merge") : "⏺", indicator == INDICATOR_RIGHT ? "➡" : " ");
             render_text(renderer, indicator_stats, 10, 50 + 4 * hud_font_size, r, g, b, 255,
+                        hud_font_size, ALIGN_TOP_LEFT, false, NULL);
+        }
+
+        // Render orientation of car 0 on top left
+        if (car0) {
+            char orientation_stats[32];
+            snprintf(orientation_stats, sizeof(orientation_stats), "Orient:   %.1f°", to_degrees(car0->orientation));
+            render_text(renderer, orientation_stats, 10, 60 + 5 * hud_font_size, r, g, b, 255,
                         hud_font_size, ALIGN_TOP_LEFT, false, NULL);
         }
     }

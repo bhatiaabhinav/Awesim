@@ -81,17 +81,17 @@ CarAccelProfile car_accel_profile_get_random_preference_preset(void) {
 
 // Dimensions of various types of cars:
 
-const Dimensions CAR_SIZE_COMPACT       = {1.707, 4.267};   // Compact car (e.g., Honda Civic, 5.6 ft wide, 14 ft long)
-const Dimensions CAR_SIZE_TYPICAL       = {1.770, 4.480};   // Typical car (e.g., midsize sedan, 5.8 ft wide, 14.7 ft long)
-const Dimensions CAR_SIZE_MIDSIZE       = {1.829, 4.785};   // Midsize sedan (e.g., Toyota Camry, 6.0 ft wide, 15.7 ft long)
-const Dimensions CAR_SIZE_COMPACT_SUV   = {1.829, 4.877};   // Compact SUV (e.g., Honda CR-V, 6.0 ft wide, 16 ft long)
-const Dimensions CAR_SIZE_LARGE_SUV     = {1.981, 5.334};   // Large SUV (e.g., Chevrolet Traverse, 6.5 ft wide, 17.5 ft long)
-const Dimensions CAR_SIZE_FULLSIZE      = {1.829, 5.486};   // Full-size car (e.g., Dodge Charger, 6.0 ft wide, 18 ft long)
-const Dimensions CAR_SIZE_PICKUP        = {2.134, 5.608};   // Full-size pickup (e.g., Ford F-150, 7.0 ft wide, 18.4 ft long)
-const Dimensions CAR_SIZE_BUS           = {2.438, 12.000};  // Full-size bus (e.g., 40 ft transit bus, 8.0 ft wide, 40 ft long)
+const Dimensions3D CAR_SIZE_COMPACT       = {1.707, 4.267, 1.450};   // Compact car (e.g., Honda Civic, 5.6 ft wide, 14 ft long)
+const Dimensions3D CAR_SIZE_TYPICAL       = {1.770, 4.480, 1.450};   // Typical car (e.g., midsize sedan, 5.8 ft wide, 14.7 ft long)
+const Dimensions3D CAR_SIZE_MIDSIZE       = {1.829, 4.785, 1.450};   // Midsize sedan (e.g., Toyota Camry, 6.0 ft wide, 15.7 ft long)
+const Dimensions3D CAR_SIZE_COMPACT_SUV   = {1.829, 4.877, 1.650};   // Compact SUV (e.g., Honda CR-V, 6.0 ft wide, 16 ft long)
+const Dimensions3D CAR_SIZE_LARGE_SUV     = {1.981, 5.334, 1.800};   // Large SUV (e.g., Chevrolet Traverse, 6.5 ft wide, 17.5 ft long)
+const Dimensions3D CAR_SIZE_FULLSIZE      = {1.829, 5.486, 1.500};   // Full-size car (e.g., Dodge Charger, 6.0 ft wide, 18 ft long)
+const Dimensions3D CAR_SIZE_PICKUP        = {2.134, 5.608, 1.900};   // Full-size pickup (e.g., Ford F-150, 7.0 ft wide, 18.4 ft long)
+const Dimensions3D CAR_SIZE_BUS           = {2.438, 12.000, 3.200};  // Full-size bus (e.g., 40 ft transit bus, 8.0 ft wide, 40 ft long)
 
-Dimensions car_dimensions_get_random_preset(void) {
-    const Dimensions dims[] = { // TODO: once you find a way to make the roads longer, consider allowing BUS sized cars.
+Dimensions3D car_dimensions_get_random_preset(void) {
+    const Dimensions3D dims[] = { // TODO: once you find a way to make the roads longer, consider allowing BUS sized cars.
         CAR_SIZE_TYPICAL,
         CAR_SIZE_COMPACT,
         CAR_SIZE_MIDSIZE,
@@ -99,10 +99,9 @@ Dimensions car_dimensions_get_random_preset(void) {
         CAR_SIZE_COMPACT_SUV,
         CAR_SIZE_LARGE_SUV,
         CAR_SIZE_PICKUP,
-        // CAR_SIZE_BUS
+        // CAR_SIZE_BUS,
     };
     size_t count = sizeof(dims) / sizeof(dims[0]);
     return dims[rand_int(count)];
 }
-
 

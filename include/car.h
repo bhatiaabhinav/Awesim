@@ -73,7 +73,7 @@ CarPersonality preferences_sample_random(void);
 struct Car {
     // fixed properties:
     CarId id;                         // unique identifier for the car
-    Dimensions dimensions;          // width and length of the car
+    Dimensions3D dimensions;          // width, length, and height of the car
     Liters fuel_tank_capacity;       // fuel tank capacity in liters
     CarCapabilities capabilities;   // capabilities of the car
     CarPersonality preferences;     // Preference profile of the car.
@@ -110,14 +110,15 @@ typedef struct Car Car;
 typedef struct Simulation Simulation;
 
 
-void car_init(Car* car, Dimensions dimensions,  CarCapabilities capabilities, Liters fuel_tank_capacity, CarPersonality preferences);
+void car_init(Car* car, Dimensions3D dimensions,  CarCapabilities capabilities, Liters fuel_tank_capacity, CarPersonality preferences);
 
 
 // getters:
 CarId car_get_id(const Car* self);
-Dimensions car_get_dimensions(const Car* self);
+Dimensions3D car_get_dimensions(const Car* self);
 Meters car_get_length(const Car* self); 
 Meters car_get_width(const Car* self);
+Meters car_get_height(const Car* self);
 Liters car_get_fuel_tank_capacity(const Car* self);
 CarCapabilities car_get_capabilities(const Car* self);
 CarPersonality car_get_preferences(const Car* self);
@@ -213,14 +214,13 @@ CarAccelProfile car_accel_profile_get_random_preference_preset(void);
 
 // Dimensions of various types of cars:
 
-extern const Dimensions CAR_SIZE_COMPACT;
-extern const Dimensions CAR_SIZE_TYPICAL;
-extern const Dimensions CAR_SIZE_MIDSIZE;
-extern const Dimensions CAR_SIZE_COMPACT_SUV;
-extern const Dimensions CAR_SIZE_LARGE_SUV;
-extern const Dimensions CAR_SIZE_FULLSIZE;
-extern const Dimensions CAR_SIZE_PICKUP;
-extern const Dimensions CAR_SIZE_BUS;
+extern const Dimensions3D CAR_SIZE_COMPACT;
+extern const Dimensions3D CAR_SIZE_TYPICAL;
+extern const Dimensions3D CAR_SIZE_MIDSIZE;
+extern const Dimensions3D CAR_SIZE_COMPACT_SUV;
+extern const Dimensions3D CAR_SIZE_LARGE_SUV;
+extern const Dimensions3D CAR_SIZE_FULLSIZE;
+extern const Dimensions3D CAR_SIZE_PICKUP;
+extern const Dimensions3D CAR_SIZE_BUS;
 
-
-Dimensions car_dimensions_get_random_preset(void);
+Dimensions3D car_dimensions_get_random_preset(void);

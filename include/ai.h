@@ -108,11 +108,13 @@ struct RGB {
 typedef struct RGB RGB;
 struct RGBCamera {
     Coordinates position; // Position of the camera
+    Meters z_altitude;    // Altitude of the camera (from ground level)
     Radians orientation;  // Orientation of the camera
     int width;           // Width of the frame
-    int height;          // Height of the frame
-    Radians fov;         // Field of view in radians
-    uint8_t* data;       // Pointer to the RGB data in CHW format, linearized
+    int height;          // Height of the frame. Determines the vertical fov when combined with width and fov.
+    Radians fov;         // Field of view in radians (horizontal direction, i.e., along the sim's XY plane (map plane))
+    Meters max_distance;   // Maximum distance the camera can see (in meters)
+    uint8_t* data;       // Pointer to the RGB data in HWC format, linearized
 };
 typedef struct RGBCamera RGBCamera;
 struct Lidar {
@@ -125,7 +127,7 @@ struct Lidar {
 };
 typedef struct Lidar Lidar;
 
-RGBCamera* rgbcam_malloc(Coordinates position, Radians orientation, int width, int height, Radians fov);
+RGBCamera* rgbcam_malloc(Coordinates position, Meters z_altitude, Radians orientation, int width, int height, Radians fov, Meters max_distance);
 Lidar* lidar_malloc(Coordinates position, Radians orientation, int num_points, Radians fov, Meters max_depth);
 void rgbcam_free(RGBCamera* frame);
 void lidar_free(Lidar* frame);
@@ -139,9 +141,12 @@ RGB rgbcam_get_pixel_at(const RGBCamera* frame, int row, int col);
 void rgbcam_set_pixel_at(RGBCamera* frame, int row, int col, const RGB pixel);
 void rgbcam_copy(const RGBCamera* src, RGBCamera* dest);
 void lidar_copy(const Lidar* src, Lidar* dest);
-void rgbcam_capture(RGBCamera* frame, Simulation* sim, void** exclude_objects);
+void rgbcam_capture(RGBCamera* frame, Simulation* sim, void** exclude_objects);  // via ray casting
+void rgbcam_capture_efficient(RGBCamera* frame, Simulation* sim, void** exclude_objects);  // via efficient projective rendering
 void lidar_capture(Lidar* frame, Simulation* sim, void** exclude_objects);
 
+// using projective rendering
+void rgbcam_capture_proj(RGBCamera* camera, Simulation* sim, void** exclude_objects);
 
 struct SituationalAwareness {
     bool is_valid;                          // Is this situational awareness valid? If false, all other fields should be ignored.

@@ -103,6 +103,9 @@ void render_car(SDL_Renderer* renderer, const Car* car, Map* map, const bool pai
 // Renders a lidar
 void render_lidar(SDL_Renderer* renderer, const Lidar* lidar);
 
+// Renders a camera
+void render_camera(SDL_Renderer* renderer, const RGBCamera* camera);
+
 // Renders the entire simulation state: roads, cars, lanes, traffic.
 void render_sim(SDL_Renderer* renderer, Simulation* sim, const bool draw_lanes, const bool draw_cars, const bool draw_track_lines, const bool draw_traffic_lights, const bool draw_car_ids, const bool draw_car_speeds, const bool draw_lane_ids, const bool draw_road_names, int hud_font_size, const bool benchmark);
 

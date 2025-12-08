@@ -20,7 +20,11 @@ static void car_update_geometry(Simulation* sim, Car* car) {
         theta = angle_normalize(theta);
         car->center.x = lane->center.x + lane->radius * cos(theta);
         car->center.y = lane->center.y + lane->radius * sin(theta);
-        car->orientation = angles_add(theta, M_PI / 2); // tangent to the arc
+        if (lane->direction == DIRECTION_CCW) {
+            car->orientation = angles_add(theta, M_PI / 2); // CCW: tangent is +90 deg
+        } else {
+            car->orientation = angles_add(theta, -M_PI / 2); // CW: tangent is -90 deg
+        }
     } else {
         LOG_ERROR("Cannot update geometry for car %d: unknown lane type.", car->id);
         return;

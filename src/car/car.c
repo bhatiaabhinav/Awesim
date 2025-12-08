@@ -6,7 +6,7 @@
 #include <stdio.h>
 
 
-void car_init(Car* car, Dimensions dimensions, CarCapabilities capabilities, Liters fuel_tank_capacity, CarPersonality preferences) {
+void car_init(Car* car, Dimensions3D dimensions, CarCapabilities capabilities, Liters fuel_tank_capacity, CarPersonality preferences) {
     car->dimensions = dimensions;
     car->fuel_tank_capacity = fuel_tank_capacity;
     car->capabilities = capabilities;
@@ -35,9 +35,10 @@ void car_free(Car* self) {
 }
 
 CarId car_get_id(const Car* self) { return self->id; }
-Dimensions car_get_dimensions(const Car* self) { return self->dimensions; }
+Dimensions3D car_get_dimensions(const Car* self) { return self->dimensions; }
 Meters car_get_length(const Car* self) { return self->dimensions.y; }
 Meters car_get_width(const Car* self) { return self->dimensions.x; }
+Meters car_get_height(const Car* self) { return self->dimensions.z; }
 Liters car_get_fuel_tank_capacity(const Car* self) { return self->fuel_tank_capacity; }
 CarCapabilities car_get_capabilities(const Car* self) { return self->capabilities; }
 CarPersonality car_get_preferences(const Car* self) { return self->preferences; }

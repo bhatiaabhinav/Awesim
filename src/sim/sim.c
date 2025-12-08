@@ -96,8 +96,9 @@ void sim_init(Simulation* sim) {
         // for (int j = 0; j < MAX_PROCEDURE_STATE_VARS; j++) {
         //     sim->ongoing_procedures[i].state[j] = 0.0; // Initialize procedure state variables
         // }
-        driving_assistant_reset_settings(&sim->driving_assistants[i], &sim->cars[i]); // Reset driving assistant settings for each car
+        // driving_assistant_reset_settings(&sim->driving_assistants[i], &sim->cars[i]); // Reset driving assistant settings for each car
     }
+    driving_assistant_reset_settings(&sim->driving_assistants[0], &sim->cars[0]);
 }
 
 Car* sim_get_new_car(Simulation* self) {

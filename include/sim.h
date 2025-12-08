@@ -74,7 +74,7 @@ typedef struct Simulation {
     Car cars[MAX_CARS_IN_SIMULATION];  // Car list; car[0] = agent
     SituationalAwareness situational_awarenesses[MAX_CARS_IN_SIMULATION]; // Situational awareness for each car
     // Procedure ongoing_procedures[MAX_CARS_IN_SIMULATION]; // Ongoing procedures for each car
-    DrivingAssistant driving_assistants[MAX_CARS_IN_SIMULATION]; // Driving assistants for each car
+    DrivingAssistant driving_assistants[1]; // Driving assistants for each car (just 1 for now, the agent car)
     int num_cars;   // Number of cars in simulation
     Seconds time;   // Time simulated so far
     Seconds dt;     // Simulation engine's time resolution for integration (in seconds)

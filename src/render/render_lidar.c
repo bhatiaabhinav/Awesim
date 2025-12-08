@@ -15,7 +15,6 @@ void render_lidar(SDL_Renderer* renderer, const Lidar* lidar) {
         Coordinates end_point = vec_add(lidar->position, vec_scale(ray_unit_vector, lidar->data[i]));
         SDL_Point screen_start = to_screen_coords(lidar->position, WINDOW_SIZE_WIDTH, WINDOW_SIZE_HEIGHT);
         SDL_Point screen_end = to_screen_coords(end_point, WINDOW_SIZE_WIDTH, WINDOW_SIZE_HEIGHT);
-        SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255); // Red color for LiDAR points
-        thickLineRGBA_ignore_if_outside_screen(renderer, screen_start.x, screen_start.y, screen_end.x, screen_end.y, 1, 255, 0, 0, 255);
+        thickLineRGBA_ignore_if_outside_screen(renderer, screen_start.x, screen_start.y, screen_end.x, screen_end.y, 1, 255, 0, 0, 64);
     }
 }
