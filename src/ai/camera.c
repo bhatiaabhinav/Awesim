@@ -267,6 +267,8 @@ RGBCamera* rgbcam_malloc(Coordinates position, Meters z_altitude, Radians orient
     frame->height = height;
     frame->fov = fov;
     frame->max_distance = max_distance;
+    frame->aa_type = AA_NONE;
+    frame->aa_level = 0;
     frame->data = (uint8_t*) malloc(sizeof(uint8_t) * 3 * width * height); // CHW format
     if (frame->data == NULL) {
         LOG_ERROR("Failed to allocate memory for RGB data");

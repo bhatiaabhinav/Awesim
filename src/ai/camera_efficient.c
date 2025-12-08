@@ -583,7 +583,30 @@ static void draw_hud(RGBCamera* camera) {
     draw_line_2d(camera, (int)center_x, hud_height - 10, (int)center_x, hud_height, HUD_NEEDLE_RGB);
 }
 
-void rgbcam_capture_efficient(RGBCamera* camera, Simulation* sim, void** exclude_objects) {
+static void downsample(RGBCamera* src, RGBCamera* dest, int scale) {
+    for (int y = 0; y < dest->height; y++) {
+        for (int x = 0; x < dest->width; x++) {
+            int r_sum = 0, g_sum = 0, b_sum = 0;
+            for (int dy = 0; dy < scale; dy++) {
+                for (int dx = 0; dx < scale; dx++) {
+                    int sy = y * scale + dy;
+                    int sx = x * scale + dx;
+                    int idx = (sy * src->width + sx) * 3;
+                    r_sum += src->data[idx + 0];
+                    g_sum += src->data[idx + 1];
+                    b_sum += src->data[idx + 2];
+                }
+            }
+            int count = scale * scale;
+            int idx = (y * dest->width + x) * 3;
+            dest->data[idx + 0] = (uint8_t)(r_sum / count);
+            dest->data[idx + 1] = (uint8_t)(g_sum / count);
+            dest->data[idx + 2] = (uint8_t)(b_sum / count);
+        }
+    }
+}
+
+static void render_scene_internal(RGBCamera* camera, Simulation* sim, void** exclude_objects) {
     // Clear to sky color (gradient from top to horizon)
     RGB sky_top = SKY_TOP_RGB; // Sky Blue
     RGB sky_horizon = SKY_HORIZON_RGB; // White at horizon
@@ -1051,6 +1074,27 @@ void rgbcam_capture_efficient(RGBCamera* camera, Simulation* sim, void** exclude
             c_ew, c_ew, // Left (W), Right (E) -> EW lights
             cam_pos, cos_o, sin_o);
     }
+}
 
+void rgbcam_capture_efficient(RGBCamera* camera, Simulation* sim, void** exclude_objects) {
+    if (camera->aa_type == AA_SSAA && camera->aa_level > 1) {
+        int scale = camera->aa_level;
+        RGBCamera high_res_cam = *camera;
+        high_res_cam.width *= scale;
+        high_res_cam.height *= scale;
+        high_res_cam.data = (uint8_t*)malloc(sizeof(uint8_t) * 3 * high_res_cam.width * high_res_cam.height);
+        
+        if (high_res_cam.data) {
+            render_scene_internal(&high_res_cam, sim, exclude_objects);
+            downsample(&high_res_cam, camera, scale);
+            free(high_res_cam.data);
+        } else {
+            // Fallback if allocation fails
+            render_scene_internal(camera, sim, exclude_objects);
+        }
+    } else {
+        render_scene_internal(camera, sim, exclude_objects);
+    }
+    
     draw_hud(camera);
 }

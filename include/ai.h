@@ -106,6 +106,12 @@ struct RGB {
     uint8_t b;         // Blue channel (0-255)
 };
 typedef struct RGB RGB;
+
+typedef enum {
+    AA_NONE = 0,
+    AA_SSAA = 1
+} AAType;
+
 struct RGBCamera {
     Coordinates position; // Position of the camera
     Meters z_altitude;    // Altitude of the camera (from ground level)
@@ -115,6 +121,8 @@ struct RGBCamera {
     Radians fov;         // Field of view in radians (horizontal direction, i.e., along the sim's XY plane (map plane))
     Meters max_distance;   // Maximum distance the camera can see (in meters)
     uint8_t* data;       // Pointer to the RGB data in HWC format, linearized
+    AAType aa_type;      // Type of anti-aliasing
+    int aa_level;        // Level of anti-aliasing (e.g., 2 for 2x SSAA)
 };
 typedef struct RGBCamera RGBCamera;
 struct Lidar {
