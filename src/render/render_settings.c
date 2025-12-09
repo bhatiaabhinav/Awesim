@@ -12,8 +12,12 @@ bool DRAW_TRACK_LINES = false;         // Draw track lines (center lines on lane
 bool DRAW_TRAFFIC_LIGHTS = true;       // Draw traffic lights
 bool DRAW_CAR_IDS = true;              // Draw car IDs
 bool DRAW_LANE_IDS = true;             // Draw lane IDs
-bool DRAW_CAR_SPEEDS = true;          // Draw car speeds
+bool DRAW_CAR_SPEEDS = true;           // Draw car speeds
 bool DRAW_ROAD_NAMES = true;           // Draw road names
+bool DRAW_LIDAR = false;               // Draw LiDAR point cloud for highlighted car
+bool DRAW_CAMERA = true;               // Draw camera view for highlighted car
+bool DRAW_MINIMAP = false;              // Draw minimap for highlighted car
+bool DRAW_INFOS_DISPLAY = false;        // Draw infos display for highlighted car
 int HUD_FONT_SIZE = 24;                // Font size for HUD text
 
 // Keep the screen centered on the following car ID:
@@ -34,5 +38,6 @@ SDL_Color HIGHLIGHTED_CAR_COLOR = {64, 64, 255, 255}; // Blue color for highligh
 SDL_Color HIGHLIGHTED_NEARBY_VEHICLES_COLOR = {139, 0, 0, 255}; // Dark red
 SDL_Color HIGHLIGHTED_FORWARD_VEHICLE_COLOR_AEB_ENGAGED = {200, 0, 0, 255}; // Lighter red
 SDL_Color HIGHLIGHTED_LANE_COLOR = {192, 192, 192, 255}; // Light gray color for highlighted lanes
+CarCameraType HIGHLIGHTED_CAR_CAMERA_TYPE = CAR_CAMERA_MAIN_FORWARD; // Default camera type for highlighted car
 
 const char* FONT_PATH = "assets/fonts/FreeSans.ttf"; // Default font path

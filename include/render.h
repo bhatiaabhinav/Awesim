@@ -20,6 +20,10 @@ extern bool DRAW_CAR_IDS;
 extern bool DRAW_CAR_SPEEDS;
 extern bool DRAW_LANE_IDS;
 extern bool DRAW_ROAD_NAMES;
+extern bool DRAW_LIDAR;
+extern bool DRAW_CAMERA;
+extern bool DRAW_MINIMAP;
+extern bool DRAW_INFOS_DISPLAY;
 extern int HUD_FONT_SIZE;
 extern CarId CAMERA_CENTERED_ON_CAR_ID;
 extern bool CAMERA_CENTERED_ON_CAR_ENABLED;
@@ -29,6 +33,7 @@ extern SDL_Color HIGHLIGHTED_CAR_COLOR; // Color for highlighted cars
 extern SDL_Color HIGHLIGHTED_NEARBY_VEHICLES_COLOR; // Color for nearby vehicles of the first highlighted car
 extern SDL_Color HIGHLIGHTED_FORWARD_VEHICLE_COLOR_AEB_ENGAGED; // Color for forward vehicle when AEB is engaged
 extern SDL_Color HIGHLIGHTED_LANE_COLOR; // Color for highlighted lanes
+extern CarCameraType HIGHLIGHTED_CAR_CAMERA_TYPE;
 extern const char* FONT_PATH;
 
 // Lane visualization constants
@@ -113,7 +118,7 @@ void render_infos_display(SDL_Renderer* renderer, const InfosDisplay* display);
 void render_minimap(SDL_Renderer* renderer, const MiniMap* minimap);
 
 // Renders the entire simulation state: roads, cars, lanes, traffic.
-void render_sim(SDL_Renderer* renderer, Simulation* sim, const bool draw_lanes, const bool draw_cars, const bool draw_track_lines, const bool draw_traffic_lights, const bool draw_car_ids, const bool draw_car_speeds, const bool draw_lane_ids, const bool draw_road_names, int hud_font_size, const bool benchmark);
+void render_sim(SDL_Renderer* renderer, Simulation* sim, const bool draw_lanes, const bool draw_cars, const bool draw_track_lines, const bool draw_traffic_lights, const bool draw_car_ids, const bool draw_car_speeds, const bool draw_lane_ids, const bool draw_road_names, bool draw_lidar, bool draw_camera, bool draw_minimap, bool draw_infos_display, int hud_font_size, const bool benchmark);
 
 // thickLineRGBA(renderer, p1.x, p1.y, p2.x, p2.y, thickness, color.r, color.g, color.b, color.a);
 

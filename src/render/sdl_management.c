@@ -251,6 +251,14 @@ SimCommand handle_sdl_events() {
             CAMERA_CENTERED_ON_CAR_ENABLED = false; // Disable following agent
             PAN_X = 0;
             PAN_Y = 0;
+        } else if (event.type == SDL_KEYUP && event.key.keysym.sym == SDLK_UP) {
+            // cycle up the car camera type. decrementing with wrap-around
+            HIGHLIGHTED_CAR_CAMERA_TYPE = (HIGHLIGHTED_CAR_CAMERA_TYPE == 0) ? (CarCameraType)(CAR_CAMERA_NUM_TYPES - 1) : (CarCameraType)(HIGHLIGHTED_CAR_CAMERA_TYPE - 1);
+            LOG_DEBUG("Up arrow key pressed, changed highlighted car camera to type %d", HIGHLIGHTED_CAR_CAMERA_TYPE);
+        } else if (event.type == SDL_KEYUP && event.key.keysym.sym == SDLK_DOWN) {
+            // cycle down the car camera type. incrementing with wrap-around
+            HIGHLIGHTED_CAR_CAMERA_TYPE = (CarCameraType)((HIGHLIGHTED_CAR_CAMERA_TYPE + 1) % CAR_CAMERA_NUM_TYPES);
+            LOG_DEBUG("Down arrow key pressed, changed highlighted car camera to type %d", HIGHLIGHTED_CAR_CAMERA_TYPE);
         } else if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT) {
             mouse_start_x = event.button.x;
             mouse_start_y = event.button.y;

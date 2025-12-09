@@ -11,7 +11,7 @@ static InfosDisplay* highlighted_car_infos_display = NULL;
 static MiniMap* highlighted_car_minimap = NULL;
 
 void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, const bool draw_cars,
-                const bool draw_track_lines, const bool draw_traffic_lights, const bool draw_car_ids, const bool draw_car_speeds, const bool draw_lane_ids, const bool draw_road_names, int hud_font_size, const bool benchmark)
+                const bool draw_track_lines, const bool draw_traffic_lights, const bool draw_car_ids, const bool draw_car_speeds, const bool draw_lane_ids, const bool draw_road_names, bool draw_lidar, bool draw_camera, bool draw_minimap, bool draw_infos_display, int hud_font_size, const bool benchmark)
 {
     Map *map = sim_get_map(sim);
 
@@ -217,7 +217,7 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
     }
 
     // render lidar of the car that the camera is centered on
-    if (HIGHLIGHTED_CARS[0] != ID_NULL) {
+    if (draw_lidar && HIGHLIGHTED_CARS[0] != ID_NULL) {
         Car* highlighted_car = sim_get_car(sim, HIGHLIGHTED_CARS[0]);
         if (highlighted_car_lidar == NULL) {
             highlighted_car_lidar = lidar_malloc((Coordinates){0,0}, 0.0, 360, from_degrees(360), from_feet(255.0)); // 255 feet max depth
@@ -232,7 +232,7 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
     }
 
     // here render the camera (attached to the highlighted car) bonut.
-    if (HIGHLIGHTED_CARS[0] != ID_NULL) {
+    if (draw_camera && HIGHLIGHTED_CARS[0] != ID_NULL) {
         Car* highlighted_car = sim_get_car(sim, HIGHLIGHTED_CARS[0]);
         if (highlighted_car_camera == NULL) {
             // Create a camera with 128x128 resolution, 90 degree fov, 500 meter max depth
@@ -241,21 +241,15 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
             highlighted_car_camera->aa_level = 2;
         }
         if (highlighted_car && highlighted_car_camera) {
-            // Attach to front-center of the car. Front is at +length/2 along orientation.
-            Vec2D front_pos_2d = vec_add(highlighted_car->center, vec_scale(angle_to_unit_vector(highlighted_car->orientation), car_get_length(highlighted_car) / 2.0));
-            
-            highlighted_car_camera->position = front_pos_2d;
-            highlighted_car_camera->z_altitude = highlighted_car->dimensions.z * 0.9; // slightly below roof height
-            highlighted_car_camera->orientation = highlighted_car->orientation;
-            
+            rgbcam_attach_to_car(highlighted_car_camera, highlighted_car, HIGHLIGHTED_CAR_CAMERA_TYPE);
             void* exclude_objects[] = {(void*)highlighted_car, NULL};
-            rgbcam_capture_efficient(highlighted_car_camera, sim, exclude_objects);
+            rgbcam_capture(highlighted_car_camera, sim, exclude_objects);
             render_camera(renderer, highlighted_car_camera);
         }
     }
 
         // Render infos display for highlighted car
-    if (HIGHLIGHTED_CARS[0] != ID_NULL) {
+    if (draw_infos_display && HIGHLIGHTED_CARS[0] != ID_NULL) {
         Car* highlighted_car = sim_get_car(sim, HIGHLIGHTED_CARS[0]);
         if (highlighted_car_infos_display == NULL) {
             highlighted_car_infos_display = infos_display_malloc(128, 128, 3);
@@ -303,7 +297,7 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
     }
 
     // Render minimap for highlighted car
-    if (HIGHLIGHTED_CARS[0] != ID_NULL) {
+    if (draw_minimap && HIGHLIGHTED_CARS[0] != ID_NULL) {
         Car* highlighted_car = sim_get_car(sim, HIGHLIGHTED_CARS[0]);
         if (highlighted_car_minimap == NULL) {
             highlighted_car_minimap = minimap_malloc(128, 128, map);

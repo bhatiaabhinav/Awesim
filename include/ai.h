@@ -113,6 +113,21 @@ typedef enum {
     AA_FXAA = 2
 } AAType;
 
+
+// based on Tesla's HW3/4 car camera setup
+typedef enum {
+    CAR_CAMERA_NARROW_FORWARD = 0,          // FOV = 35°, Range = 250 m. Location: near rear view mirror (Dropped in HW4, but useful if images are low-res)
+    CAR_CAMERA_MAIN_FORWARD = 1,            // FOV = 50°, Range = 150 m. Location: near rear view mirror
+    CAR_CAMERA_WIDE_FORWARD = 2,            // FOV = 120°, Range = 60 m. Location: near rear view mirror
+    CAR_CAMERA_SIDE_LEFT_FORWARDVIEW = 3,   // FOV = 90°, Range = 80 m.  Location: B-pillar left
+    CAR_CAMERA_SIDE_RIGHT_FORWARDVIEW = 4,  // FOV = 90°, Range = 80 m.  Location: B-pillar right
+    CAR_CAMERA_SIDE_LEFT_REARVIEW = 5,      // FOV = 75°, Range = 100 m. Location: fender left
+    CAR_CAMERA_SIDE_RIGHT_REARVIEW = 6,     // FOV = 75°, Range = 100 m. Location: fender right
+    CAR_CAMERA_REARVIEW = 7,                // FOV = 140°, Range = 60 m. Location: above rear license plate
+    CAR_CAMERA_FRONT_BUMPER = 8,            // FOV = 150°, Range = 20 m. Location: front bumper (New in HW4)
+    CAR_CAMERA_NUM_TYPES = 9                // Number of camera types
+} CarCameraType;
+
 struct RGBCamera {
     Coordinates position; // Position of the camera
     Meters z_altitude;    // Altitude of the camera (from ground level)
@@ -124,6 +139,8 @@ struct RGBCamera {
     uint8_t* data;       // Pointer to the RGB data in HWC format, linearized
     AAType aa_type;      // Type of anti-aliasing
     int aa_level;        // Level of anti-aliasing (e.g., 2 for 2x SSAA)
+    Car* attached_car;  // If the camera is attached to a car, pointer to that car (NULL if not attached). Once attached to a car, the camera's position and orientation are set automatically based on the car's state when capturing.
+    CarCameraType attached_car_camera_type; // If the camera is attached to a car, type of the car camera. Determines the relative position and orientation of the camera w.r.t. the car and its fov and max_distance.
 };
 typedef struct RGBCamera RGBCamera;
 
@@ -193,12 +210,10 @@ RGB rgbcam_get_pixel_at(const RGBCamera* frame, int row, int col);
 void rgbcam_set_pixel_at(RGBCamera* frame, int row, int col, const RGB pixel);
 void rgbcam_copy(const RGBCamera* src, RGBCamera* dest);
 void lidar_copy(const Lidar* src, Lidar* dest);
-void rgbcam_capture(RGBCamera* frame, Simulation* sim, void** exclude_objects);  // via ray casting
-void rgbcam_capture_efficient(RGBCamera* frame, Simulation* sim, void** exclude_objects);  // via efficient projective rendering
+void rgbcam_capture(RGBCamera* frame, Simulation* sim, void** exclude_objects);
+void rgbcam_attach_to_car(RGBCamera* camera, Car* car, CarCameraType camera_type);
 void lidar_capture(Lidar* frame, Simulation* sim, void** exclude_objects);
 
-// using projective rendering
-void rgbcam_capture_proj(RGBCamera* camera, Simulation* sim, void** exclude_objects);
 
 struct SituationalAwareness {
     bool is_valid;                          // Is this situational awareness valid? If false, all other fields should be ignored.
