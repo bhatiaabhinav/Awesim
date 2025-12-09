@@ -9,6 +9,7 @@ Seconds seconds(double value) { return value; }
 MetersPerSecond mps(double value) { return value; }
 MetersPerSecondSquared mpss(double value) { return value; }
 Radians radians(double value) { return value; }
+Degrees degrees(double value) { return value; }
 Kilograms kilograms(double value) { return value; }
 Liters liters(double value) { return value; }
 Watts watts(double value) { return value; }
