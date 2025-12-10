@@ -1,9 +1,12 @@
 import ast
+import os
 import sys
+import gymnasium
 import numpy as np
 import torch
+import torch.nn as nn
 from gymenv import AwesimEnv
-from gymenv_utils import make_mlp
+from gymenv_utils import VisionEncoder384, LiteVisionEncoder384
 from ppo import Actor
 from gymnasium.vector import SyncVectorEnv, AsyncVectorEnv, AutoresetMode
 
@@ -15,8 +18,11 @@ TEST_CONFIG = {
     "verbose": True,                    # whether to print detailed logs
     "parallel": False,                  # whether to run multiple environments in parallel for evaluation
     "episodes": 100,                    # number of episodes to run for evaluation
+    "video_interval": 10,               # interval for video recording (in episodes), None to disable
 }
 ENV_CONFIG = {
+    "cam_resolution": (128, 128),       # width, height
+    "anti_aliasing": True,
     "goal_lane": 84,
     "city_width": 1000,                 # in meters
     "num_cars": 256,                    # number of other cars in the environment
@@ -24,9 +30,9 @@ ENV_CONFIG = {
     "sim_duration": 60 * 60,            # 60 minutes max duration after which the episode ends and wage for entire 8-hour workday is lost
     "appointment_time": 60 * 20,        # 20 minutes to reach the appointment
     "cost_gas_per_gallon": 4.0,         # in NYC (USD)
-    "cost_car": 30000,                  # cost of the car (USD), incurred if crashed (irrespective of severity)
+    "cost_car": 0,                      # cost of the car (USD), incurred if crashed (irrespective of severity)
     "cost_lost_wage_per_hour": 40,      # of a decent job in NYC (USD)
-    "may_lose_entire_day_wage": True,   # lose entire 8-hour workday wage if not reached by the end of sim_duration
+    "may_lose_entire_day_wage": False,  # lose entire 8-hour workday wage if not reached by the end of sim_duration
     "init_fuel_gallons": 3.0,           # initial fuel in gallons -- 1/4th of a 12-gallon tank car
     "goal_reward": 1.0,                 # A small positive number to incentivize reaching the goal
     "deterministic_actions": True,      # If True, actions to select follow-mode vs stop-mode and turn/merge signals are deterministic instead of bernoulli-sampled
@@ -37,10 +43,10 @@ VEC_ENV_CONFIG = {
 }
 POLICY_CONFIG = {
     "norm_obs": True,
-    "net_arch": [1024, 512, 256],
-    "layernorm": True,
-    "deterministic": True,
+    "hidden_dims": 512,
+    "lite": False,
     "state_dependent_std": True,
+    "deterministic": True,
 }
 
 
@@ -61,7 +67,8 @@ def test_model(model_path) -> None:
     obs_dim = env.observation_space.shape[0]   # type: ignore
     action_dim = env.action_space.shape[0]     # type: ignore
 
-    actor_model = make_mlp(obs_dim, POLICY_CONFIG["net_arch"], 2 * action_dim if POLICY_CONFIG["state_dependent_std"] else action_dim, layernorm=POLICY_CONFIG["layernorm"])
+    VisionEncoder = LiteVisionEncoder384 if POLICY_CONFIG["lite"] else VisionEncoder384
+    actor_model = nn.Sequential(VisionEncoder(POLICY_CONFIG["hidden_dims"]), nn.Flatten(), nn.Linear(POLICY_CONFIG["hidden_dims"], 2 * action_dim if POLICY_CONFIG["state_dependent_std"] else action_dim))
     actor = Actor(actor_model, env.observation_space, env.action_space, deterministic=POLICY_CONFIG["deterministic"], norm_obs=POLICY_CONFIG["norm_obs"], state_dependent_std=POLICY_CONFIG["state_dependent_std"])    # type: ignore
     actor.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
 
@@ -71,6 +78,10 @@ def test_model(model_path) -> None:
         rews, costs, lens, succs = actor.evaluate_policy_parallel(vec_env, TEST_CONFIG["episodes"], deterministic=POLICY_CONFIG["deterministic"])
         vec_env.close()
     else:
+        # set up env for video recording as well periodically
+        if TEST_CONFIG["video_interval"] is not None:
+            model_name = os.path.splitext(os.path.basename(model_path))[0]
+            env = gymnasium.wrappers.RecordVideo(env, video_folder=f"videos/{model_name}", episode_trigger=lambda x: x % TEST_CONFIG["video_interval"] == 0, name_prefix="test")
         rews, costs, lens, succs = actor.evaluate_policy(env, TEST_CONFIG["episodes"], deterministic=POLICY_CONFIG["deterministic"])
 
     print(f"Average Reward: {np.mean(rews)}, Average Cost: {np.mean(costs)}, Average Length: {np.mean(lens)}, Success Rate: {np.mean(succs)}")

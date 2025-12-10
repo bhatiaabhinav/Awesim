@@ -7,6 +7,23 @@ from gymenv_utils import direction_onehot, indicator_onehot
 
 
 class AwesimEnv(gym.Env):
+    """
+    A Gym environment simulating an autonomous vehicle with an Advanced Driver Assistance System (ADAS).
+    The agent controls the vehicle to navigate a city environment, aiming to reach a specified goal lane
+    or drive safely without crashing. The environment uses a custom simulation backend (`bindings`) and
+    provides observations of the vehicle's state, ADAS settings, location, nearby vehicles, and traffic conditions.
+    Actions control speed, turn/merge signals, and follow distance. The environment supports rendering and
+    synchronized simulation for visualization.
+
+    Key Features:
+    - Action space: Continuous 3D Box for speed adjustment (±10 mph), turn/merge signal, and follow distance (±1s).
+    - Observation space: 149-dimensional vector capturing vehicle state, ADAS settings, location, nearby vehicles,
+      and traffic conditions, normalized to [-10, 10].
+    - Reward: -0.2 per second (time penalty), +100 for reaching goal lane, -100 for crashing, and speed-based reward
+      if no goal is specified.
+    - Termination: Episode ends on crash, reaching goal, or exceeding simulation duration (default 1 hour).
+    """
+
     # Constants
     DEFAULT_CITY_WIDTH = 1000  # City width in meters
     DEFAULT_NUM_CARS = 256  # Number of vehicles in the simulation
@@ -27,14 +44,12 @@ class AwesimEnv(gym.Env):
     MAX_THW = 10.0  # Maximum time-headway (seconds)
     COST_GAS_PER_GALLON = 3.2  # Average cost of gas per gallon ($) in US
     COST_LOST_WAGE_PER_HOUR = 30.0  # Average wages per hour ($) in US
-    MAY_LOSE_ENTIRE_DAY_WAGE = False  # Lose entire 8-hour workday wage if not reached by the end of sim_duration
-    # COST_CAR = 35000.0  # Average new car cost ($) in US. This is the cost for total loss in a crash.
-    COST_CAR = 0.0  # Set to 0 for now to not penalize crashes too much
+    MAY_LOSE_ENTIRE_DAY_WAGE = True  # Lose entire 8-hour workday wage if not reached by the end of sim_duration
+    COST_CAR = 35000.0  # Average new car cost ($) in US. This is the cost for total loss in a crash.
     DEFAULT_INIT_FUEL_GALLONS = 15.0  # Default initial fuel level in gallons
-    DEFAULT_CAM_RESOLUTION = (128, 128)  # Default camera resolution (width, height)
     OBSERVATION_NORMALIZATION = {
-        "speed": A.from_mph(120),  # Normalize speeds by 120 mph
-        "acceleration": 12,  # Normalize accelerations by 12 m/s²
+        "speed": 10,  # Normalize speeds by 10 m/s
+        "acceleration": 10,  # Normalize accelerations by 10 m/s²
         "distance": 100,  # Normalize distances by 100 meters
         "center": 1000,  # Normalize coordinates by 1000 meters
         "lanes": 10,  # Normalize lane counts by 10
@@ -45,8 +60,6 @@ class AwesimEnv(gym.Env):
 
     def __init__(
         self,
-        cam_resolution: Tuple[int, int] = DEFAULT_CAM_RESOLUTION,
-        anti_aliasing: bool = False,
         city_width: int = DEFAULT_CITY_WIDTH,
         goal_lane: Optional[int] = None,
         num_cars: int = DEFAULT_NUM_CARS,
@@ -73,7 +86,6 @@ class AwesimEnv(gym.Env):
         Initialize the AwesimEnv with simulation and agent configuration.
 
         Args:
-            cam_resolution (Tuple[int, int]): Resolution of the agent's camera (width, height).
             city_width (int): Width of the city map in meters.
             goal_lane (Optional[int]): Target lane ID to reach, or None for general driving.
             num_cars (int): Number of vehicles in the simulation.
@@ -101,8 +113,6 @@ class AwesimEnv(gym.Env):
             raise ValueError("decision_interval must be positive")
 
         # Environment configuration
-        self.cam_resolution = cam_resolution
-        self.anti_aliasing = anti_aliasing
         self.goal_lane = goal_lane
         self.city_width = city_width
         self.num_cars = num_cars
@@ -124,7 +134,6 @@ class AwesimEnv(gym.Env):
         self.should_render = should_render
         self.render_server_ip = render_server_ip
         self.verbose = verbose
-        self.render_mode = "rgb_array"
 
         # Initialize simulation
         self.sim = A.sim_malloc()  # Allocate simulation instance
@@ -136,13 +145,6 @@ class AwesimEnv(gym.Env):
         self.agent = A.sim_get_agent_car(self.sim)  # Get agent vehicle
         if self.verbose:
             print(f"Agent car ID: {self.agent.id}")
-        self.cams = [A.rgbcam_malloc(A.coordinates_create(0, 0), 0, 0, cam_resolution[0], cam_resolution[1], A.from_degrees(0), A.meters(0)) for _ in range(7)]  # Initialize 7 cameras
-        if self.anti_aliasing:
-            for cam in self.cams:
-                cam.aa_type = A.AA_SSAA
-                cam.aa_level = 2
-        self.infos_display = A.infos_display_malloc(cam_resolution[0], cam_resolution[1], len(self._get_info_for_info_display()))
-        self.minimap = A.minimap_malloc(cam_resolution[0], cam_resolution[1], A.sim_get_map(self.sim))
 
         print("seeding rng with ", env_index + 1)
         A.seed_rng(env_index + 1)  # Seed random number generator for reproducibility
@@ -158,103 +160,322 @@ class AwesimEnv(gym.Env):
             high = np.array([follow_mode_probability_high, speed_target_high, follow_mode_thw_high, margin_max, turn_signal_max], dtype=np.float32),
         )
 
-        # Define observation space. 9 images: 7 cameras (front main, front wide, front-left, front-right, rear, rear-left, rear-right), one minimap and one image displaying various vehicle, adas and environment state variables. The images are gridified into a single image of shape (9*height, width, 3), then transposed to channels-first format (3, 3*height, 3*width)
+        # Define observation space
+        n_state_factors = len(self._get_observation())
         self.observation_space = spaces.Box(
-            low=0, high=255, shape=(3, cam_resolution[1] * 3, cam_resolution[0] * 3), dtype=np.uint8
+            low=-10, high=10, shape=(n_state_factors,), dtype=np.float32
+        )  # Normalized observation space
+
+    def _construct_car_state_observation(self) -> np.ndarray:
+        """
+        Construct observation for the agent's vehicle state.
+
+        Returns:
+            np.ndarray: Concatenated array of vehicle capabilities, current speed,
+            acceleration, lane/turn indicators, and one-hot encoded signals.
+        """
+        agent = self.agent
+        lane_indicator = indicator_onehot(A.car_get_indicator_lane(agent))
+        turn_indicator = indicator_onehot(A.car_get_indicator_turn(agent))
+        return np.concatenate(
+            (
+                np.array(
+                    [
+                        agent.capabilities.top_speed / self.OBSERVATION_NORMALIZATION["speed"],
+                        agent.capabilities.accel_profile.max_acceleration / self.OBSERVATION_NORMALIZATION["acceleration"],
+                        agent.capabilities.accel_profile.max_acceleration_reverse_gear / self.OBSERVATION_NORMALIZATION["acceleration"],
+                        agent.capabilities.accel_profile.max_deceleration / self.OBSERVATION_NORMALIZATION["acceleration"],
+                        A.car_get_speed(agent) / self.OBSERVATION_NORMALIZATION["speed"],
+                        A.car_get_acceleration(agent) / self.OBSERVATION_NORMALIZATION["acceleration"],
+                        A.car_get_request_indicated_lane(agent),
+                        A.car_get_request_indicated_turn(agent),
+                        A.car_get_fuel_level(agent) / self.OBSERVATION_NORMALIZATION["fuel"],
+                    ],
+                    dtype=np.float32,
+                ),
+                lane_indicator,
+                turn_indicator,
+            )
         )
 
-    def _get_info_for_info_display(self) -> list[Tuple[float, A.RGB]]:
+    def _construct_location_observation(self) -> np.ndarray:
+        """
+        Construct observation for the vehicle's location and lane attributes.
 
-        A.situational_awareness_build(self.sim, self.agent.id)
+        Returns:
+            np.ndarray: Concatenated array of intersection/road position, lane properties,
+            and directional information.
+        """
+        map = A.sim_get_map(self.sim)
+        sit = A.sim_get_situational_awareness(self.sim, 0)
+        is_on_intersection = sit.is_on_intersection
+        center = sit.intersection.center if is_on_intersection else sit.road.mid_point
+        lane = sit.lane
+
+        # Determine lane direction for straight or turn lanes
+        if lane.type == A.LINEAR_LANE:
+            direction_from = direction_to = direction_onehot(lane.direction)
+        else:
+            lane_prev = A.lane_get_connection_incoming_straight(lane, map)
+            lane_next = A.lane_get_connection_straight(lane, map)
+            direction_from = direction_onehot(lane_prev.direction)
+            direction_to = direction_onehot(lane_next.direction)
+
+        is_straight = lane.type == A.LINEAR_LANE
+        is_left_turn = lane.direction == A.DIRECTION_CCW
+        is_right_turn = lane.direction == A.DIRECTION_CW
+
+        # Determine lane number and count based on intersection or road
+        if is_on_intersection:
+            if lane.type == A.LINEAR_LANE:
+                prev_lane = A.lane_get_connection_incoming_straight(lane, map)
+                prev_road = A.lane_get_road(prev_lane, map)
+                num_lanes = prev_road.num_lanes
+                lane_number = A.road_find_index_of_lane(prev_road, prev_lane.id)
+            else:
+                num_lanes = lane_number = 1
+        else:
+            num_lanes = sit.road.num_lanes
+            lane_number = A.road_find_index_of_lane(sit.road, lane.id)
+
+        return np.concatenate(
+            (
+                np.array(
+                    [
+                        is_on_intersection,
+                        center.x / self.OBSERVATION_NORMALIZATION["center"],
+                        center.y / self.OBSERVATION_NORMALIZATION["center"],
+                        is_straight,
+                        is_left_turn,
+                        is_right_turn,
+                        sit.is_exit_available,
+                        sit.is_exit_available_eventually,
+                        sit.is_on_entry_ramp,
+                        sit.is_approaching_dead_end,
+                        sit.is_an_intersection_upcoming,
+                        num_lanes / self.OBSERVATION_NORMALIZATION["lanes"],
+                        lane_number / num_lanes,
+                        (num_lanes - 1 - lane_number) / num_lanes,
+                        A.car_get_lane_progress(self.agent),
+                        sit.distance_to_end_of_lane_from_leading_edge / self.OBSERVATION_NORMALIZATION["distance"],
+                    ],
+                    dtype=np.float32,
+                ),
+                direction_from,
+                direction_to,
+            )
+        )
+
+    def _construct_driving_assistant_observation(self) -> np.ndarray:
+        """
+        Construct observation for the ADAS settings.
+
+        Returns:
+            np.ndarray: Concatenated array of ADAS parameters and one-hot encoded intents.
+        """
         das = A.sim_get_driving_assistant(self.sim, 0)
         sit = A.sim_get_situational_awareness(self.sim, 0)
-    
+        stopping_target_from_end_of_lane = sit.distance_to_end_of_lane_from_leading_edge - das.stopping_distance_target if das.stop_mode else 0
+        stopping_target_from_end_of_lane = max(stopping_target_from_end_of_lane, 0.0)  # just in case, as it can be negative if we are already past the end of lane and the margin is measured from leading edge
+        return np.concatenate(
+            (
+                np.array(
+                    [
+                        das.speed_target / self.OBSERVATION_NORMALIZATION["speed"],
+                        das.stop_mode,
+                        stopping_target_from_end_of_lane / self.OBSERVATION_NORMALIZATION["distance"],
+                        das.follow_mode,
+                        das.follow_mode_thw / self.OBSERVATION_NORMALIZATION["speed"],
+                        das.follow_mode_buffer,
+                        das.merge_assistance,
+                        das.aeb_assistance,
+                        das.aeb_in_progress,
+                        das.aeb_manually_disengaged,
+                        das.use_preferred_accel_profile,
+                        das.use_linear_speed_control,
+                    ],
+                    dtype=np.float32,
+                ),
+                indicator_onehot(das.merge_intent),
+                indicator_onehot(das.turn_intent),
+            )
+        )
 
-        # car state
-        fuel = A.car_get_fuel_level(self.agent) / self.OBSERVATION_NORMALIZATION["fuel"]
-        speed = A.car_get_speed(self.agent) / self.OBSERVATION_NORMALIZATION["speed"]
-        accel = A.car_get_acceleration(self.agent) / self.OBSERVATION_NORMALIZATION["acceleration"]
-        ind_turn_left = A.car_get_indicator_turn(self.agent) == A.INDICATOR_LEFT
-        ind_merge_left = A.car_get_indicator_lane(self.agent) == A.INDICATOR_LEFT
-        ind_left = ind_turn_left or ind_merge_left
-        ind_turn_right = A.car_get_indicator_turn(self.agent) == A.INDICATOR_RIGHT
-        ind_merge_right = A.car_get_indicator_lane(self.agent) == A.INDICATOR_RIGHT
-        ind_right = ind_turn_right or ind_merge_right
+    def _construct_nearby_vehicles_observation(self) -> np.ndarray:
+        """
+        Construct observation for nearby vehicles' states.
 
-        # ADAS state
-        speed_target = das.speed_target / self.OBSERVATION_NORMALIZATION["speed"]
-        follow_thw_target = das.follow_mode_thw / self.MAX_FOLLOW_THW
-        margin_target = max(sit.distance_to_end_of_lane_from_leading_edge - das.stopping_distance_target, 0) / A.from_feet(10) if das.stop_mode else das.follow_mode_buffer / A.from_feet(10)
-        merge_intent_left = das.merge_intent == A.INDICATOR_LEFT
-        merge_intent_right = das.merge_intent == A.INDICATOR_RIGHT
-        turn_intent_left = das.turn_intent == A.INDICATOR_LEFT
-        turn_intent_right = das.turn_intent == A.INDICATOR_RIGHT
-        intent_left = merge_intent_left or turn_intent_left
-        intent_right = merge_intent_right or turn_intent_right
-        stop_mode = das.stop_mode
-        follow_mode = das.follow_mode
-        aeb_in_progress = das.aeb_in_progress
+        Returns:
+            np.ndarray: Concatenated array of lead/following vehicle states and nearby vehicle metrics.
+        """
+        situation = A.sim_get_situational_awareness(self.sim, 0)
+        agent_speed = A.car_get_speed(self.agent)
+        agent_acc = A.car_get_acceleration(self.agent)
 
-        # environment state
-        t = A.sim_get_time(self.sim) / self.OBSERVATION_NORMALIZATION["time"]
-        speed_limit = sit.lane.speed_limit / self.OBSERVATION_NORMALIZATION["speed"]
-        
+        # Lead vehicle observation
+        lead_exists = situation.is_vehicle_ahead
+        lead_distance = (
+            situation.distance_to_lead_vehicle - (A.car_get_length(self.agent) / 2 + A.car_get_length(situation.lead_vehicle) / 2)
+            if lead_exists
+            else self.MAX_DISTANCE
+        )
+        lead_rel_speed = A.car_get_speed(situation.lead_vehicle) - agent_speed if lead_exists else 0
+        lead_rel_acc = A.car_get_acceleration(situation.lead_vehicle) - agent_acc if lead_exists else 0
 
-        infos_and_colors = [
-            (fuel, A.RGB_WHITE), (speed, A.RGB_BLUE),
-            (abs(accel), A.RGB_GREEN if accel >= 0 else A.RGB_RED),
-            (float(ind_left), A.RGB_RED if ind_turn_left else (A.RGB_ORANGE if ind_merge_left else A.RGB_WHITE)),
-            (float(ind_right), A.RGB_RED if ind_turn_right else (A.RGB_ORANGE if ind_merge_right else A.RGB_WHITE)),
-            (speed_target, A.RGB_MAGENTA), (follow_thw_target, A.RGB_MAGENTA), (margin_target, A.RGB_MAGENTA),
-            (float(intent_left), A.RGB_RED if turn_intent_left else (A.RGB_ORANGE if merge_intent_left else A.RGB_WHITE)),
-            (float(intent_right), A.RGB_RED if turn_intent_right else (A.RGB_ORANGE if merge_intent_right else A.RGB_WHITE)),
-            (float(stop_mode), A.RGB_CYAN), (float(follow_mode), A.RGB_CYAN), (float(aeb_in_progress), A.RGB_RED),
-            (t, A.RGB_WHITE), (speed_limit, A.RGB_WHITE),
-        ]
+        # Following vehicle observation
+        behind_exists = situation.is_vehicle_behind
+        behind_distance = (
+            situation.distance_to_following_vehicle - (A.car_get_length(self.agent) / 2 + A.car_get_length(situation.following_vehicle) / 2)
+            if behind_exists
+            else self.MAX_DISTANCE
+        )
+        behind_rel_speed = A.car_get_speed(situation.following_vehicle) - agent_speed if behind_exists else 0
+        behind_rel_acc = A.car_get_acceleration(situation.following_vehicle) - agent_acc if behind_exists else 0
 
-        return infos_and_colors
+        # Nearby vehicles observation
+        nearby_flattened = A.NearbyVehiclesFlattened()
+        A.nearby_vehicles_flatten(situation.nearby_vehicles, nearby_flattened, True)
+        flattened_count = A.nearby_vehicles_flattened_get_count(nearby_flattened)
+        nearby_exists_flags = np.array(
+            [A.nearby_vehicles_flattened_get_car_id(nearby_flattened, i) != -1 for i in range(flattened_count)],
+            dtype=np.float32,
+        )
+        nearby_distances = np.array(
+            [A.nearby_vehicles_flattened_get_distance(nearby_flattened, i) for i in range(flattened_count)],
+            dtype=np.float32,
+        ).clip(0, self.MAX_DISTANCE)
+        nearby_ttcs = np.array(
+            [A.nearby_vehicles_flattened_get_time_to_collision(nearby_flattened, i) for i in range(flattened_count)],
+            dtype=np.float32,
+        ).clip(0, self.MAX_TTC)
+        nearby_thws = np.array(
+            [A.nearby_vehicles_flattened_get_time_headway(nearby_flattened, i) for i in range(flattened_count)],
+            dtype=np.float32,
+        ).clip(0, self.MAX_THW)
+        nearby_speeds_relative = np.array(
+            [
+                (A.car_get_speed(A.sim_get_car(self.sim, A.nearby_vehicles_flattened_get_car_id(nearby_flattened, i))) - agent_speed)
+                if nearby_exists_flags[i]
+                else 0
+                for i in range(flattened_count)
+            ],
+            dtype=np.float32,
+        )
+        nearby_acc_relative = np.array(
+            [
+                (A.car_get_acceleration(A.sim_get_car(self.sim, A.nearby_vehicles_flattened_get_car_id(nearby_flattened, i))) - agent_acc)
+                if nearby_exists_flags[i]
+                else 0
+                for i in range(flattened_count)
+            ],
+            dtype=np.float32,
+        )
 
-    def _get_obs_as_list_of_images(self) -> list[np.ndarray]:
-        # ensure cams are attached to the agent
-        A.rgbcam_attach_to_car(self.cams[0], self.agent, A.CAR_CAMERA_MAIN_FORWARD)
-        A.rgbcam_attach_to_car(self.cams[1], self.agent, A.CAR_CAMERA_WIDE_FORWARD)
-        A.rgbcam_attach_to_car(self.cams[2], self.agent, A.CAR_CAMERA_SIDE_LEFT_FORWARDVIEW)
-        A.rgbcam_attach_to_car(self.cams[3], self.agent, A.CAR_CAMERA_SIDE_RIGHT_FORWARDVIEW)
-        A.rgbcam_attach_to_car(self.cams[4], self.agent, A.CAR_CAMERA_SIDE_LEFT_REARVIEW)
-        A.rgbcam_attach_to_car(self.cams[5], self.agent, A.CAR_CAMERA_SIDE_RIGHT_REARVIEW)
-        A.rgbcam_attach_to_car(self.cams[6], self.agent, A.CAR_CAMERA_REARVIEW)
+        return np.concatenate(
+            (
+                np.array(
+                    [
+                        lead_exists,
+                        lead_distance / self.OBSERVATION_NORMALIZATION["distance"],
+                        lead_rel_speed / self.OBSERVATION_NORMALIZATION["speed"],
+                        lead_rel_acc / self.OBSERVATION_NORMALIZATION["acceleration"],
+                        behind_exists,
+                        behind_distance / self.OBSERVATION_NORMALIZATION["distance"],
+                        behind_rel_speed / self.OBSERVATION_NORMALIZATION["speed"],
+                        behind_rel_acc / self.OBSERVATION_NORMALIZATION["acceleration"],
+                    ]
+                ),
+                nearby_distances / self.OBSERVATION_NORMALIZATION["distance"],
+                nearby_ttcs / self.OBSERVATION_NORMALIZATION["speed"],
+                nearby_thws / self.OBSERVATION_NORMALIZATION["speed"],
+                nearby_speeds_relative / self.OBSERVATION_NORMALIZATION["speed"],
+                nearby_acc_relative / self.OBSERVATION_NORMALIZATION["acceleration"],
+            )
+        )
 
-        # capture all cams
-        for cam in self.cams:
-            A.rgbcam_capture(cam, self.sim)
+    def _construct_environment_conditions_observation(self) -> np.ndarray:
+        """
+        Construct observation for environmental conditions.
 
-        # minimap render
-        self.minimap.marked_car_id = self.agent.id
-        A.minimap_render(self.minimap, self.sim)
+        Returns:
+            np.ndarray: Array containing the current lane's speed limit.
+        """
+        sit = A.sim_get_situational_awareness(self.sim, 0)
+        t = A.sim_get_time(self.sim)
+        return np.array([sit.lane.speed_limit / self.OBSERVATION_NORMALIZATION["speed"], t / self.OBSERVATION_NORMALIZATION["time"]], dtype=np.float32)
 
-        # info display render
-        infos_and_colors = self._get_info_for_info_display()
-        for i, (info, color) in enumerate(infos_and_colors):
-            A.infos_display_set_info(self.infos_display, i, info)
-            A.infos_display_set_info_color(self.infos_display, i, color)
-        A.infos_display_render(self.infos_display)
+    def _construct_turn_relevant_observations(self) -> np.ndarray:
+        """
+        Construct observation for turn-related traffic conditions.
 
-        return [
-            self.cams[0].to_numpy(),
-            self.cams[1].to_numpy(),
-            self.cams[2].to_numpy(),
-            self.cams[3].to_numpy(),
-            self.cams[4].to_numpy(),
-            self.cams[5].to_numpy(),
-            self.cams[6].to_numpy(),
-            self.minimap.to_numpy(),
-            self.infos_display.to_numpy(),
-        ]
+        Returns:
+            np.ndarray: Array of turn availability and traffic light states.
+        """
+        sit = A.sim_get_situational_awareness(self.sim, 0)
+        lane = sit.lane
+        map = A.sim_get_map(self.sim)
+        left_turn_available = A.lane_get_connection_left_id(lane) != A.ID_NULL
+        straight_available = A.lane_get_connection_straight_id(lane) != A.ID_NULL
+        right_turn_available = A.lane_get_connection_right_id(lane) != A.ID_NULL
+
+        is_green = is_yellow = is_red = all_red = is_fourway_stop = False
+        countdown = 0
+        if intersection := sit.intersection:
+            is_fourway_stop = intersection.state == A.FOUR_WAY_STOP
+            if not is_fourway_stop:
+                direction = (
+                    A.lane_get_connection_incoming_straight(lane, map).direction
+                    if sit.is_on_intersection
+                    else lane.direction
+                )
+                is_ew = direction in (A.DIRECTION_EAST, A.DIRECTION_WEST)
+                is_ns = not is_ew
+                is_green = (is_ew and intersection.state == A.NS_RED_EW_GREEN) or (
+                    is_ns and intersection.state == A.NS_GREEN_EW_RED
+                )
+                is_yellow = (is_ew and intersection.state == A.EW_YELLOW_NS_RED) or (
+                    is_ns and intersection.state == A.NS_YELLOW_EW_RED
+                )
+                is_red = not (is_green or is_yellow)
+                all_red = intersection.state in (A.ALL_RED_BEFORE_EW_GREEN, A.ALL_RED_BEFORE_NS_GREEN)
+                countdown = intersection.countdown
+            else:
+                all_red = is_red = True
+
+        return np.array(
+            [
+                left_turn_available,
+                straight_available,
+                right_turn_available,
+                is_green,
+                is_yellow,
+                is_red,
+                all_red,
+                is_fourway_stop,
+                countdown / self.OBSERVATION_NORMALIZATION["countdown"],
+            ],
+            dtype=np.float32,
+        )
 
     def _get_observation(self) -> np.ndarray:
-        frames_list = self._get_obs_as_list_of_images()
-        gridified = self.gridify(frames_list)
-        return gridified.transpose(2, 0, 1)  # channels first
+        """
+        Build the complete observation vector from all components.
+
+        Returns:
+            np.ndarray: Concatenated observation of car state, ADAS, location, nearby vehicles,
+            turn conditions, and environment.
+        """
+        A.situational_awareness_build(self.sim, self.agent.id)
+        return np.concatenate(
+            (
+                self._construct_car_state_observation(),
+                self._construct_driving_assistant_observation(),
+                self._construct_location_observation(),
+                self._construct_nearby_vehicles_observation(),
+                self._construct_turn_relevant_observations(),
+                self._construct_environment_conditions_observation(),
+            )
+        )
 
     def _get_reward(self) -> float:
         """
@@ -592,35 +813,3 @@ class AwesimEnv(gym.Env):
         A.sim_disconnect_from_render_server(self.sim)
         A.sim_free(self.sim)
         super().close()
-
-    def render(self) -> np.ndarray:
-        """
-        Render the current simulation state to an RGB array.
-
-        Returns:
-            np.ndarray: Rendered RGB image of the current simulation state.
-        """
-        img = self.gridify(self._get_obs_as_list_of_images())
-
-        return img
-
-    def gridify(self, images: list[np.ndarray]) -> np.ndarray:
-        """
-        Arrange a batch of images into a grid format for visualization.
-
-        Args:
-            images (list[np.ndarray]):List of images to be arranged in a grid.
-
-        Returns:
-            np.ndarray: Grid of images arranged in a square-like format.
-        """
-        N = len(images)
-        H, W, C = images[0].shape
-        grid_size = int(np.ceil(np.sqrt(N)))
-        grid = np.zeros((grid_size * H, grid_size * W, C), dtype=images[0].dtype)
-
-        for idx in range(N):
-            row, col = divmod(idx, grid_size)
-            grid[row * H:(row + 1) * H, col * W:(col + 1) * W, :] = images[idx]
-
-        return grid

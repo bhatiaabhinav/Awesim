@@ -3,22 +3,27 @@ import os
 import sys
 from typing import Tuple
 
+import gymnasium
 import matplotlib.pyplot as plt
 import torch
+import torch.nn as nn
 import wandb
 from gymenv import AwesimEnv
-from gymenv_utils import make_mlp
+from gymenv_utils import VisionEncoder384, LiteVisionEncoder384
 from gymnasium.spaces import Box
 from gymnasium.vector import SyncVectorEnv, AsyncVectorEnv, AutoresetMode, VectorEnv
 from ppo import Actor, ActorBase, Critic, PPO
 
 WANDB_CONFIG = {
     "no_wandb": False,
-    "project": "Awesim-ApppointmentWorld",
-    "experiment_name": "ApptWorld-20mins",
-    "notes": """From a random starting point, reach destination (lane #84) in 20 mins (rew = 1, 0 otherwise), else lost wage cost starts accumulating (in a seperate cost stream). Cost of gas and cost of crash also included in the cost stream. Episode ends at 60 mins and wage for entire 8-hour workday is lost if not reached.""",
+    "project": "Awesim",
+    "experiment_name": "Awesim-Vision",
+    "notes": """Moved to vision based environment""",
+    "video_interval": 100,
 }
 ENV_CONFIG = {
+    "cam_resolution": (128, 128),       # width, height
+    "anti_aliasing": True,
     "goal_lane": 84,
     "city_width": 1000,                 # in meters
     "num_cars": 256,                    # number of other cars in the environment
@@ -26,9 +31,9 @@ ENV_CONFIG = {
     "sim_duration": 60 * 60,            # 60 minutes max duration after which the episode ends and wage for entire 8-hour workday is lost
     "appointment_time": 60 * 20,        # 20 minutes to reach the appointment
     "cost_gas_per_gallon": 4.0,         # in NYC (USD)
-    "cost_car": 30000,                  # cost of the car (USD), incurred if crashed (irrespective of severity)
+    "cost_car": 0,                      # cost of the car (USD), incurred if crashed (irrespective of severity)
     "cost_lost_wage_per_hour": 40,      # of a decent job in NYC (USD)
-    "may_lose_entire_day_wage": True,   # lose entire 8-hour workday wage if not reached by the end of sim_duration
+    "may_lose_entire_day_wage": False,  # lose entire 8-hour workday wage if not reached by the end of sim_duration
     "init_fuel_gallons": 3.0,           # initial fuel in gallons -- 1/4th of a 12-gallon tank car
     "goal_reward": 1.0,                 # A small positive number to incentivize reaching the goal
 }
@@ -51,18 +56,17 @@ PPO_CONFIG = {
     "norm_rewards": True,
     "cmdp_mode": False,
     "constrain_undiscounted_cost": True,
-    "cost_threshold": 100.0,  # max cost per episode  # TODO: tune this
+    "cost_threshold": 5.0,  # max cost per episode
     "lagrange_lr": 0.01,
     "lagrange_max": 100.0,
-    # "verbose": 1,
     "training_device": "cuda" if torch.cuda.is_available() else "cpu",
     "inference_device": "cuda" if torch.cuda.is_available() else "cpu",
     "verbose": False
 }
 POLICY_CONFIG = {
     "norm_obs": True,
-    "net_arch": [1024, 512, 256],
-    "layernorm": True,
+    "hidden_dims": 512,
+    "lite": False,
     "state_dependent_std": True,
 }
 
@@ -94,17 +98,20 @@ def train_model() -> Tuple[ActorBase, Critic, PPO]:
         )
 
     obs_space: Box = vec_env.single_observation_space       # type: ignore
+    print(f"Observation space: {obs_space}")
     action_space: Box = vec_env.single_action_space         # type: ignore
     obs_dim = vec_env.single_observation_space.shape[0]     # type: ignore
     action_dim = vec_env.single_action_space.shape[0]       # type: ignore
     print(f"Observation space dim: {obs_dim}, Action space dim: {action_dim}")
 
-    actor_model = make_mlp(obs_dim, POLICY_CONFIG["net_arch"], 2 * action_dim if POLICY_CONFIG["state_dependent_std"] else action_dim, layernorm=POLICY_CONFIG["layernorm"])
-    critic_model = make_mlp(obs_dim, POLICY_CONFIG["net_arch"], 1, layernorm=POLICY_CONFIG["layernorm"])
+    VisionEncoder = LiteVisionEncoder384 if POLICY_CONFIG["lite"] else VisionEncoder384
+    actor_model = nn.Sequential(VisionEncoder(POLICY_CONFIG["hidden_dims"]), nn.Flatten(), nn.Linear(POLICY_CONFIG["hidden_dims"], 2 * action_dim if POLICY_CONFIG["state_dependent_std"] else action_dim))
+    critic_model = nn.Sequential(VisionEncoder(POLICY_CONFIG["hidden_dims"]), nn.Flatten(), nn.Linear(POLICY_CONFIG["hidden_dims"], 1))
+
     actor = Actor(actor_model, obs_space, action_space, norm_obs=POLICY_CONFIG["norm_obs"], state_dependent_std=POLICY_CONFIG["state_dependent_std"])    # type: ignore
     critic = Critic(critic_model, obs_space, norm_obs=POLICY_CONFIG["norm_obs"])
     if PPO_CONFIG["cmdp_mode"]:
-        cost_critic_model = make_mlp(obs_dim, POLICY_CONFIG["net_arch"], 1, layernorm=POLICY_CONFIG["layernorm"])
+        cost_critic_model = nn.Sequential(VisionEncoder(POLICY_CONFIG["hidden_dims"]), nn.Flatten(), nn.Linear(POLICY_CONFIG["hidden_dims"], 1))
         cost_critic = Critic(cost_critic_model, obs_space, norm_obs=POLICY_CONFIG["norm_obs"])
     else:
         cost_critic = None
@@ -114,6 +121,16 @@ def train_model() -> Tuple[ActorBase, Critic, PPO]:
     # make dir for saving models
     model_dir = f"./models/{WANDB_CONFIG['experiment_name']}"
     os.makedirs(model_dir, exist_ok=True)
+
+    # an env for video recording
+    env = None
+    if WANDB_CONFIG["video_interval"] is not None:
+        env = make_env()
+        video_dir = f"videos/{WANDB_CONFIG['experiment_name']}"
+        os.makedirs(video_dir, exist_ok=True)
+        env = gymnasium.wrappers.RecordVideo(env, video_folder=video_dir, episode_trigger=lambda x: True, name_prefix="training")
+        if not WANDB_CONFIG["no_wandb"]:
+            wandb.save(f"{video_dir}/*.mp4")
 
     # interleave eval, logging, model_saving
     while ppo.stats['iterations'] < ppo.iters:
@@ -159,6 +176,9 @@ def train_model() -> Tuple[ActorBase, Critic, PPO]:
             torch.save(critic.state_dict(), f"{model_dir}/critic_iter{ppo.stats['iterations']}.pth")
             torch.save(actor.state_dict(), f"{model_dir}/actor_latest.pth")
             torch.save(critic.state_dict(), f"{model_dir}/critic_latest.pth")
+        
+        if env is not None and ppo.stats['iterations'] % WANDB_CONFIG["video_interval"] == 0:
+            actor.evaluate_policy(env, 1, False)    # for video recording
 
     if not WANDB_CONFIG["no_wandb"]:
         wandb.finish()

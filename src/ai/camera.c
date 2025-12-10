@@ -1446,3 +1446,5 @@ const RGB RGB_BLUE  = { 0, 0, 255 };
 const RGB RGB_YELLOW = { 255, 255, 0 };
 const RGB RGB_CYAN = { 0, 255, 255 };
 const RGB RGB_MAGENTA = { 255, 0, 255 };
+const RGB RGB_GRAY = { 128, 128, 128 };
+const RGB RGB_ORANGE = { 255, 165, 0 };
