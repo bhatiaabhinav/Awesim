@@ -76,6 +76,7 @@ void awesim_setup(Simulation* sim, Meters city_width, int num_cars, Seconds dt, 
             lane_add_car(random_lane, car, sim);
             // car_set_speed(car, random_lane->speed_limit + car->preferences.average_speed_offset);
             car_set_speed(car, 0);
+            car_update_geometry(sim, car);
             LOG_TRACE("Placed car id %d on lane %d (%s) at position %.2f meters (speed = %.2f mph) after %d attempts", car->id, random_lane->id, road_get_name(random_road), car_get_lane_progress_meters(car), to_mph(car_get_speed(car)), attempts);
         }
     }

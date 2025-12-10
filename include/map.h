@@ -33,6 +33,7 @@ typedef struct Intersection Intersection;
 typedef struct Map Map;
 typedef struct Simulation Simulation;
 Car* sim_get_car(Simulation* sim, CarId id);
+Map* sim_get_map(Simulation* sim);
 double car_get_lane_progress(const Car* self);
 CarId car_get_id(const Car* self);
 int car_get_lane_rank(const Car* self);

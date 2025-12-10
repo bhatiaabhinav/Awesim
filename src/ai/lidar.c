@@ -4,8 +4,12 @@
 #include <string.h>
 
 
+void lidar_capture(Lidar* lidar, Simulation* sim) {
+    lidar_capture_exclude_objects(lidar, sim, (void*[]){ NULL } );
+}
 
-void lidar_capture(Lidar* lidar, Simulation* sim, void** exclude_objects) {
+
+void lidar_capture_exclude_objects(Lidar* lidar, Simulation* sim, void** exclude_objects) {
     // Algo: starting from lidar orientation - fov/2 radians to orientation+fov/2 radians, scan "num_points" number of lines uniformly, and get unit vector. For each line, construct a line segment from origin to origin + max_depth * unit_vector.
 
     lidar_clear(lidar);

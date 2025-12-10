@@ -16,8 +16,8 @@ bool DRAW_CAR_SPEEDS = true;           // Draw car speeds
 bool DRAW_ROAD_NAMES = true;           // Draw road names
 bool DRAW_LIDAR = false;               // Draw LiDAR point cloud for highlighted car
 bool DRAW_CAMERA = true;               // Draw camera view for highlighted car
-bool DRAW_MINIMAP = false;              // Draw minimap for highlighted car
-bool DRAW_INFOS_DISPLAY = false;        // Draw infos display for highlighted car
+bool DRAW_MINIMAP = true;              // Draw minimap for highlighted car
+bool DRAW_INFOS_DISPLAY = true;        // Draw infos display for highlighted car
 int HUD_FONT_SIZE = 24;                // Font size for HUD text
 
 // Keep the screen centered on the following car ID:

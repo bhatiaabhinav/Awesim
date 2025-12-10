@@ -198,3 +198,42 @@ void car_reset_all_control_variables(Car* self) {
     car_set_request_indicated_turn(self, false);
     car_set_acceleration(self, 0);
 }
+
+
+void car_update_geometry(Simulation* sim, Car* car) {
+    Lane* lane = car_get_lane(car, sim_get_map(sim));
+    if (lane->type == LINEAR_LANE) {
+        Vec2D start = lane->start_point;
+        Vec2D end = lane->end_point;
+        Vec2D delta = vec_sub(end, start);
+        car->center = vec_add(start, vec_scale(delta, car->lane_progress));
+        car->orientation = angle_normalize(atan2(delta.y, delta.x));
+    } else if (lane->type == QUARTER_ARC_LANE) {
+        double theta = lane->start_angle + car->lane_progress * (lane->end_angle - lane->start_angle);
+        theta = angle_normalize(theta);
+        car->center.x = lane->center.x + lane->radius * cos(theta);
+        car->center.y = lane->center.y + lane->radius * sin(theta);
+        if (lane->direction == DIRECTION_CCW) {
+            car->orientation = angles_add(theta, M_PI / 2); // CCW: tangent is +90 deg
+        } else {
+            car->orientation = angles_add(theta, -M_PI / 2); // CW: tangent is -90 deg
+        }
+    } else {
+        LOG_ERROR("Cannot update geometry for car %d: unknown lane type.", car->id);
+        return;
+    }
+
+    double width = car->dimensions.x;
+    double length = car->dimensions.y;
+    // Define car corners in local coordinates. Car is facing right (0 radians).
+    Vec2D local_corners[4] = {
+        {length / 2, -width / 2},   // Front-right (0)
+        {length / 2, width / 2},  // Front-left (1)
+        {-length / 2, width / 2}, // Rear-left (2)
+        {-length / 2, -width / 2}   // Rear-right (3)
+    };
+    // Transform corners to world coordinates
+    for (int i = 0; i < 4; i++) {
+        car->corners[i] = vec_add(car_get_center(car), vec_rotate(local_corners[i], car->orientation));
+    }
+}

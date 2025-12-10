@@ -226,7 +226,7 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
             highlighted_car_lidar->position = highlighted_car->center;
             highlighted_car_lidar->orientation = highlighted_car->orientation;
             void* exclude_objects[] = {(void*)highlighted_car, NULL};
-            lidar_capture(highlighted_car_lidar, sim, exclude_objects);
+            lidar_capture_exclude_objects(highlighted_car_lidar, sim, exclude_objects);
             render_lidar(renderer, highlighted_car_lidar);
         }
     }
@@ -242,8 +242,7 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
         }
         if (highlighted_car && highlighted_car_camera) {
             rgbcam_attach_to_car(highlighted_car_camera, highlighted_car, HIGHLIGHTED_CAR_CAMERA_TYPE);
-            void* exclude_objects[] = {(void*)highlighted_car, NULL};
-            rgbcam_capture(highlighted_car_camera, sim, exclude_objects);
+            rgbcam_capture(highlighted_car_camera, sim);
             render_camera(renderer, highlighted_car_camera);
         }
     }
@@ -252,44 +251,51 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
     if (draw_infos_display && HIGHLIGHTED_CARS[0] != ID_NULL) {
         Car* highlighted_car = sim_get_car(sim, HIGHLIGHTED_CARS[0]);
         if (highlighted_car_infos_display == NULL) {
-            highlighted_car_infos_display = infos_display_malloc(128, 128, 3);
+            highlighted_car_infos_display = infos_display_malloc(128, 128, 9);
         }
         
         if (highlighted_car && highlighted_car_infos_display) {
             infos_display_clear(highlighted_car_infos_display);
             
+            int info_idx = 0;
             // Populate data
+
+            // Fuel
+            infos_display_set_info(highlighted_car_infos_display, info_idx++, highlighted_car->fuel_level / highlighted_car->fuel_tank_capacity);
+
             // Speed (normalized to ~120mph)
             double speed_mph = to_mph(highlighted_car->speed);
-            highlighted_car_infos_display->middle_info[2] = fmin(1.0, fmax(0.0, speed_mph / 120.0));
-            
-            // Acceleration (normalized from -10 to 10 m/s^2)
-            double accel_norm = (highlighted_car->acceleration + 10.0) / 20.0;
-            highlighted_car_infos_display->middle_info[1] = fmin(1.0, fmax(0.0, accel_norm));
-            
-            // Fuel
-            if (highlighted_car->fuel_tank_capacity > 0) {
-                highlighted_car_infos_display->middle_info[0] = highlighted_car->fuel_level / highlighted_car->fuel_tank_capacity;
+            // set blue color
+            infos_display_set_info_color(highlighted_car_infos_display, info_idx, (RGB){0, 0, 255});
+            infos_display_set_info(highlighted_car_infos_display, info_idx++, fmin(1.0, fmax(0.0, speed_mph / 120.0)));
+
+            // Acceleration
+            double accel = (highlighted_car->acceleration) / 12.0;
+            // color is green for positive acceleration, red for negative acceleration
+            if (highlighted_car->acceleration >= 0) {
+                infos_display_set_info_color(highlighted_car_infos_display, info_idx, (RGB){0, 255, 0});
+            } else {
+                infos_display_set_info_color(highlighted_car_infos_display, info_idx, (RGB){255, 0, 0});
+                accel = -accel;
             }
+            infos_display_set_info(highlighted_car_infos_display, info_idx++, fmin(1.0, fmax(0.0, accel)));
             
             // Indicators
             // Turn
-            if (highlighted_car->indicator_turn == INDICATOR_LEFT) {
-                highlighted_car_infos_display->left_info[2] = 1.0;
-                highlighted_car_infos_display->right_info[2] = 0.0;
-            } else if (highlighted_car->indicator_turn == INDICATOR_RIGHT) {
-                highlighted_car_infos_display->left_info[2] = 0.0;
-                highlighted_car_infos_display->right_info[2] = 1.0;
-            }
+            // color is red
+            infos_display_set_info_color(highlighted_car_infos_display, info_idx, (RGB){255, 0, 0});
+            infos_display_set_info(highlighted_car_infos_display, info_idx++, (double)(highlighted_car->indicator_turn == INDICATOR_LEFT));
+            info_idx++;  // leave middle empty
+            infos_display_set_info_color(highlighted_car_infos_display, info_idx, (RGB){255, 0, 0});
+            infos_display_set_info(highlighted_car_infos_display, info_idx++, (double)(highlighted_car->indicator_turn == INDICATOR_RIGHT));
             
             // Merge
-            if (highlighted_car->indicator_lane == INDICATOR_LEFT) {
-                highlighted_car_infos_display->left_info[1] = 1.0;
-                highlighted_car_infos_display->right_info[1] = 0.0;
-            } else if (highlighted_car->indicator_lane == INDICATOR_RIGHT) {
-                highlighted_car_infos_display->left_info[1] = 0.0;
-                highlighted_car_infos_display->right_info[1] = 1.0;
-            }
+            // orange color
+            infos_display_set_info_color(highlighted_car_infos_display, info_idx, (RGB){255, 165, 0});
+            infos_display_set_info(highlighted_car_infos_display, info_idx++, (double)(highlighted_car->indicator_lane == INDICATOR_LEFT));
+            info_idx++;  // leave middle empty
+            infos_display_set_info_color(highlighted_car_infos_display, info_idx, (RGB){255, 165, 0});
+            infos_display_set_info(highlighted_car_infos_display, info_idx++, (double)(highlighted_car->indicator_lane == INDICATOR_RIGHT));
             
             infos_display_render(highlighted_car_infos_display);
             render_infos_display(renderer, highlighted_car_infos_display);
@@ -332,64 +338,6 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
     // Render weather stats
     render_text(renderer, weather_strings[sim->weather], WINDOW_SIZE_WIDTH - 10, 20 + hud_font_size,
                 255, 255, 255, 255, hud_font_size, ALIGN_TOP_RIGHT, false, NULL);
-
-
-    if (HIGHLIGHTED_CARS[0] != ID_NULL) {
-        // Render highlighted car 0 fuel level on top left (in gallon)
-
-        Uint8 r = HIGHLIGHTED_CAR_COLOR.r, g = HIGHLIGHTED_CAR_COLOR.g, b = HIGHLIGHTED_CAR_COLOR.b;
-
-        Car* car0 = sim_get_car(sim, HIGHLIGHTED_CARS[0]);
-        if (car0) {
-            char fuel_stats[32];
-            snprintf(fuel_stats, sizeof(fuel_stats), "Fuel:       %.2f/%.1f gal", to_gallons(car0->fuel_level), to_gallons(car0->fuel_tank_capacity));
-            render_text(renderer, fuel_stats, 10, 20 + hud_font_size, r, g, b, 255,
-                        hud_font_size, ALIGN_TOP_LEFT, false, NULL);
-        }
-
-        // Render car 0 speed on top left
-        if (car0) {
-            char speed_stats[32];
-            snprintf(speed_stats, sizeof(speed_stats), "Speed:   %.1f mph", to_mph(car0->speed));
-            render_text(renderer, speed_stats, 10, 30 + 2 * hud_font_size, r, g, b, 255,
-                        hud_font_size, ALIGN_TOP_LEFT, false, NULL);
-        }
-
-        // Render car 0 acceleration on top left
-        if (car0) {
-            char accel_stats[32];
-            snprintf(accel_stats, sizeof(accel_stats), "Accel:     %.1f m/s²", car0->acceleration);
-            render_text(renderer, accel_stats, 10, 40 + 3 * hud_font_size, r, g, b, 255,
-                        hud_font_size, ALIGN_TOP_LEFT, false, NULL);
-        }
-
-        // Render indicator status of car 0 on top left. At a time, only one of merge or turn is active. So we pick one that is not INDICATOR_NONE. In parenthesis, we print whether it is turn or lane indicator.
-        if (car0) {
-            char indicator_stats[32];
-
-            CarIndicator indicator = INDICATOR_NONE;
-            bool is_turn_indicator = false;
-            if (car0->indicator_turn != INDICATOR_NONE) {
-                indicator = car0->indicator_turn;
-                is_turn_indicator = true;
-            } else if (car0->indicator_lane != INDICATOR_NONE) {
-                indicator = car0->indicator_lane;
-            }
-            bool indicating_anything = indicator != INDICATOR_NONE;
-
-            snprintf(indicator_stats, sizeof(indicator_stats), "%s (%s) %s", indicator == INDICATOR_LEFT ? "⬅" : "", indicating_anything ? (is_turn_indicator ? "Turn" : "Merge") : "⏺", indicator == INDICATOR_RIGHT ? "➡" : " ");
-            render_text(renderer, indicator_stats, 10, 50 + 4 * hud_font_size, r, g, b, 255,
-                        hud_font_size, ALIGN_TOP_LEFT, false, NULL);
-        }
-
-        // Render orientation of car 0 on top left
-        if (car0) {
-            char orientation_stats[32];
-            snprintf(orientation_stats, sizeof(orientation_stats), "Orient:   %.1f°", to_degrees(car0->orientation));
-            render_text(renderer, orientation_stats, 10, 60 + 5 * hud_font_size, r, g, b, 255,
-                        hud_font_size, ALIGN_TOP_LEFT, false, NULL);
-        }
-    }
 
     if (sim->is_agent_enabled && sim->is_agent_driving_assistant_enabled) {
         // Render driving assistant status on top left

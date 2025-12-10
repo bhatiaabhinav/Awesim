@@ -1188,7 +1188,15 @@ static void apply_fxaa(RGBCamera* camera) {
     #undef IDX
 }
 
-void rgbcam_capture(RGBCamera* camera, Simulation* sim, void** exclude_objects) {
+void rgbcam_capture(RGBCamera* camera, Simulation* sim) {
+    void* exclude_objects[2] = { NULL, NULL };
+    if (camera->attached_car != NULL) {
+        exclude_objects[0] = (void*)camera->attached_car;
+    }
+    rgbcam_capture_exclude_objects(camera, sim, exclude_objects);
+}
+
+void rgbcam_capture_exclude_objects(RGBCamera* camera, Simulation* sim, void** exclude_objects) {
     // here, if the camera is attached to a car, we need to update the camera's position and orientation based on the car's current state
     if (camera->attached_car != NULL) {
         Car* car = camera->attached_car;
@@ -1424,3 +1432,17 @@ void rgbcam_attach_to_car(RGBCamera* camera, Car* car, CarCameraType camera_type
             break;
     }
 }
+
+
+RGB rgb(uint8_t r, uint8_t g, uint8_t b) {
+    return (RGB){ r, g, b };
+}
+
+const RGB RGB_WHITE = { 255, 255, 255 };
+const RGB RGB_BLACK = { 0, 0, 0 };
+const RGB RGB_RED   = { 255, 0, 0 };
+const RGB RGB_GREEN = { 0, 255, 0 };
+const RGB RGB_BLUE  = { 0, 0, 255 };
+const RGB RGB_YELLOW = { 255, 255, 0 };
+const RGB RGB_CYAN = { 0, 255, 255 };
+const RGB RGB_MAGENTA = { 255, 0, 255 };

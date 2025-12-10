@@ -107,6 +107,18 @@ struct RGB {
 };
 typedef struct RGB RGB;
 
+RGB rgb(uint8_t r, uint8_t g, uint8_t b);
+extern const RGB RGB_WHITE;
+extern const RGB RGB_BLACK;
+extern const RGB RGB_RED;
+extern const RGB RGB_GREEN;
+extern const RGB RGB_BLUE;
+extern const RGB RGB_YELLOW;
+extern const RGB RGB_ORANGE;
+extern const RGB RGB_GRAY;
+extern const RGB RGB_CYAN;
+extern const RGB RGB_MAGENTA;
+
 typedef enum {
     AA_NONE = 0,
     AA_SSAA = 1,
@@ -144,22 +156,21 @@ struct RGBCamera {
 };
 typedef struct RGBCamera RGBCamera;
 
-#define MAX_INFOS_ROWS 8
-
+// Display for showing numerical information. The info is arrange in a grid, with number of rows and columns determined by square root of number of infos. Each info entry is represented as a horizontal bar that dims from full intensity to low intensity based on the value of the info (0.0 to 1.0).
 struct InfosDisplay {
     int width;
     int height;
-    int num_rows;
-    uint8_t* data; // RGB data in HWC format
-    uint8_t* static_data; // Pre-rendered layout with full intensity
-    double left_info[MAX_INFOS_ROWS];
-    double middle_info[MAX_INFOS_ROWS];
-    double right_info[MAX_INFOS_ROWS];
+    int num_infos;
+    uint8_t* data;          // RGB data in HWC format
+    double* info_data;      // Array of info values. Length = num_infos
+    RGB* info_colors;       // Array of colors for each info. Length = num_infos. Defaults to white for all infos.
 };
 typedef struct InfosDisplay InfosDisplay;
 
-InfosDisplay* infos_display_malloc(int width, int height, int num_rows);
-void infos_display_reset_num_rows(InfosDisplay* display, int num_rows);
+InfosDisplay* infos_display_malloc(int width, int height, int num_infos);
+void infos_display_set_info(InfosDisplay* display, int info_index, double value);
+void infos_display_set_info_color(InfosDisplay* display, int info_index, RGB color);
+double infos_display_get_info(const InfosDisplay* display, int info_index);
 void infos_display_free(InfosDisplay* display);
 void infos_display_clear(InfosDisplay* display);
 void infos_display_render(InfosDisplay* display);
@@ -210,9 +221,11 @@ RGB rgbcam_get_pixel_at(const RGBCamera* frame, int row, int col);
 void rgbcam_set_pixel_at(RGBCamera* frame, int row, int col, const RGB pixel);
 void rgbcam_copy(const RGBCamera* src, RGBCamera* dest);
 void lidar_copy(const Lidar* src, Lidar* dest);
-void rgbcam_capture(RGBCamera* frame, Simulation* sim, void** exclude_objects);
+void rgbcam_capture(RGBCamera* frame, Simulation* sim);
+void rgbcam_capture_exclude_objects(RGBCamera* frame, Simulation* sim, void** exclude_objects);
 void rgbcam_attach_to_car(RGBCamera* camera, Car* car, CarCameraType camera_type);
-void lidar_capture(Lidar* frame, Simulation* sim, void** exclude_objects);
+void lidar_capture(Lidar* frame, Simulation* sim);
+void lidar_capture_exclude_objects(Lidar* frame, Simulation* sim, void** exclude_objects);
 
 
 struct SituationalAwareness {

@@ -187,6 +187,10 @@ void car_set_auto_turn_off_indicators(Car* self, bool auto_turn_off);
 void car_reset_all_control_variables(Car* self);
 
 
+// should be called by the sim engine to update the car's geometry based on its lane, lane progress, and dimensions.
+void car_update_geometry(Simulation* sim, Car* car);
+
+
 
 
 // ------- Presets (values defined in car_presets_and_preferences.c) -----------

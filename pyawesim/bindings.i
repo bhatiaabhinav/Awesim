@@ -58,3 +58,49 @@
 %include "../include/ai.h"
 %include "../include/sim.h"
 %include "../include/awesim.h"
+
+%extend RGBCamera {
+    PyObject* _get_data_view() {
+        if (!$self->data) {
+            Py_RETURN_NONE;
+        }
+        Py_ssize_t size = (Py_ssize_t)($self->width * $self->height * 3);
+        return PyMemoryView_FromMemory((char*)$self->data, size, PyBUF_WRITE);
+    }
+}
+
+%extend InfosDisplay {
+    PyObject* _get_data_view() {
+        if (!$self->data) {
+            Py_RETURN_NONE;
+        }
+        Py_ssize_t size = (Py_ssize_t)($self->width * $self->height * 3);
+        return PyMemoryView_FromMemory((char*)$self->data, size, PyBUF_WRITE);
+    }
+}
+
+%extend MiniMap {
+    PyObject* _get_data_view() {
+        if (!$self->data) {
+            Py_RETURN_NONE;
+        }
+        Py_ssize_t size = (Py_ssize_t)($self->width * $self->height * 3);
+        return PyMemoryView_FromMemory((char*)$self->data, size, PyBUF_WRITE);
+    }
+}
+
+%pythoncode %{
+    def _rgbcamera_to_numpy(self):
+        """Returns the image data as a numpy array (H, W, 3).
+           Note: The array shares memory with the C struct.
+        """
+        import numpy as np
+        view = self._get_data_view()
+        if view is None:
+            return None
+        return np.frombuffer(view, dtype=np.uint8).reshape((self.height, self.width, 3))
+
+    RGBCamera.to_numpy = _rgbcamera_to_numpy
+    InfosDisplay.to_numpy = _rgbcamera_to_numpy
+    MiniMap.to_numpy = _rgbcamera_to_numpy
+%}

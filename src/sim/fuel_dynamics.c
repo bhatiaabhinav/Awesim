@@ -117,7 +117,7 @@ Liters fuel_consumption_compute_env(MetersPerSecond initial_velocity,
 
     // --- Compute integrals for rolling resistance and aerodynamic drag ---
     Meters integral_abs_velocity_dt = 0.0;               // ∫|v| dt
-    MetersCubedPerSecondsSquared integral_abs_velocity_cubed_dt = 0.0; // ∫|v|³ dt
+    MetersCubedPerSecondsSquared integral_abs_velocity_cubed_dt = 0.0; // ∫ v_air^2 * |v| dt
 
     const double eps = 1e-10;
     double velocity_scale = fmax(fabs(initial_velocity), fabs(final_velocity));
@@ -136,7 +136,7 @@ Liters fuel_consumption_compute_env(MetersPerSecond initial_velocity,
         // Account for headwind in aerodynamic drag
         double v_air = fabs(initial_velocity) + env->headwind;
         if (v_air < 0.0) v_air = 0.0;
-        integral_abs_velocity_cubed_dt = v_air * v_air * v_air * delta_time;
+        integral_abs_velocity_cubed_dt = v_air * v_air * v * delta_time;
     }
     // Simple segment with no zero crossing
     else if (!velocity_crosses_zero) {
@@ -147,7 +147,7 @@ Liters fuel_consumption_compute_env(MetersPerSecond initial_velocity,
         double v_mid = 0.5 * (initial_velocity + final_velocity);
         double v_air_mid = fabs(v_mid) + env->headwind;
         if (v_air_mid < 0.0) v_air_mid = 0.0;
-        integral_abs_velocity_cubed_dt = v_air_mid * v_air_mid * v_air_mid * delta_time;
+        integral_abs_velocity_cubed_dt = v_air_mid * v_air_mid * fabs(v_mid) * delta_time;
     }
     // Velocity crosses zero, split into two intervals
     else {
@@ -169,8 +169,8 @@ Liters fuel_consumption_compute_env(MetersPerSecond initial_velocity,
         if (v_air_mid2 < 0.0) v_air_mid2 = 0.0;
 
         integral_abs_velocity_dt = sign_initial * displacement1 + sign_final * displacement2;
-        integral_abs_velocity_cubed_dt = (v_air_mid1 * v_air_mid1 * v_air_mid1) * dt1 +
-                                         (v_air_mid2 * v_air_mid2 * v_air_mid2) * dt2;
+        integral_abs_velocity_cubed_dt = (v_air_mid1 * v_air_mid1 * fabs(v_mid1)) * dt1 +
+                                         (v_air_mid2 * v_air_mid2 * fabs(v_mid2)) * dt2;
     }
 
     // --- Road load calculations ---
