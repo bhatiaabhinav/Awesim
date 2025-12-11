@@ -139,8 +139,7 @@ class AwesimEnv(gym.Env):
         self.cams = [A.rgbcam_malloc(A.coordinates_create(0, 0), 0, 0, cam_resolution[0], cam_resolution[1], A.from_degrees(0), A.meters(0)) for _ in range(7)]  # Initialize 7 cameras
         if self.anti_aliasing:
             for cam in self.cams:
-                cam.aa_type = A.AA_SSAA
-                cam.aa_level = 2
+                A.rgbcam_set_aa_level(cam, 2)  # 2x anti-aliasing
         self.infos_display = A.infos_display_malloc(cam_resolution[0], cam_resolution[1], len(self._get_info_for_info_display()))
         self.minimap = A.minimap_malloc(cam_resolution[0], cam_resolution[1], A.sim_get_map(self.sim))
 

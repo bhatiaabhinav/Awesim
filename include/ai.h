@@ -119,13 +119,6 @@ extern const RGB RGB_GRAY;
 extern const RGB RGB_CYAN;
 extern const RGB RGB_MAGENTA;
 
-typedef enum {
-    AA_NONE = 0,
-    AA_SSAA = 1,
-    AA_FXAA = 2
-} AAType;
-
-
 // based on Tesla's HW3/4 car camera setup
 typedef enum {
     CAR_CAMERA_NARROW_FORWARD = 0,          // FOV = 35°, Range = 250 m. Location: near rear view mirror (Dropped in HW4, but useful if images are low-res)
@@ -149,12 +142,26 @@ struct RGBCamera {
     Radians fov;         // Field of view in radians (horizontal direction, i.e., along the sim's XY plane (map plane))
     Meters max_distance;   // Maximum distance the camera can see (in meters)
     uint8_t* data;       // Pointer to the RGB data in HWC format, linearized
-    AAType aa_type;      // Type of anti-aliasing
     int aa_level;        // Level of anti-aliasing (e.g., 2 for 2x SSAA)
     Car* attached_car;  // If the camera is attached to a car, pointer to that car (NULL if not attached). Once attached to a car, the camera's position and orientation are set automatically based on the car's state when capturing.
     CarCameraType attached_car_camera_type; // If the camera is attached to a car, type of the car camera. Determines the relative position and orientation of the camera w.r.t. the car and its fov and max_distance.
+    
+    // Z-buffer (internal use)
+    float* z_buffer;
+    int z_buffer_size;
+
+    // Pre-computed background (sky + ground)
+    uint8_t* background_buffer;
+
+    // Rendering buffer (internal use, for SSAA or double buffering)
+    uint8_t* render_buffer;
+    int render_width;
+    int render_height;
 };
 typedef struct RGBCamera RGBCamera;
+
+// Set the anti-aliasing level for the camera. This will reallocate the internal rendering buffer.
+void rgbcam_set_aa_level(RGBCamera* camera, int level);
 
 // Display for showing numerical information. The info is arrange in a grid, with number of rows and columns determined by square root of number of infos. Each info entry is represented as a horizontal bar that dims from full intensity to low intensity based on the value of the info (0.0 to 1.0).
 struct InfosDisplay {

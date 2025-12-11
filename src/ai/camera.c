@@ -1,9 +1,46 @@
 #include "ai.h"
 #include "logging.h"
+#include "utils.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
 #include <float.h>
+
+// --- Benchmarking ---
+// #define ENABLE_BENCHMARKING // Uncomment to enable benchmarking
+
+#ifdef ENABLE_BENCHMARKING
+static int bench_frame_count = 0;
+static double bench_time_sky = 0;
+static double bench_time_ground = 0;
+static double bench_time_cars = 0;
+static double bench_time_roads = 0;
+static double bench_time_intersections = 0;
+static double bench_time_total = 0;
+static double bench_time_hud = 0;
+static double bench_time_downsample = 0;
+
+#define BENCH_START(var) double var##_start = get_sys_time_seconds();
+#define BENCH_END(var) var += get_sys_time_seconds() - var##_start;
+#else
+#define BENCH_START(var)
+#define BENCH_END(var)
+#endif
+
+// --- Optimization Switches ---
+// Uncomment to enable optimizations/approximations
+// #define OPT_SIMPLE_CARS          // Render cars as simple boxes
+// #define OPT_NO_CAR_LIGHTS        // Do not render car lights/indicators
+// #define OPT_SIMPLE_LIGHTS        // Render lights as flat quads instead of thick ones
+// #define OPT_NO_LANE_MARKINGS     // Do not render lane markings
+// #define OPT_SIMPLE_LANE_MARKINGS // Reduce segments for curved lanes
+// #define OPT_NO_DASHED_LINES      // Render dashed lines as solid (faster)
+// #define OPT_SIMPLE_INTERSECTIONS // Do not render intersection edges/lights
+// #define OPT_NO_HUD               // Do not render HUD
+
+// --- Rendering Options ---
+#define OPT_SPAN_CLIPPING        // Enable per-row span clipping (much faster)
+// #define OPT_Z_BUFFER_EUCLIDEAN   // Use Euclidean distance for Z-buffer (slower, but maybe more precise)
 
 // --- Configuration Constants ---
 
@@ -78,81 +115,207 @@ typedef struct {
     double z;    // Camera space Z (forward)
 } ProjectedVertex;
 
-// Z-buffer array
-static double* z_buffer = NULL;
-static int z_buffer_size = 0;
-
-static void ensure_z_buffer(int size) {
-    if (size > z_buffer_size) {
-        if (z_buffer) free(z_buffer);
-        z_buffer = (double*)malloc(sizeof(double) * size);
-        z_buffer_size = size;
+static void ensure_z_buffer(RGBCamera* camera) {
+    int size = camera->render_width * camera->render_height;
+    if (size > camera->z_buffer_size) {
+        if (camera->z_buffer) free(camera->z_buffer);
+        camera->z_buffer = (float*)malloc(sizeof(float) * size);
+        camera->z_buffer_size = size;
     }
 }
 
-static void clear_z_buffer(int width, int height, double max_dist) {
-    for (int i = 0; i < width * height; i++) {
-        z_buffer[i] = max_dist;
-    }
+static void clear_z_buffer(RGBCamera* camera) {
+    int size = camera->render_width * camera->render_height;
+#ifdef OPT_Z_BUFFER_EUCLIDEAN
+    // Initialize to infinity for Euclidean distance (closest wins)
+    float val = FLT_MAX;
+    for(int i=0; i<size; i++) camera->z_buffer[i] = val;
+#else
+    // Clear to 0.0f (representing infinite distance in 1/z space)
+    // This avoids artificial clipping at max_distance
+    memset(camera->z_buffer, 0, sizeof(float) * size);
+#endif
 }
+
+#define EPSILON_F 1e-5f
+#define SLOPE_EPSILON 1e-9f
 
 static void rasterize_triangle(RGBCamera* camera, ProjectedVertex v0, ProjectedVertex v1, ProjectedVertex v2, RGB color) {
+    // Use double for setup to avoid precision issues (cracks/holes)
+    double v0x = v0.x; double v0y = v0.y; double v0z = v0.z;
+    double v1x = v1.x; double v1y = v1.y; double v1z = v1.z;
+    double v2x = v2.x; double v2y = v2.y; double v2z = v2.z;
+
     // Bounding box
-    int min_x = (int)floor(fmin(v0.x, fmin(v1.x, v2.x)));
-    int max_x = (int)ceil(fmax(v0.x, fmax(v1.x, v2.x)));
-    int min_y = (int)floor(fmin(v0.y, fmin(v1.y, v2.y)));
-    int max_y = (int)ceil(fmax(v0.y, fmax(v1.y, v2.y)));
+    int min_x = (int)floor(fmin(v0x, fmin(v1x, v2x)));
+    int max_x = (int)ceil(fmax(v0x, fmax(v1x, v2x)));
+    int min_y = (int)floor(fmin(v0y, fmin(v1y, v2y)));
+    int max_y = (int)ceil(fmax(v0y, fmax(v1y, v2y)));
 
     // Clip to screen
-    min_x = fmax(min_x, 0);
-    max_x = fmin(max_x, camera->width - 1);
-    min_y = fmax(min_y, 0);
-    max_y = fmin(max_y, camera->height - 1);
+    min_x = (int)fmax((double)min_x, 0.0);
+    max_x = (int)fmin((double)max_x, (double)camera->render_width - 1.0);
+    min_y = (int)fmax((double)min_y, 0.0);
+    max_y = (int)fmin((double)max_y, (double)camera->render_height - 1.0);
+
+    if (min_x > max_x || min_y > max_y) return;
 
     // Precompute denominator
-    double denom = (v1.y - v2.y) * (v0.x - v2.x) + (v2.x - v1.x) * (v0.y - v2.y);
-    if (fabs(denom) < EPSILON) return; // Skip degenerate triangles
+    double denom = (v1y - v2y) * (v0x - v2x) + (v2x - v1x) * (v0y - v2y);
+    if (fabs(denom) < EPSILON_F) return;
+
+    double inv_denom = 1.0 / denom;
+    
+    // Barycentric constants
+    // Using pixel centers (x + 0.5, y + 0.5)
+    double w0_dx = (v1y - v2y) * inv_denom;
+    double w1_dx = (v2y - v0y) * inv_denom;
+    double w2_dx = -w0_dx - w1_dx;
+
+    double w0_dy = (v2x - v1x) * inv_denom;
+    double w1_dy = (v0x - v2x) * inv_denom;
+    double w2_dy = -w0_dy - w1_dy;
+
+    double w0_row_start = ((v1y - v2y) * (min_x + 0.5 - v2x) + (v2x - v1x) * (min_y + 0.5 - v2y)) * inv_denom;
+    double w1_row_start = ((v2y - v0y) * (min_x + 0.5 - v2x) + (v0x - v2x) * (min_y + 0.5 - v2y)) * inv_denom;
+    double w2_row_start = 1.0 - w0_row_start - w1_row_start;
+
+    // 1/z interpolation
+    double inv_z0 = 1.0 / v0z;
+    double inv_z1 = 1.0 / v1z;
+    double inv_z2 = 1.0 / v2z;
+    
+    double dz_dw0 = inv_z0 - inv_z2;
+    double dz_dw1 = inv_z1 - inv_z2;
+    double z_inv_base = inv_z2;
+    
+    double z_inv_dx = w0_dx * dz_dw0 + w1_dx * dz_dw1;
+    double z_inv_dy = w0_dy * dz_dw0 + w1_dy * dz_dw1;
+    
+    double z_inv_row_start = w0_row_start * dz_dw0 + w1_row_start * dz_dw1 + z_inv_base;
+
+    int row_offset = min_y * camera->render_width;
+    float* z_buf_ptr = camera->z_buffer;
+    uint8_t* img_data = camera->render_buffer;
 
     for (int y = min_y; y <= max_y; y++) {
-        for (int x = min_x; x <= max_x; x++) {
-            double w0, w1, w2;
-            double px = x + 0.5;
-            double py = y + 0.5;
+        int x_start = min_x;
+        int x_end = max_x;
 
-            w0 = ((v1.y - v2.y) * (px - v2.x) + (v2.x - v1.x) * (py - v2.y)) / denom;
-            w1 = ((v2.y - v0.y) * (px - v2.x) + (v0.x - v2.x) * (py - v2.y)) / denom;
-            w2 = 1.0 - w0 - w1;
+#ifdef OPT_SPAN_CLIPPING
+        // Span clipping: Calculate exact x range for this row
+        // We solve for w >= -EPSILON_F to prevent cracks between triangles
+        // We clamp the result to avoid integer overflow for large triangles
+        
+        double min_x_f = (double)min_x;
+        double max_x_f = (double)max_x;
+        
+        // Clip against w0 >= -EPSILON_F
+        if (w0_dx > SLOPE_EPSILON) {
+            double f_lim = min_x_f + (-w0_row_start - EPSILON_F) / w0_dx;
+            f_lim = fmax(min_x_f - 1.0, fmin(max_x_f + 1.0, f_lim));
+            int x_lim = (int)ceil(f_lim);
+            if (x_lim > x_start) x_start = x_lim;
+        } else if (w0_dx < -SLOPE_EPSILON) {
+            double f_lim = min_x_f + (-w0_row_start - EPSILON_F) / w0_dx;
+            f_lim = fmax(min_x_f - 1.0, fmin(max_x_f + 1.0, f_lim));
+            int x_lim = (int)floor(f_lim);
+            if (x_lim < x_end) x_end = x_lim;
+        } else if (w0_row_start < -EPSILON_F) {
+            x_start = x_end + 1; // Invalid
+        }
 
-            if (w0 >= -EPSILON && w1 >= -EPSILON && w2 >= -EPSILON) {
-                // Perspective correct interpolation for Z
-                // We interpolate 1/z
-                double z_inv = w0 * (1.0 / v0.z) + w1 * (1.0 / v1.z) + w2 * (1.0 / v2.z);
-                if (z_inv <= EPSILON) continue; // Avoid division by zero or negative Z
-                double z = 1.0 / z_inv;
+        // Clip against w1 >= -EPSILON_F
+        if (w1_dx > SLOPE_EPSILON) {
+            double f_lim = min_x_f + (-w1_row_start - EPSILON_F) / w1_dx;
+            f_lim = fmax(min_x_f - 1.0, fmin(max_x_f + 1.0, f_lim));
+            int x_lim = (int)ceil(f_lim);
+            if (x_lim > x_start) x_start = x_lim;
+        } else if (w1_dx < -SLOPE_EPSILON) {
+            double f_lim = min_x_f + (-w1_row_start - EPSILON_F) / w1_dx;
+            f_lim = fmax(min_x_f - 1.0, fmin(max_x_f + 1.0, f_lim));
+            int x_lim = (int)floor(f_lim);
+            if (x_lim < x_end) x_end = x_lim;
+        } else if (w1_row_start < -EPSILON_F) {
+            x_start = x_end + 1; // Invalid
+        }
 
-                // Calculate actual distance from camera (Euclidean)
-                double tan_fov_2 = tan(camera->fov / 2.0);
-                double d = (camera->width / 2.0) / tan_fov_2;
-                
-                // Use pixel center for reconstruction too
-                double y_cam = ((camera->width / 2.0) - px) * z / d;
-                double z_cam = ((camera->height / 2.0) - py) * z / d;
-                
-                double dist = sqrt(y_cam * y_cam + z_cam * z_cam + z * z);
+        // Clip against w2 >= -EPSILON_F
+        if (w2_dx > SLOPE_EPSILON) {
+            double f_lim = min_x_f + (-w2_row_start - EPSILON_F) / w2_dx;
+            f_lim = fmax(min_x_f - 1.0, fmin(max_x_f + 1.0, f_lim));
+            int x_lim = (int)ceil(f_lim);
+            if (x_lim > x_start) x_start = x_lim;
+        } else if (w2_dx < -SLOPE_EPSILON) {
+            double f_lim = min_x_f + (-w2_row_start - EPSILON_F) / w2_dx;
+            f_lim = fmax(min_x_f - 1.0, fmin(max_x_f + 1.0, f_lim));
+            int x_lim = (int)floor(f_lim);
+            if (x_lim < x_end) x_end = x_lim;
+        } else if (w2_row_start < -EPSILON_F) {
+            x_start = x_end + 1; // Invalid
+        }
+#endif
 
-                int idx = y * camera->width + x;
-                if (dist < z_buffer[idx]) {
-                    z_buffer[idx] = dist;
-                    rgbcam_set_pixel_at(camera, y, x, color);
+        if (x_start <= x_end) {
+            // Clamp to screen bounds
+            if (x_start < min_x) x_start = min_x;
+            if (x_end > max_x) x_end = max_x;
+
+            int dx_start = x_start - min_x;
+            // Convert to float for inner loop
+            float z_inv = (float)(z_inv_row_start + dx_start * z_inv_dx);
+            float z_inv_dx_f = (float)z_inv_dx;
+            
+#ifndef OPT_SPAN_CLIPPING
+            float w0 = (float)(w0_row_start + dx_start * w0_dx);
+            float w1 = (float)(w1_row_start + dx_start * w1_dx);
+            float w0_dx_f = (float)w0_dx;
+            float w1_dx_f = (float)w1_dx;
+#endif
+
+            int idx = row_offset + x_start;
+
+            for (int x = x_start; x <= x_end; x++) {
+#ifndef OPT_SPAN_CLIPPING
+                float w2 = 1.0f - w0 - w1;
+                if (w0 >= -EPSILON_F && w1 >= -EPSILON_F && w2 >= -EPSILON_F) {
+#endif
+                    // Depth test
+#ifdef OPT_Z_BUFFER_EUCLIDEAN
+                    float z_curr = 1.0f / z_inv;
+                    if (z_curr < z_buf_ptr[idx]) {
+                        z_buf_ptr[idx] = z_curr;
+#else
+                    if (z_inv > z_buf_ptr[idx]) {
+                        z_buf_ptr[idx] = z_inv;
+#endif
+                        // Direct pixel write
+                        int p = idx * 3;
+                        img_data[p] = color.r;
+                        img_data[p+1] = color.g;
+                        img_data[p+2] = color.b;
+                    }
+#ifndef OPT_SPAN_CLIPPING
                 }
+                w0 += w0_dx_f;
+                w1 += w1_dx_f;
+#endif
+                z_inv += z_inv_dx_f;
+                idx++;
             }
         }
+
+        w0_row_start += w0_dy;
+        w1_row_start += w1_dy;
+        w2_row_start += w2_dy;
+        z_inv_row_start += z_inv_dy;
+        row_offset += camera->render_width;
     }
 }
 
 static void project_and_draw_triangle(RGBCamera* camera, Vec3 p0, Vec3 p1, Vec3 p2, RGB color) {
     double tan_fov_2 = tan(camera->fov / 2.0);
-    double d = (camera->width / 2.0) / tan_fov_2;
+    double d = (camera->render_width / 2.0) / tan_fov_2;
 
     ProjectedVertex v[3];
     Vec3 ps[3] = {p0, p1, p2};
@@ -163,8 +326,8 @@ static void project_and_draw_triangle(RGBCamera* camera, Vec3 p0, Vec3 p1, Vec3 
         double y_screen = d * ps[i].y / ps[i].x;
         double z_screen = d * ps[i].z / ps[i].x;
         
-        v[i].x = (camera->width / 2.0) - y_screen;
-        v[i].y = (camera->height / 2.0) - z_screen;
+        v[i].x = (camera->render_width / 2.0) - y_screen;
+        v[i].y = (camera->render_height / 2.0) - z_screen;
     }
     rasterize_triangle(camera, v[0], v[1], v[2], color);
 }
@@ -357,6 +520,10 @@ static void rasterize_dashed_line(RGBCamera* camera, Coordinates3D start, Coordi
 }
 
 static void render_lane_markings(RGBCamera* camera, Lane* lane, Map* map, Coordinates3D cam_pos, double cos_o, double sin_o) {
+#ifdef OPT_NO_LANE_MARKINGS
+    return;
+#endif
+
     RGB white = {255, 255, 255};
     RGB yellow = {255, 255, 0};
     
@@ -383,6 +550,11 @@ static void render_lane_markings(RGBCamera* camera, Lane* lane, Map* map, Coordi
     } else if (adj_right->direction == lane->direction) {
         draw_right = true; color_right = white; dashed_right = true;
     }
+
+#ifdef OPT_NO_DASHED_LINES
+    dashed_left = false;
+    dashed_right = false;
+#endif
 
     if (lane->type == LINEAR_LANE) {
         Coordinates start = lane->start_point;
@@ -426,7 +598,11 @@ static void render_lane_markings(RGBCamera* camera, Lane* lane, Map* map, Coordi
             r_right = lane->radius + lane->width/2 - offset_right;
         }
         
+#ifdef OPT_SIMPLE_LANE_MARKINGS
+        int segments = TURN_SEGMENTS;
+#else
         int segments = TURN_SEGMENTS * 2;
+#endif
         double step = (lane->end_angle - lane->start_angle) / segments;
         
         if (draw_left) {
@@ -476,8 +652,11 @@ static void render_lane_markings(RGBCamera* camera, Lane* lane, Map* map, Coordi
 }
 
 static void draw_pixel_safe(RGBCamera* camera, int x, int y, RGB color) {
-    if (x >= 0 && x < camera->width && y >= 0 && y < camera->height) {
-        rgbcam_set_pixel_at(camera, y, x, color);
+    if (x >= 0 && x < camera->render_width && y >= 0 && y < camera->render_height) {
+        int index = y * (camera->render_width * 3) + x * 3;
+        camera->render_buffer[index + 0] = color.r;
+        camera->render_buffer[index + 1] = color.g;
+        camera->render_buffer[index + 2] = color.b;
     }
 }
 
@@ -525,24 +704,32 @@ static void draw_char_scaled(RGBCamera* camera, int x, int y, char c, RGB color,
 }
 
 static void draw_hud(RGBCamera* camera) {
-    int hud_height = HUD_HEIGHT;
+    // Scale HUD elements based on render resolution vs base resolution (assuming base is width/height)
+    // But wait, width/height are just the output dimensions.
+    // If we are in SSAA mode, render_width > width.
+    // We want the HUD to be drawn at high resolution so it gets anti-aliased too.
+    
+    int scale = camera->render_width / camera->width;
+    if (scale < 1) scale = 1;
+
+    int hud_height = HUD_HEIGHT * scale;
     RGB tick_color = HUD_TICK_RGB;
     RGB text_color = HUD_TEXT_RGB;
     RGB north_color = HUD_NORTH_RGB;
 
     // Background strip
     for(int y=0; y<hud_height; y++) {
-        for(int x=0; x<camera->width; x++) {
-            int idx = (y * camera->width + x) * 3;
-            camera->data[idx+0] = camera->data[idx+0] / 2;
-            camera->data[idx+1] = camera->data[idx+1] / 2;
-            camera->data[idx+2] = camera->data[idx+2] / 2;
+        for(int x=0; x<camera->render_width; x++) {
+            int idx = (y * camera->render_width + x) * 3;
+            camera->render_buffer[idx+0] = camera->render_buffer[idx+0] / 2;
+            camera->render_buffer[idx+1] = camera->render_buffer[idx+1] / 2;
+            camera->render_buffer[idx+2] = camera->render_buffer[idx+2] / 2;
         }
     }
 
     double fov = camera->fov;
-    double center_x = camera->width / 2.0;
-    double pixels_per_rad = camera->width / fov;
+    double center_x = camera->render_width / 2.0;
+    double pixels_per_rad = camera->render_width / fov;
     
     double orientation = fmod(camera->orientation, 2*M_PI);
     if (orientation < 0) orientation += 2*M_PI;
@@ -568,21 +755,21 @@ static void draw_hud(RGBCamera* camera) {
                 else if (i == 18) label = 'S';
                 
                 RGB c = (label == 'N') ? north_color : text_color;
-                draw_char_scaled(camera, x - 5, 5, label, c, HUD_TEXT_SCALE);
+                draw_char_scaled(camera, x - 5*scale, 5*scale, label, c, HUD_TEXT_SCALE * scale);
             } else if (i % 3 == 0) {
                 // Intercardinal (NE, SE, SW, NW) -> Pipe
-                draw_line_2d(camera, x, hud_height - 12, x, hud_height - 4, tick_color);
-                draw_line_2d(camera, x+1, hud_height - 12, x+1, hud_height - 4, tick_color);
+                draw_line_2d(camera, x, hud_height - 12*scale, x, hud_height - 4*scale, tick_color);
+                draw_line_2d(camera, x+1, hud_height - 12*scale, x+1, hud_height - 4*scale, tick_color);
             } else {
                 // Minor tick -> Period
-                draw_line_2d(camera, x, hud_height - 6, x, hud_height - 4, tick_color);
-                draw_line_2d(camera, x+1, hud_height - 6, x+1, hud_height - 4, tick_color);
+                draw_line_2d(camera, x, hud_height - 6*scale, x, hud_height - 4*scale, tick_color);
+                draw_line_2d(camera, x+1, hud_height - 6*scale, x+1, hud_height - 4*scale, tick_color);
             }
         }
     }
     
     // Center marker (Needle)
-    draw_line_2d(camera, (int)center_x, hud_height - 10, (int)center_x, hud_height, HUD_NEEDLE_RGB);
+    draw_line_2d(camera, (int)center_x, hud_height - 10*scale, (int)center_x, hud_height, HUD_NEEDLE_RGB);
 }
 
 static void downsample(RGBCamera* src, RGBCamera* dest, int scale) {
@@ -608,48 +795,67 @@ static void downsample(RGBCamera* src, RGBCamera* dest, int scale) {
     }
 }
 
-static void render_scene_internal(RGBCamera* camera, Simulation* sim, void** exclude_objects) {
-    // Clear to sky color (gradient from top to horizon)
-    RGB sky_top = SKY_TOP_RGB; // Sky Blue
-    RGB sky_horizon = SKY_HORIZON_RGB; // White at horizon
 
-    for (int y = 0; y < camera->height; y++) {
-        double t = (double)y / (camera->height / 2.0);
+static void fill_background(uint8_t* buffer, int width, int height) {
+    RGB sky_top = SKY_TOP_RGB;
+    RGB sky_horizon = SKY_HORIZON_RGB;
+    RGB ground_color = GROUND_RGB;
+    
+    uint8_t* ptr = buffer;
+    int half_height = height / 2;
+    
+    // Sky (Top half)
+    for (int y = 0; y < half_height; y++) {
+        double t = (double)y / (double)half_height; // 0 at top, 1 at horizon
         if (t > 1.0) t = 1.0;
-
         uint8_t r = (uint8_t)(sky_top.r * (1.0 - t) + sky_horizon.r * t);
         uint8_t g = (uint8_t)(sky_top.g * (1.0 - t) + sky_horizon.g * t);
         uint8_t b = (uint8_t)(sky_top.b * (1.0 - t) + sky_horizon.b * t);
-
-        for (int x = 0; x < camera->width; x++) {
-            int idx = (y * camera->width + x) * 3;
-            camera->data[idx + 0] = r;
-            camera->data[idx + 1] = g;
-            camera->data[idx + 2] = b;
+        
+        for (int x = 0; x < width; x++) {
+            *ptr++ = r;
+            *ptr++ = g;
+            *ptr++ = b;
         }
     }
+    
+    // Ground (Bottom half)
+    uint8_t gr = ground_color.r;
+    uint8_t gg = ground_color.g;
+    uint8_t gb = ground_color.b;
+    int pixels_remaining = (height - half_height) * width;
+    for (int i = 0; i < pixels_remaining; i++) {
+        *ptr++ = gr;
+        *ptr++ = gg;
+        *ptr++ = gb;
+    }
+}
 
-    ensure_z_buffer(camera->width * camera->height);
-    clear_z_buffer(camera->width, camera->height, camera->max_distance);
+static void render_scene_internal(RGBCamera* camera, Simulation* sim, void** exclude_objects) {
+    BENCH_START(bench_time_sky);
+    // Copy pre-computed background (sky + ground)
+    if (camera->background_buffer) {
+        memcpy(camera->render_buffer, camera->background_buffer, sizeof(uint8_t) * 3 * camera->render_width * camera->render_height);
+    } else {
+        // Fallback if background buffer is missing (e.g. SSAA high-res camera)
+        fill_background(camera->render_buffer, camera->render_width, camera->render_height);
+    }
+    BENCH_END(bench_time_sky);
+
+    ensure_z_buffer(camera);
+    clear_z_buffer(camera);
 
     double cos_o = cos(camera->orientation);
     double sin_o = sin(camera->orientation);
     Coordinates3D cam_pos = { camera->position.x, camera->position.y, camera->z_altitude };
 
     // 0. Ground
-    {
-        double ground_half_size = GROUND_SIZE;
-        double ground_z = GROUND_Z; // Slightly below 0 to avoid z-fighting with road surface
-        Coordinates3D g0 = { camera->position.x - ground_half_size, camera->position.y - ground_half_size, ground_z };
-        Coordinates3D g1 = { camera->position.x + ground_half_size, camera->position.y - ground_half_size, ground_z };
-        Coordinates3D g2 = { camera->position.x + ground_half_size, camera->position.y + ground_half_size, ground_z };
-        Coordinates3D g3 = { camera->position.x - ground_half_size, camera->position.y + ground_half_size, ground_z };
-        
-        RGB ground_color = GROUND_RGB; // Forest Green
-        rasterize_quad(camera, to_cam(g0, cam_pos, cos_o, sin_o), to_cam(g1, cam_pos, cos_o, sin_o), to_cam(g2, cam_pos, cos_o, sin_o), to_cam(g3, cam_pos, cos_o, sin_o), ground_color);
-    }
+    BENCH_START(bench_time_ground);
+    // Ground already drawn via background copy
+    BENCH_END(bench_time_ground);
 
     // 1. Cars
+    BENCH_START(bench_time_cars);
     for (CarId car_id = 0; car_id < sim_get_num_cars(sim); car_id++) {
         Car* car = sim_get_car(sim, car_id);
         if (object_array_contains_object(exclude_objects, car)) continue;
@@ -706,6 +912,11 @@ static void render_scene_internal(RGBCamera* camera, Simulation* sim, void** exc
         rasterize_quad(camera, vb[2], vb[3], vt[3], vt[2], colors[4]); // Back
         rasterize_quad(camera, vb[3], vb[0], vt[0], vt[3], colors[5]); // Right
 
+#ifdef OPT_SIMPLE_CARS
+        continue;
+#endif
+
+#ifndef OPT_NO_CAR_LIGHTS
         // Calculate normals for lights (extrusion)
         #define V3_SUB(a, b) (Vec3){a.x - b.x, a.y - b.y, a.z - b.z}
         #define V3_CROSS(a, b) (Vec3){ \
@@ -753,6 +964,10 @@ static void render_scene_internal(RGBCamera* camera, Simulation* sim, void** exc
             n_right = c;
         }
 
+#ifdef OPT_SIMPLE_LIGHTS
+        #define RASTERIZE_THICK_QUAD(p0, p1, p2, p3, normal, thickness, color) \
+            rasterize_quad(camera, p0, p1, p2, p3, color)
+#else
         #define RASTERIZE_THICK_QUAD(p0, p1, p2, p3, normal, thickness, color) do { \
             Vec3 _n = normal; \
             double _t = thickness; \
@@ -766,6 +981,7 @@ static void render_scene_internal(RGBCamera* camera, Simulation* sim, void** exc
             rasterize_quad(camera, p2, p3, _q3, _q2, color); \
             rasterize_quad(camera, p3, p0, _q0, _q3, color); \
         } while(0)
+#endif
 
         double light_thickness = 0.05;
 
@@ -847,6 +1063,7 @@ static void render_scene_internal(RGBCamera* camera, Simulation* sim, void** exc
 
         // Render Indicators
         {
+
             bool left_on = (car->indicator_turn == INDICATOR_LEFT || car->indicator_lane == INDICATOR_LEFT);
             bool right_on = (car->indicator_turn == INDICATOR_RIGHT || car->indicator_lane == INDICATOR_RIGHT);
             
@@ -935,9 +1152,12 @@ static void render_scene_internal(RGBCamera* camera, Simulation* sim, void** exc
         #undef V3_LEN
         #undef V3_NORM
         #undef RASTERIZE_THICK_QUAD
+#endif
     }
+    BENCH_END(bench_time_cars);
 
     // 2. Roads
+    BENCH_START(bench_time_roads);
     Map* map = sim_get_map(sim);
     for (RoadId road_id = 0; road_id < map_get_num_roads(map); road_id++) {
         Road* road = map_get_road(map, road_id);
@@ -945,14 +1165,20 @@ static void render_scene_internal(RGBCamera* camera, Simulation* sim, void** exc
 
         if (road_get_type(road) == STRAIGHT) {
             Coordinates road_center = road_get_center(road);
+            
+            // Pruning: Check if road is within max_distance
+            // Approximate road extent as length/2
+            double road_len = road_get_length(road);
+            if (vec_distance(camera->position, road_center) > camera->max_distance + road_len / 2.0) continue;
+
             Meters delta_x, delta_y;
             bool is_horizontal = (road_get_direction(road) == DIRECTION_EAST || road_get_direction(road) == DIRECTION_WEST);
             if (is_horizontal) {
-                delta_x = road_get_length(road) / 2.0;
+                delta_x = road_len / 2.0;
                 delta_y = road_get_width(road) / 2.0;
             } else {
                 delta_x = road_get_width(road) / 2.0;
-                delta_y = road_get_length(road) / 2.0;
+                delta_y = road_len / 2.0;
             }
             Coordinates3D r0 = { road_center.x - delta_x, road_center.y - delta_y, 0.0 };
             Coordinates3D r1 = { road_center.x + delta_x, road_center.y - delta_y, 0.0 };
@@ -968,6 +1194,11 @@ static void render_scene_internal(RGBCamera* camera, Simulation* sim, void** exc
             Coordinates center = road_get_center(road);
             Meters radius = road->radius;
             Meters width = road_get_width(road);
+            
+            // Pruning: Check if turn is within max_distance
+            // Approximate turn extent as radius + width/2
+            if (vec_distance(camera->position, center) > camera->max_distance + radius + width / 2.0) continue;
+
             Meters r_out = radius + width / 2.0;
             Meters r_in = radius - width / 2.0;
             Quadrant quad = road->quadrant;
@@ -999,8 +1230,10 @@ static void render_scene_internal(RGBCamera* camera, Simulation* sim, void** exc
             render_lane_markings(camera, lane, map, cam_pos, cos_o, sin_o);
         }
     }
+    BENCH_END(bench_time_roads);
 
     // 3. Intersections
+    BENCH_START(bench_time_intersections);
     for (IntersectionId intersection_id = 0; intersection_id < map_get_num_intersections(map); intersection_id++) {
         Intersection* intersection = map_get_intersection(map, intersection_id);
         if (object_array_contains_object(exclude_objects, intersection)) continue;
@@ -1014,6 +1247,7 @@ static void render_scene_internal(RGBCamera* camera, Simulation* sim, void** exc
 
         rasterize_thick_quad(camera, i0, i1, i2, i3, INTERSECTION_RGB, cam_pos, cos_o, sin_o);
 
+#ifndef OPT_SIMPLE_INTERSECTIONS
         // Intersection Edges
         RGB edge_color = INTERSECTION_EDGE_RGB;
         double edge_width = INTERSECTION_EDGE_WIDTH;
@@ -1075,117 +1309,9 @@ static void render_scene_internal(RGBCamera* camera, Simulation* sim, void** exc
             c_ns, c_ns, // Front (S), Back (N) -> NS lights
             c_ew, c_ew, // Left (W), Right (E) -> EW lights
             cam_pos, cos_o, sin_o);
+#endif
     }
-}
-
-// Simple FXAA implementation
-static void apply_fxaa(RGBCamera* camera) {
-    int w = camera->width;
-    int h = camera->height;
-    uint8_t* data = camera->data;
-    
-    // We need a copy of the source to read from while writing to destination
-    // Since we want to modify in-place effectively, we'll allocate a temp buffer for the result
-    // or just read from 'data' and write to 'data' carefully? 
-    // Standard way: Read from src, write to dst.
-    uint8_t* src = (uint8_t*)malloc(3 * w * h);
-    if (!src) return;
-    memcpy(src, data, 3 * w * h);
-
-    // Luma coefficients
-    // const float lumaR = 0.299f;
-    // const float lumaG = 0.587f;
-    // const float lumaB = 0.114f;
-    // Integer approximation for speed: Y = (R*77 + G*150 + B*29) >> 8
-    #define GET_LUMA(r, g, b) ((r*77 + g*150 + b*29) >> 8)
-    #define IDX(x, y) (((y) * w + (x)) * 3)
-
-    // Thresholds
-    const int EDGE_THRESHOLD_MIN = 32;
-
-    for (int y = 1; y < h - 1; y++) {
-        for (int x = 1; x < w - 1; x++) {
-            int idx = IDX(x, y);
-            uint8_t r = src[idx+0];
-            uint8_t g = src[idx+1];
-            uint8_t b = src[idx+2];
-            int lumaM = GET_LUMA(r, g, b);
-
-            // Neighbors
-            int lumaN = GET_LUMA(src[IDX(x, y-1)+0], src[IDX(x, y-1)+1], src[IDX(x, y-1)+2]);
-            int lumaS = GET_LUMA(src[IDX(x, y+1)+0], src[IDX(x, y+1)+1], src[IDX(x, y+1)+2]);
-            int lumaW = GET_LUMA(src[IDX(x-1, y)+0], src[IDX(x-1, y)+1], src[IDX(x-1, y)+2]);
-            int lumaE = GET_LUMA(src[IDX(x+1, y)+0], src[IDX(x+1, y)+1], src[IDX(x+1, y)+2]);
-
-            int minLuma = lumaM;
-            if (lumaN < minLuma) minLuma = lumaN;
-            if (lumaS < minLuma) minLuma = lumaS;
-            if (lumaW < minLuma) minLuma = lumaW;
-            if (lumaE < minLuma) minLuma = lumaE;
-
-            int maxLuma = lumaM;
-            if (lumaN > maxLuma) maxLuma = lumaN;
-            if (lumaS > maxLuma) maxLuma = lumaS;
-            if (lumaW > maxLuma) maxLuma = lumaW;
-            if (lumaE > maxLuma) maxLuma = lumaE;
-
-            int range = maxLuma - minLuma;
-            if (range < EDGE_THRESHOLD_MIN) continue; // Not an edge
-
-            // Determine edge direction
-            // Calculate luma of corners for better direction estimation
-            int lumaNW = GET_LUMA(src[IDX(x-1, y-1)+0], src[IDX(x-1, y-1)+1], src[IDX(x-1, y-1)+2]);
-            int lumaNE = GET_LUMA(src[IDX(x+1, y-1)+0], src[IDX(x+1, y-1)+1], src[IDX(x+1, y-1)+2]);
-            int lumaSW = GET_LUMA(src[IDX(x-1, y+1)+0], src[IDX(x-1, y+1)+1], src[IDX(x-1, y+1)+2]);
-            int lumaSE = GET_LUMA(src[IDX(x+1, y+1)+0], src[IDX(x+1, y+1)+1], src[IDX(x+1, y+1)+2]);
-
-            int edgeVert = 
-                abs((1 * lumaNW + (-2) * lumaN + 1 * lumaNE)) +
-                2 * abs((1 * lumaW  + (-2) * lumaM + 1 * lumaE)) +
-                abs((1 * lumaSW + (-2) * lumaS + 1 * lumaSE));
-            
-            int edgeHorz = 
-                abs((1 * lumaNW + (-2) * lumaW + 1 * lumaSW)) +
-                2 * abs((1 * lumaN  + (-2) * lumaM + 1 * lumaS)) +
-                abs((1 * lumaNE + (-2) * lumaE + 1 * lumaSE));
-            
-            bool isHorz = edgeHorz >= edgeVert;
-
-            // Simple blending: average with the neighbor in the direction of the edge gradient
-            // If horizontal edge, gradient is vertical (compare N and S)
-            // If vertical edge, gradient is horizontal (compare W and E)
-            
-            int luma1, luma2;
-            if (isHorz) {
-                luma1 = lumaN;
-                luma2 = lumaS;
-            } else {
-                luma1 = lumaW;
-                luma2 = lumaE;
-            }
-
-            int grad1 = abs(luma1 - lumaM);
-            int grad2 = abs(luma2 - lumaM);
-            
-            int offX = 0, offY = 0;
-            if (isHorz) {
-                offY = (grad1 >= grad2) ? -1 : 1;
-            } else {
-                offX = (grad1 >= grad2) ? -1 : 1;
-            }
-            
-            int neighborIdx = IDX(x + offX, y + offY);
-            
-            // Reduced blend strength to preserve sharpness (25% blend instead of 50%)
-            data[idx+0] = (src[idx+0] * 3 + src[neighborIdx+0]) / 4;
-            data[idx+1] = (src[idx+1] * 3 + src[neighborIdx+1]) / 4;
-            data[idx+2] = (src[idx+2] * 3 + src[neighborIdx+2]) / 4;
-        }
-    }
-    
-    free(src);
-    #undef GET_LUMA
-    #undef IDX
+    BENCH_END(bench_time_intersections);
 }
 
 void rgbcam_capture(RGBCamera* camera, Simulation* sim) {
@@ -1197,6 +1323,7 @@ void rgbcam_capture(RGBCamera* camera, Simulation* sim) {
 }
 
 void rgbcam_capture_exclude_objects(RGBCamera* camera, Simulation* sim, void** exclude_objects) {
+    BENCH_START(bench_time_total);
     // here, if the camera is attached to a car, we need to update the camera's position and orientation based on the car's current state
     if (camera->attached_car != NULL) {
         Car* car = camera->attached_car;
@@ -1273,29 +1400,79 @@ void rgbcam_capture_exclude_objects(RGBCamera* camera, Simulation* sim, void** e
         camera->orientation = angle_normalize(car->orientation + local_yaw);
     }
 
-    if (camera->aa_type == AA_SSAA && camera->aa_level > 1) {
-        int scale = camera->aa_level;
-        RGBCamera high_res_cam = *camera;
-        high_res_cam.width *= scale;
-        high_res_cam.height *= scale;
-        high_res_cam.data = (uint8_t*)malloc(sizeof(uint8_t) * 3 * high_res_cam.width * high_res_cam.height);
+    // Ensure buffers are correct (handles manual AA level changes)
+    int needed_level = (camera->aa_level > 1) ? camera->aa_level : 1;
+    rgbcam_set_aa_level(camera, needed_level);
+
+    // Render scene
+    // We render directly into the render_buffer using render_width/render_height
+    // render_scene_internal will use camera->render_width/height/buffer
+    render_scene_internal(camera, sim, exclude_objects);
+
+#ifndef OPT_NO_HUD
+    BENCH_START(bench_time_hud);
+    draw_hud(camera);
+    BENCH_END(bench_time_hud);
+#endif
+
+    // Post-processing and downsampling
+    if (camera->aa_level > 1) {
+        // Downsample from render_buffer to data
+        // We need a temporary camera struct to pass to downsample as source
+        // But downsample takes RGBCamera* src, RGBCamera* dest
+        // src is 'camera' (with high res data), dest needs to be a wrapper around orig_data
         
-        if (high_res_cam.data) {
-            render_scene_internal(&high_res_cam, sim, exclude_objects);
-            downsample(&high_res_cam, camera, scale);
-            free(high_res_cam.data);
-        } else {
-            // Fallback if allocation fails
-            render_scene_internal(camera, sim, exclude_objects);
-        }
+        // Wait, render_scene_internal now uses render_buffer.
+        // So camera->render_buffer contains the high-res image.
+        // camera->data is the destination low-res buffer.
+        
+        // We need to adapt downsample to work with this setup or create a temp struct
+        // Let's create a temp struct for the source (high res)
+        RGBCamera src_cam = *camera;
+        src_cam.width = camera->render_width;
+        src_cam.height = camera->render_height;
+        src_cam.data = camera->render_buffer;
+        
+        BENCH_START(bench_time_downsample);
+        downsample(&src_cam, camera, camera->aa_level);
+        BENCH_END(bench_time_downsample);
     } else {
-        render_scene_internal(camera, sim, exclude_objects);
-        if (camera->aa_type == AA_FXAA) {
-            apply_fxaa(camera);
-        }
+        // AA level 1: Swap pointers (Double buffering)
+        // camera->render_buffer has the new frame
+        // camera->data has the old frame buffer
+        
+        uint8_t* temp = camera->data;
+        camera->data = camera->render_buffer;
+        camera->render_buffer = temp;
     }
     
-    draw_hud(camera);
+    BENCH_END(bench_time_total);
+
+#ifdef ENABLE_BENCHMARKING
+    bench_frame_count++;
+    if (bench_frame_count >= 1000) {
+        printf("--- Camera Benchmark (Avg over %d frames) ---\n", bench_frame_count);
+        printf("Sky:           %.6f ms\n", (bench_time_sky / bench_frame_count) * 1000.0);
+        printf("Ground:        %.6f ms\n", (bench_time_ground / bench_frame_count) * 1000.0);
+        printf("Cars:          %.6f ms\n", (bench_time_cars / bench_frame_count) * 1000.0);
+        printf("Roads:         %.6f ms\n", (bench_time_roads / bench_frame_count) * 1000.0);
+        printf("Intersections: %.6f ms\n", (bench_time_intersections / bench_frame_count) * 1000.0);
+        printf("HUD:           %.6f ms\n", (bench_time_hud / bench_frame_count) * 1000.0);
+        printf("Downsample:    %.6f ms\n", (bench_time_downsample / bench_frame_count) * 1000.0);
+        printf("TOTAL:         %.6f ms\n", (bench_time_total / bench_frame_count) * 1000.0);
+        printf("---------------------------------------------\n");
+        
+        bench_frame_count = 0;
+        bench_time_sky = 0;
+        bench_time_ground = 0;
+        bench_time_cars = 0;
+        bench_time_roads = 0;
+        bench_time_intersections = 0;
+        bench_time_total = 0;
+        bench_time_hud = 0;
+        bench_time_downsample = 0;
+    }
+#endif
 }
 
 
@@ -1317,8 +1494,9 @@ RGBCamera* rgbcam_malloc(Coordinates position, Meters z_altitude, Radians orient
     frame->height = height;
     frame->fov = fov;
     frame->max_distance = max_distance;
-    frame->aa_type = AA_NONE;
-    frame->aa_level = 0;
+    frame->aa_level = 1;
+    frame->z_buffer = NULL;
+    frame->z_buffer_size = 0;
     frame->data = (uint8_t*) malloc(sizeof(uint8_t) * 3 * width * height); // CHW format
     if (frame->data == NULL) {
         LOG_ERROR("Failed to allocate memory for RGB data");
@@ -1326,13 +1504,97 @@ RGBCamera* rgbcam_malloc(Coordinates position, Meters z_altitude, Radians orient
         return NULL;
     }
     memset(frame->data, 0, sizeof(uint8_t) * 3 * width * height);
+
+    // Pre-compute background (sky + ground)
+    frame->background_buffer = (uint8_t*) malloc(sizeof(uint8_t) * 3 * width * height);
+    if (frame->background_buffer == NULL) {
+        LOG_ERROR("Failed to allocate memory for background buffer");
+        free(frame->data);
+        free(frame);
+        return NULL;
+    }
+
+    // Fill background buffer
+    fill_background(frame->background_buffer, width, height);
+
+    // Initialize render buffer (same size as data initially, AA=1)
+    frame->render_width = width;
+    frame->render_height = height;
+    frame->render_buffer = (uint8_t*) malloc(sizeof(uint8_t) * 3 * width * height);
+    if (frame->render_buffer == NULL) {
+        LOG_ERROR("Failed to allocate memory for render buffer");
+        free(frame->background_buffer);
+        free(frame->data);
+        free(frame);
+        return NULL;
+    }
+    // Initialize render buffer with background
+    memcpy(frame->render_buffer, frame->background_buffer, sizeof(uint8_t) * 3 * width * height);
+
     return frame;
+}
+
+void rgbcam_set_aa_level(RGBCamera* camera, int level) {
+    if (camera == NULL || level < 1) return;
+    
+    int target_width = camera->width * level;
+    int target_height = camera->height * level;
+
+    if (camera->aa_level == level && 
+        camera->render_width == target_width && 
+        camera->render_height == target_height && 
+        camera->render_buffer != NULL) {
+        return;
+    }
+
+    camera->aa_level = level;
+    camera->render_width = target_width;
+    camera->render_height = target_height;
+
+    // Reallocate render buffer
+    if (camera->render_buffer != NULL) {
+        free(camera->render_buffer);
+    }
+    camera->render_buffer = (uint8_t*) malloc(sizeof(uint8_t) * 3 * camera->render_width * camera->render_height);
+    if (camera->render_buffer == NULL) {
+        LOG_ERROR("Failed to allocate memory for render buffer in rgbcam_set_aa_level");
+        // Try to recover with level 1
+        camera->aa_level = 1;
+        camera->render_width = camera->width;
+        camera->render_height = camera->height;
+        camera->render_buffer = (uint8_t*) malloc(sizeof(uint8_t) * 3 * camera->render_width * camera->render_height);
+    }
+
+    // Reallocate background buffer to match render resolution
+    if (camera->background_buffer != NULL) {
+        free(camera->background_buffer);
+    }
+    camera->background_buffer = (uint8_t*) malloc(sizeof(uint8_t) * 3 * camera->render_width * camera->render_height);
+    if (camera->background_buffer != NULL) {
+        fill_background(camera->background_buffer, camera->render_width, camera->render_height);
+    }
+
+    // Reset Z-buffer so it gets reallocated on next render
+    if (camera->z_buffer != NULL) {
+        free(camera->z_buffer);
+        camera->z_buffer = NULL;
+        camera->z_buffer_size = 0;
+    }
 }
 
 void rgbcam_free(RGBCamera* frame) {
     if (frame != NULL) {
         if (frame->data != NULL) {
             free(frame->data);
+        }
+        if (frame->z_buffer != NULL) {
+            free(frame->z_buffer);
+        }
+        if (frame->background_buffer != NULL) {
+            free(frame->background_buffer);
+        }
+        if (frame->render_buffer != NULL) {
+            free(frame->render_buffer);
         }
         free(frame);
     }
