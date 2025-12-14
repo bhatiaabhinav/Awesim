@@ -241,6 +241,7 @@ class ActorBase(nn.Module, abc.ABC):
         action_space: The Gymnasium action space (Box or Discrete).
         deterministic: If True, actions are deterministic (mean/argmax).
         norm_obs: If True, normalize observations using running mean/var. ! Critical note: In POMDPs, this may leak information across timesteps.
+        forward_batch_size: Maximum batch size for forward passes to avoid memory issues. If the input batch size exceeds this, the input is split into smaller batches.
         obs_mean: Running mean for observation normalization (non-trainable).
         obs_var: Running variance for observation normalization (non-trainable).
         obs_count: Running count for observation normalization (non-trainable).
@@ -248,13 +249,14 @@ class ActorBase(nn.Module, abc.ABC):
     Note: Subclasses must implement `sample_action`, `get_entropy`, and `get_logprob`.
     """
 
-    def __init__(self, model, observation_space: Box, action_space: Union[Box, Discrete], deterministic: bool = False, device='cpu', norm_obs: bool = False):
+    def __init__(self, model, observation_space: Box, action_space: Union[Box, Discrete], deterministic: bool = False, device='cpu', norm_obs: bool = False, forward_batch_size: int = 64):
         super(ActorBase, self).__init__()
         self.model = model.to(device)
         self.observation_space = observation_space
         self.action_space = action_space
         self.deterministic = deterministic
         self.norm_obs = norm_obs
+        self.forward_batch_size = forward_batch_size
         self.obs_mean = nn.Parameter(torch.zeros(observation_space.shape, dtype=torch.float32, device=device), requires_grad=False)
         self.obs_var = nn.Parameter(torch.ones(observation_space.shape, dtype=torch.float32, device=device), requires_grad=False)
         self.obs_count = nn.Parameter(torch.tensor(0., dtype=torch.float32, device=device), requires_grad=False)
@@ -286,7 +288,15 @@ class ActorBase(nn.Module, abc.ABC):
         else:
             if self.norm_obs:
                 x = normalize_and_update_stats(self.obs_mean, self.obs_var, self.obs_count, x, False)
-            x = self.model(x)
+            
+            if x.shape[0] > self.forward_batch_size:
+                out = []
+                for i in range(0, x.shape[0], self.forward_batch_size):
+                    batch_x = x[i:i+self.forward_batch_size]
+                    out.append(self.model(batch_x))
+                x = torch.cat(out, dim=0)
+            else:
+                x = self.model(x)
         return x
 
     def get_subfinal_layer_output(self, x: Tensor) -> Tensor:
@@ -476,8 +486,8 @@ class ActorContinuous(ActorBase):
     Log-probabilities are adjusted for the tanh transformation and scaling.
     """
 
-    def __init__(self, model, observation_space: Box, action_space: Box, deterministic: bool = False, device='cpu', norm_obs: bool = False, state_dependent_std: bool = False):
-        super(ActorContinuous, self).__init__(model, observation_space, action_space, deterministic, device, norm_obs)
+    def __init__(self, model, observation_space: Box, action_space: Box, deterministic: bool = False, device='cpu', norm_obs: bool = False, state_dependent_std: bool = False, forward_batch_size: int = 64):
+        super(ActorContinuous, self).__init__(model, observation_space, action_space, deterministic, device, norm_obs, forward_batch_size=forward_batch_size)
         assert np.all(np.isfinite(action_space.low)) and np.all(np.isfinite(action_space.high))
         self.state_dependent_std = state_dependent_std
         self.logstd = nn.Parameter(torch.zeros(1, action_space.shape[0], dtype=torch.float32, device=device), requires_grad=True) if not state_dependent_std else None
@@ -566,8 +576,8 @@ class ActorDiscrete(ActorBase):
     In deterministic mode, logits are inflated to approximate argmax.
     """
 
-    def __init__(self, model, observation_space: Box, action_space: Discrete, deterministic: bool = False, device='cpu', norm_obs: bool = False):
-        super(ActorDiscrete, self).__init__(model, observation_space, action_space, deterministic, device, norm_obs)
+    def __init__(self, model, observation_space: Box, action_space: Discrete, deterministic: bool = False, device='cpu', norm_obs: bool = False, forward_batch_size: int = 64):
+        super(ActorDiscrete, self).__init__(model, observation_space, action_space, deterministic, device, norm_obs, forward_batch_size=forward_batch_size)
         assert action_space.n >= 2, "Action space must have at least 2 discrete actions."
 
     def sample_action(self, x: Tensor) -> Tuple[Tensor, Dict[str, Tensor]]:
@@ -603,15 +613,15 @@ class ActorDiscrete(ActorBase):
         return probs_all, logprobs_all
 
 
-def Actor(model, observation_space: Box, action_space: Union[Box, Discrete], deterministic: bool = False, device='cpu', norm_obs: bool = False, state_dependent_std: bool = False) -> ActorBase:
+def Actor(model, observation_space: Box, action_space: Union[Box, Discrete], deterministic: bool = False, device='cpu', norm_obs: bool = False, state_dependent_std: bool = False, forward_batch_size: int = 64) -> ActorBase:
     """Factory function to create an appropriate Actor subclass based on the action space."""
     # raise a warning if norm_obs is True and the model is a SequenceModel
     if norm_obs and isinstance(model, SequenceModel):
         print("Warning: Observation normalization is enabled for a SequenceModel. In POMDPs, this may leak information across timesteps.", file=sys.stderr)
     if isinstance(action_space, Box):
-        return ActorContinuous(model, observation_space, action_space, deterministic, device, norm_obs, state_dependent_std=state_dependent_std)
+        return ActorContinuous(model, observation_space, action_space, deterministic, device, norm_obs, state_dependent_std=state_dependent_std, forward_batch_size=forward_batch_size)
     elif isinstance(action_space, Discrete):
-        return ActorDiscrete(model, observation_space, action_space, deterministic, device, norm_obs)
+        return ActorDiscrete(model, observation_space, action_space, deterministic, device, norm_obs, forward_batch_size=forward_batch_size)
     else:
         raise NotImplementedError("Only Box and Discrete action spaces are supported.")
 
@@ -626,15 +636,17 @@ class Critic(nn.Module):
     Attributes:
         model: The underlying neural network (nn.Module) for value prediction.
         norm_obs: If True, normalize observations using running mean/var. ! Critical note: In POMDPs, this may leak information across timesteps.
+        forward_batch_size: Batch size for forward passes to handle large inputs. If the input batch size exceeds this, the forward pass is split into smaller batches of this size.
         obs_mean: Running mean for observation normalization (non-trainable).
         obs_var: Running variance for observation normalization (non-trainable).
         obs_count: Running count for observation normalization (non-trainable).
     """
 
-    def __init__(self, model, observation_space: Box, device='cpu', norm_obs: bool = False):
+    def __init__(self, model, observation_space: Box, device='cpu', norm_obs: bool = False, forward_batch_size: int = 64):
         super(Critic, self).__init__()
         self.model = model
         self.norm_obs = norm_obs
+        self.forward_batch_size = forward_batch_size
         self.obs_mean = nn.Parameter(torch.zeros(observation_space.shape, dtype=torch.float32, device=device), requires_grad=False)
         self.obs_var = nn.Parameter(torch.ones(observation_space.shape, dtype=torch.float32, device=device), requires_grad=False)
         self.obs_count = nn.Parameter(torch.tensor(0., dtype=torch.float32, device=device), requires_grad=False)
@@ -674,7 +686,15 @@ class Critic(nn.Module):
         else:
             if self.norm_obs:
                 x = normalize_and_update_stats(self.obs_mean, self.obs_var, self.obs_count, x, False)
-            x = self.model(x)
+            
+            if x.shape[0] > self.forward_batch_size:
+                out = []
+                for i in range(0, x.shape[0], self.forward_batch_size):
+                    batch_x = x[i:i+self.forward_batch_size]
+                    out.append(self.model(batch_x))
+                x = torch.cat(out, dim=0)
+            else:
+                x = self.model(x)
         return x
 
     def get_subfinal_layer_output(self, x: Tensor) -> Tensor:

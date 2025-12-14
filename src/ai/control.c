@@ -191,6 +191,14 @@ MetersPerSecondSquared car_compute_acceleration_chase_target(const Car* car, Met
             }
         }
     }
+
+    if (speed_current > speed_limit) {   // even after all that, we are still overspeeding. Need to brake more.
+        LOG_TRACE("Even after all that, we are still overspeeding. Need to brake more.");
+        MetersPerSecondSquared accel_brake_to_speed_limit = control_speed_compute_bounded_accel((ControlError){0, speed_current - speed_limit}, preferred.max_deceleration, MPH_60);
+        if (accel_brake_to_speed_limit < accel) {
+            accel = accel_brake_to_speed_limit;
+        }
+    }
     return accel;
 }
 

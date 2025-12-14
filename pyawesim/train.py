@@ -9,17 +9,49 @@ import torch
 import torch.nn as nn
 import wandb
 from gymenv import AwesimEnv
-from gymenv_utils import VisionEncoder384, LiteVisionEncoder384
+from pyawesim.cnn import SimpleCNN, SimpleCNNWith3x3DownsamplingPairs, MinimalRLConv128
 from gymnasium.spaces import Box
 from gymnasium.vector import SyncVectorEnv, AsyncVectorEnv, AutoresetMode, VectorEnv
 from ppo import Actor, ActorBase, Critic, PPO
 
+
+class ModelArchitecture(nn.Module):
+
+    def __init__(self, hidden_dim_per_image, hidden_dim: int, dim_out: int, c_base: int = 32, num_images: int = 9, cnn_type="minimal"):
+        net_name_to_class = {
+            "simple": SimpleCNN,
+            "minimal": MinimalRLConv128,
+            "simplefancy": SimpleCNNWith3x3DownsamplingPairs,
+        }
+        CNN = net_name_to_class[cnn_type]
+        super().__init__()
+        self.hidden_dim_per_image = hidden_dim_per_image
+        self.hidden_dim = hidden_dim
+        self.num_images = num_images
+        self.cnns = nn.ModuleList([CNN(hidden_dim_per_image, c_base=c_base) for _ in range(num_images)])
+        self.hidden_fc = nn.Linear(num_images * hidden_dim_per_image, hidden_dim)
+        self.relu = nn.ReLU()
+        self.final_fc = nn.Linear(hidden_dim, dim_out)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        assert x.shape[1:4] == (3 * self.num_images, 128, 128), f"Expected input shape (3 * {self.num_images}, 128, 128), but got {x.shape}"
+        cnn_outputs = torch.zeros((x.shape[0], self.num_images * self.hidden_dim_per_image), device=x.device)  # (B, num_images * hidden_dim)
+        for i, cnn in enumerate(self.cnns):
+            x_i = x[:, i * 3:(i + 1) * 3, :, :]         # (B, 3, H, W)
+            y_i = cnn(x_i)                              # (B, hidden_dim)
+            cnn_outputs[:, i * self.hidden_dim_per_image:(i + 1) * self.hidden_dim_per_image] = y_i     # (B, hidden_dim)
+        x = self.hidden_fc(cnn_outputs)                 # (B, hidden_dim)
+        x = self.relu(x)                                # (B, hidden_dim)
+        x = self.final_fc(x)                            # (B, dim_out)
+        return x
+
+
 WANDB_CONFIG = {
     "no_wandb": False,
-    "project": "Awesim",
+    "project": "Awesim-ApppointmentWorld",
     "experiment_name": "Awesim-Vision",
     "notes": """Moved to vision based environment""",
-    "video_interval": 100,
+    "video_interval": 25,
 }
 ENV_CONFIG = {
     "cam_resolution": (128, 128),       # width, height
@@ -36,19 +68,22 @@ ENV_CONFIG = {
     "may_lose_entire_day_wage": False,  # lose entire 8-hour workday wage if not reached by the end of sim_duration
     "init_fuel_gallons": 3.0,           # initial fuel in gallons -- 1/4th of a 12-gallon tank car
     "goal_reward": 1.0,                 # A small positive number to incentivize reaching the goal
+    "reward_shaping": False,
 }
 VEC_ENV_CONFIG = {
-    "n_envs": 64,
+    "n_envs": 8,
     "async": True,
 }
 PPO_CONFIG = {
     "iters": 10000,
-    "nsteps": 512,
+    "nsteps": 256,
     "actor_lr": 0.0001,
     "critic_lr": 0.0001,
     "decay_lr": False,
-    "entropy_coef": 0.0,
-    "batch_size": 256,
+    "decay_entropy_coef": True,
+    "entropy_coef": 0.01,
+    "batch_size": 64,
+    "nepochs": 4,
     "target_kl": 0.01,
     "lam": 0.95,
     "gamma": 0.999,
@@ -63,10 +98,15 @@ PPO_CONFIG = {
     "inference_device": "cuda" if torch.cuda.is_available() else "cpu",
     "verbose": False
 }
+ENV_CONFIG["reward_shaping_gamma"] = PPO_CONFIG["gamma"]
+NET_CONFIG = {
+    "hidden_dim_per_image": 128,
+    "hidden_dim": 512,
+    "c_base": 32,
+    "cnn_type": "simple",
+}
 POLICY_CONFIG = {
     "norm_obs": True,
-    "hidden_dims": 512,
-    "lite": False,
     "state_dependent_std": True,
 }
 
@@ -104,14 +144,16 @@ def train_model() -> Tuple[ActorBase, Critic, PPO]:
     action_dim = vec_env.single_action_space.shape[0]       # type: ignore
     print(f"Observation space dim: {obs_dim}, Action space dim: {action_dim}")
 
-    VisionEncoder = LiteVisionEncoder384 if POLICY_CONFIG["lite"] else VisionEncoder384
-    actor_model = nn.Sequential(VisionEncoder(POLICY_CONFIG["hidden_dims"]), nn.Flatten(), nn.Linear(POLICY_CONFIG["hidden_dims"], 2 * action_dim if POLICY_CONFIG["state_dependent_std"] else action_dim))
-    critic_model = nn.Sequential(VisionEncoder(POLICY_CONFIG["hidden_dims"]), nn.Flatten(), nn.Linear(POLICY_CONFIG["hidden_dims"], 1))
+    actor_dim_out = action_dim * 2 if POLICY_CONFIG["state_dependent_std"] else action_dim
+    actor_model = ModelArchitecture(dim_out=actor_dim_out, **NET_CONFIG)
+    print("Actor model:")
+    print(actor_model)
+    critic_model = ModelArchitecture(dim_out=1, **NET_CONFIG)
 
     actor = Actor(actor_model, obs_space, action_space, norm_obs=POLICY_CONFIG["norm_obs"], state_dependent_std=POLICY_CONFIG["state_dependent_std"])    # type: ignore
     critic = Critic(critic_model, obs_space, norm_obs=POLICY_CONFIG["norm_obs"])
     if PPO_CONFIG["cmdp_mode"]:
-        cost_critic_model = nn.Sequential(VisionEncoder(POLICY_CONFIG["hidden_dims"]), nn.Flatten(), nn.Linear(POLICY_CONFIG["hidden_dims"], 1))
+        cost_critic_model = ModelArchitecture(dim_out=1, **NET_CONFIG)
         cost_critic = Critic(cost_critic_model, obs_space, norm_obs=POLICY_CONFIG["norm_obs"])
     else:
         cost_critic = None
@@ -124,9 +166,9 @@ def train_model() -> Tuple[ActorBase, Critic, PPO]:
 
     # an env for video recording
     env = None
+    video_dir = f"videos/{WANDB_CONFIG['experiment_name']}"
     if WANDB_CONFIG["video_interval"] is not None:
         env = make_env()
-        video_dir = f"videos/{WANDB_CONFIG['experiment_name']}"
         os.makedirs(video_dir, exist_ok=True)
         env = gymnasium.wrappers.RecordVideo(env, video_folder=video_dir, episode_trigger=lambda x: True, name_prefix="training")
         if not WANDB_CONFIG["no_wandb"]:
@@ -176,9 +218,11 @@ def train_model() -> Tuple[ActorBase, Critic, PPO]:
             torch.save(critic.state_dict(), f"{model_dir}/critic_iter{ppo.stats['iterations']}.pth")
             torch.save(actor.state_dict(), f"{model_dir}/actor_latest.pth")
             torch.save(critic.state_dict(), f"{model_dir}/critic_latest.pth")
-        
+
         if env is not None and ppo.stats['iterations'] % WANDB_CONFIG["video_interval"] == 0:
             actor.evaluate_policy(env, 1, False)    # for video recording
+            if not WANDB_CONFIG["no_wandb"]:
+                wandb.save(f"{video_dir}/*.mp4")
 
     if not WANDB_CONFIG["no_wandb"]:
         wandb.finish()
@@ -215,8 +259,11 @@ if __name__ == "__main__":
             if k in PPO_CONFIG:
                 PPO_CONFIG[k] = v
                 found_key = True
+            if k in NET_CONFIG:
+                NET_CONFIG[k] = v
+                found_key = True
             if k in POLICY_CONFIG:
-                POLICY_CONFIG[k] = v
+                POLICY_CONFIG[k] = v    # type: ignore
                 found_key = True
             if k in WANDB_CONFIG:
                 WANDB_CONFIG[k] = v

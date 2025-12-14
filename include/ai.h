@@ -487,27 +487,20 @@ MetersPerSecondSquared control_speed_compute_bounded_accel(ControlError error, M
 #define AEB_DISENGAGE_MAX_SPEED_MPS 0.0045              // AEB disengages when ego speed falls below 0.0045 m/s (≈ 0.01 mph)
 #define AEB_ENGAGE_BEST_CASE_BRAKING_GAP_M 0.9144       // AEB engages if best-case gap under maximum braking is less than 0.9144 m (≈ 3 ft)
 #define AEB_DISENGAGE_BEST_CASE_BRAKING_GAP_M 1.8288    // AEB disengages if best-case gap under maximum braking exceeds 1.8288 m (≈ 6 ft)
+#define DRIVING_ASSISTANT_BUFFER_M 1.0                  // Buffer distance for driving assistant to stop at intersection (in feet) and for stopping behind a lead vehicle (if it exists and is stopped)
 
 typedef struct DrivingAssistant {
-    Seconds last_configured_at;                  // Timestamp of the driving assistant's last settings update
+    Seconds last_configured_at;         // Timestamp of the driving assistant's last settings update
 
     // Acceleration based on target speed:
-    MetersPerSecond speed_target;       // Determines target speed
+    MetersPerSecond speed_target;       // Determines target speed. Can be of opposite sign.
 
     // Requested intents to determine steering:
     CarIndicator merge_intent;           // For switching lanes within a road, or merge/exit a highway. Set to None automatically once the assistant issues merge command.
     CarIndicator turn_intent;            // For which lane to take when approaching intersections. Set to None automatically once the assistant issues turn command.
 
-    // Smart modes:
-
-    // Stop mode to come to a stop at a target distance from current position. If it is not possible to stop in time, the car will brake as hard as possible and try to stop as soon as possible even though it will overshoot the target stopping position. Stop mode disengages automatically once the car is fully stopped (speed < 0.01 mph) or manually disengaged. Stop mode automatically sets speed_target = 0.
-    bool stop_mode;                       // Whether to trigger stop mode. Can be triggered only if the vehicle is moving ahead (speed > 0) and stopping_distance_target >= 0.
-    Meters stopping_distance_target;      // Non-negative. Target stopping distance from current position. It is constantly updated as the car moves forward. On overshooting, it gets clamped to 0 (which means continue to brake as hard as possible to stop ASAP).
-
-    // Follow mode for adaptive cruise control. Cannot be engaged simulataneously with stop mode.
-    bool follow_mode;                       // Match speed of next vehicle and maintains follow distance = car_speed * follow_mode_thw + follow_mode_buffer, while not exceeding speed_target. If no vehicle ahead, targets speed_target. Follow mode cannot be engaged with a negative speed_target.
-    Seconds follow_mode_thw;                // Time headway distance to the next vehicle.
-    Meters follow_mode_buffer;              // Buffer distance to maintain from the next vehicle, in addition to the follow_mode_thw distance. You can also think of this as the distance to maintain in stopped traffic.
+    Seconds thw;                        // Time headway distance to the next vehicle (if exists). Also, the time headway for determining merge safety when merge assistance is active.
+    bool should_stop_at_intersection;          // Whether to stop at the next intersection. The car will try to brake as smoothly as possible to stop DRIVING_ASSISTANT_BUFFER_M meter before the intersection. If stop_at_intersection is invoked later than the smoothest braking distance, braking intensity will be automatically adjusted to stop DRIVING_ASSISTANT_BUFFER_M meter before the intersection. If it slightly overshoots over the buffer, it will back up. But if it is impossible to brake in time, the car will still brake hard even though it will overshoot the legal stop line. Once already overshot, this variable is ignored because there is no intersection ahead and the only way the speed still reduces is if the speed_target reduces.
 
     // Safety assistants
     bool merge_assistance;          // Whether indicated lane change happens only when it is safe to merge, which is when post merging, the distance from the lead car and the following car is geq follow_mode_thw
@@ -536,13 +529,10 @@ bool driving_assistant_reset_settings(DrivingAssistant* das, Car* car);
 
 Seconds driving_assistant_get_last_configured_at(const DrivingAssistant* das);
 MetersPerSecond driving_assistant_get_speed_target(const DrivingAssistant* das);
-bool driving_assistant_get_stop_mode(const DrivingAssistant* das);
-Meters driving_assistant_get_stopping_distance_target(const DrivingAssistant* das);
+bool driving_assistant_get_should_stop_at_intersection(const DrivingAssistant* das);
 CarIndicator driving_assistant_get_merge_intent(const DrivingAssistant* das);
 CarIndicator driving_assistant_get_turn_intent(const DrivingAssistant* das);
-bool driving_assistant_get_follow_mode(const DrivingAssistant* das);
-Meters driving_assistant_get_follow_mode_buffer(const DrivingAssistant* das);
-Seconds driving_assistant_get_follow_mode_thw(const DrivingAssistant* das);
+Seconds driving_assistant_get_thw(const DrivingAssistant* das);
 bool driving_assistant_get_merge_assistance(const DrivingAssistant* das);
 bool driving_assistant_get_aeb_assistance(const DrivingAssistant* das);
 bool driving_assistant_get_aeb_in_progress(const DrivingAssistant* das);
@@ -554,13 +544,10 @@ bool driving_assistant_get_use_linear_speed_control(const DrivingAssistant* das)
 // Setters (will update the timestamp)
 
 void driving_assistant_configure_speed_target(DrivingAssistant* das, const Car* car, const Simulation* sim, MetersPerSecond speed_target);
-void driving_assistant_configure_stop_mode(DrivingAssistant* das, const Car* car, const Simulation* sim, bool stop_mode);
-void driving_assistant_configure_stopping_distance_target(DrivingAssistant* das, const Car* car, const Simulation* sim, Meters stopping_distance_target);
+void driving_assistant_configure_should_stop_at_intersection(DrivingAssistant* das, const Car* car, const Simulation* sim, bool should_stop_at_intersection);
 void driving_assistant_configure_merge_intent(DrivingAssistant* das, const Car* car, const Simulation* sim, CarIndicator merge_intent);
 void driving_assistant_configure_turn_intent(DrivingAssistant* das, const Car* car, const Simulation* sim, CarIndicator turn_intent);
-void driving_assistant_configure_follow_mode(DrivingAssistant* das, const Car* car, const Simulation* sim, bool follow_mode);
-void driving_assistant_configure_follow_mode_buffer(DrivingAssistant* das, const Car* car, const Simulation* sim, Meters follow_mode_buffer);
-void driving_assistant_configure_follow_mode_thw(DrivingAssistant* das, const Car* car, const Simulation* sim, Seconds follow_mode_thw);
+void driving_assistant_configure_thw(DrivingAssistant* das, const Car* car, const Simulation* sim, Seconds thw);
 void driving_assistant_configure_merge_assistance(DrivingAssistant* das, const Car* car, const Simulation* sim, bool merge_assistance);
 void driving_assistant_configure_aeb_assistance(DrivingAssistant* das, const Car* car, const Simulation* sim, bool aeb_assistance);
 void driving_assistant_configure_use_preferred_accel_profile(DrivingAssistant* das, const Car* car, const Simulation* sim, bool use_preferred_accel_profile);

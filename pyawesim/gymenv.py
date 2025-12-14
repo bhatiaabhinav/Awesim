@@ -18,13 +18,8 @@ class AwesimEnv(gym.Env):
     DEFAULT_CRASH_PENALTY = 0.0  # Penalty for crashing
     DEFAULT_RENDER_IP = "127.0.0.1"  # Default IP for rendering server
     TERMINATION_CHECK_INTERVAL = 0.1  # Interval for checking termination conditions (seconds)
-    SPEED_ADJUSTMENT_MPH = 10  # Max speed adjustment per action (±10 mph)
-    FOLLOW_THW_ADJUSTMENT_SECONDS = 1  # Max follow time-headway adjustment (±1 second)
-    MIN_FOLLOW_THW = 0.2  # Minimum follow time-headway (seconds)
-    MAX_FOLLOW_THW = 5.0  # Maximum follow time-headway (seconds)
-    MAX_DISTANCE = 1000.0  # Maximum distance for nearby vehicles (meters)
-    MAX_TTC = 10.0  # Maximum time-to-collision (seconds)
-    MAX_THW = 10.0  # Maximum time-headway (seconds)
+    MIN_THW = 0.2  # Minimum follow time-headway (seconds)
+    MAX_THW = 5.0  # Maximum follow time-headway (seconds)
     COST_GAS_PER_GALLON = 3.2  # Average cost of gas per gallon ($) in US
     COST_LOST_WAGE_PER_HOUR = 30.0  # Average wages per hour ($) in US
     MAY_LOSE_ENTIRE_DAY_WAGE = False  # Lose entire 8-hour workday wage if not reached by the end of sim_duration
@@ -33,7 +28,7 @@ class AwesimEnv(gym.Env):
     DEFAULT_INIT_FUEL_GALLONS = 15.0  # Default initial fuel level in gallons
     DEFAULT_CAM_RESOLUTION = (128, 128)  # Default camera resolution (width, height)
     OBSERVATION_NORMALIZATION = {
-        "speed": A.from_mph(120),  # Normalize speeds by 120 mph
+        "speed": A.from_mph(100),  # Normalize speeds by 100 mph
         "acceleration": 12,  # Normalize accelerations by 12 m/s²
         "distance": 100,  # Normalize distances by 100 meters
         "center": 1000,  # Normalize coordinates by 1000 meters
@@ -47,6 +42,8 @@ class AwesimEnv(gym.Env):
         self,
         cam_resolution: Tuple[int, int] = DEFAULT_CAM_RESOLUTION,
         anti_aliasing: bool = False,
+        reward_shaping: bool = False,
+        reward_shaping_gamma: float = 0.99,
         city_width: int = DEFAULT_CITY_WIDTH,
         goal_lane: Optional[int] = None,
         num_cars: int = DEFAULT_NUM_CARS,
@@ -103,6 +100,8 @@ class AwesimEnv(gym.Env):
         # Environment configuration
         self.cam_resolution = cam_resolution
         self.anti_aliasing = anti_aliasing
+        self.reward_shaping = reward_shaping
+        self.reward_shaping_gamma = reward_shaping_gamma
         self.goal_lane = goal_lane
         self.city_width = city_width
         self.num_cars = num_cars
@@ -142,32 +141,32 @@ class AwesimEnv(gym.Env):
                 A.rgbcam_set_aa_level(cam, 2)  # 2x anti-aliasing
         self.infos_display = A.infos_display_malloc(cam_resolution[0], cam_resolution[1], len(self._get_info_for_info_display()))
         self.minimap = A.minimap_malloc(cam_resolution[0], cam_resolution[1], A.sim_get_map(self.sim))
+        self.goal_lane_midpoint = A.map_get_lane(A.sim_get_map(self.sim), self.goal_lane).mid_point if self.goal_lane is not None else None
+        self.prev_manhat = 0.0  # to be set on first reset
 
         print("seeding rng with ", env_index + 1)
         A.seed_rng(env_index + 1)  # Seed random number generator for reproducibility
 
-        # Define action space. # 5 continuous actions: follow mode vs stop at lane end mode, speed limit, follow mode THW, margin feet (for follow distance buffer (in addition to THW) in follow mode, or stopping margin from end of lane when in stop mode.)
-        follow_mode_probability_low, follow_mode_probability_high = 0.0, 1.0        # normalized to [0, 1] where 0 means always in stop mode at lane end, and 1 means always in follow mode, anything in between probabilistically sets follow mode with that probability
-        speed_target_low, speed_target_high = 0.0, 1.0                              # normalized to [0, 1] where 0 means 0 mph and 1 means agent's top speed
-        follow_mode_thw_low, follow_mode_thw_high = self.MIN_FOLLOW_THW, self.MAX_FOLLOW_THW  # in seconds
-        margin_min, margin_max = A.from_feet(1), A.from_feet(10)                    # in feet, margin for follow distance buffer (in addition to THW) in follow mode, or stopping margin from end of lane when in stop mode.
+        # action space: speed, thw, indicator, stop_at_intersection
+        speed_target_low, speed_target_high = A.from_mph(-20), A.from_mph(100)  # in m/s
+        thw_low, thw_high = self.MIN_THW, self.MAX_THW  # in seconds
         turn_signal_min, turn_signal_max = -1.0, 1.0                                # -1 means left signal, +1 means right signal, 0 means no signal, anything in between means probabilistically choose left / right with probability proportional to magnitude of the value
+        stop_prob_min, stop_prob_max = 0.0, 1.0  # 0 means no stop, 1 means stop at intersection. anything in between means probabilistically choose stop / no stop with probability proportional to magnitude of the value
         self.action_space = spaces.Box(
-            low = np.array([follow_mode_probability_low, speed_target_low, follow_mode_thw_low, margin_min, turn_signal_min], dtype=np.float32),
-            high = np.array([follow_mode_probability_high, speed_target_high, follow_mode_thw_high, margin_max, turn_signal_max], dtype=np.float32),
+            low=np.array([speed_target_low, thw_low, turn_signal_min, stop_prob_min], dtype=np.float32),
+            high=np.array([speed_target_high, thw_high, turn_signal_max, stop_prob_max], dtype=np.float32),
         )
 
         # Define observation space. 9 images: 7 cameras (front main, front wide, front-left, front-right, rear, rear-left, rear-right), one minimap and one image displaying various vehicle, adas and environment state variables. The images are gridified into a single image of shape (9*height, width, 3), then transposed to channels-first format (3, 3*height, 3*width)
         self.observation_space = spaces.Box(
-            low=0, high=255, shape=(3, cam_resolution[1] * 3, cam_resolution[0] * 3), dtype=np.uint8
+            low=0, high=255, shape=(3 * 9, cam_resolution[1], cam_resolution[0]), dtype=np.uint8
         )
 
     def _get_info_for_info_display(self) -> list[Tuple[float, A.RGB]]:
 
         A.situational_awareness_build(self.sim, self.agent.id)
-        das = A.sim_get_driving_assistant(self.sim, 0)
-        sit = A.sim_get_situational_awareness(self.sim, 0)
-    
+        das = A.sim_get_driving_assistant(self.sim, self.agent.id)
+        sit = A.sim_get_situational_awareness(self.sim, self.agent.id)
 
         # car state
         fuel = A.car_get_fuel_level(self.agent) / self.OBSERVATION_NORMALIZATION["fuel"]
@@ -182,33 +181,25 @@ class AwesimEnv(gym.Env):
 
         # ADAS state
         speed_target = das.speed_target / self.OBSERVATION_NORMALIZATION["speed"]
-        follow_thw_target = das.follow_mode_thw / self.MAX_FOLLOW_THW
-        margin_target = max(sit.distance_to_end_of_lane_from_leading_edge - das.stopping_distance_target, 0) / A.from_feet(10) if das.stop_mode else das.follow_mode_buffer / A.from_feet(10)
+        thw_target = das.thw / self.MAX_THW
         merge_intent_left = das.merge_intent == A.INDICATOR_LEFT
         merge_intent_right = das.merge_intent == A.INDICATOR_RIGHT
         turn_intent_left = das.turn_intent == A.INDICATOR_LEFT
         turn_intent_right = das.turn_intent == A.INDICATOR_RIGHT
         intent_left = merge_intent_left or turn_intent_left
         intent_right = merge_intent_right or turn_intent_right
-        stop_mode = das.stop_mode
-        follow_mode = das.follow_mode
+        should_stop_at_intersection = das.should_stop_at_intersection
         aeb_in_progress = das.aeb_in_progress
 
         # environment state
         t = A.sim_get_time(self.sim) / self.OBSERVATION_NORMALIZATION["time"]
         speed_limit = sit.lane.speed_limit / self.OBSERVATION_NORMALIZATION["speed"]
-        
 
         infos_and_colors = [
-            (fuel, A.RGB_WHITE), (speed, A.RGB_BLUE),
-            (abs(accel), A.RGB_GREEN if accel >= 0 else A.RGB_RED),
-            (float(ind_left), A.RGB_RED if ind_turn_left else (A.RGB_ORANGE if ind_merge_left else A.RGB_WHITE)),
-            (float(ind_right), A.RGB_RED if ind_turn_right else (A.RGB_ORANGE if ind_merge_right else A.RGB_WHITE)),
-            (speed_target, A.RGB_MAGENTA), (follow_thw_target, A.RGB_MAGENTA), (margin_target, A.RGB_MAGENTA),
-            (float(intent_left), A.RGB_RED if turn_intent_left else (A.RGB_ORANGE if merge_intent_left else A.RGB_WHITE)),
-            (float(intent_right), A.RGB_RED if turn_intent_right else (A.RGB_ORANGE if merge_intent_right else A.RGB_WHITE)),
-            (float(stop_mode), A.RGB_CYAN), (float(follow_mode), A.RGB_CYAN), (float(aeb_in_progress), A.RGB_RED),
-            (t, A.RGB_WHITE), (speed_limit, A.RGB_WHITE),
+            (fuel, A.RGB_WHITE), (abs(speed), A.RGB_BLUE if speed >= 0 else A.RGB_YELLOW), (abs(accel), A.RGB_GREEN if accel >= 0 else A.RGB_RED),
+            (float(ind_left), A.RGB_RED if ind_turn_left else (A.RGB_ORANGE if ind_merge_left else A.RGB_WHITE)), (float(ind_right), A.RGB_RED if ind_turn_right else (A.RGB_ORANGE if ind_merge_right else A.RGB_WHITE)), (abs(speed_target), A.RGB_MAGENTA if speed_target >= 0 else A.RGB_CYAN),
+            (thw_target, A.RGB_MAGENTA), (float(intent_left), A.RGB_RED if turn_intent_left else (A.RGB_ORANGE if merge_intent_left else A.RGB_WHITE)), (float(intent_right), A.RGB_RED if turn_intent_right else (A.RGB_ORANGE if merge_intent_right else A.RGB_WHITE)),
+            (float(should_stop_at_intersection), A.RGB_CYAN), (float(aeb_in_progress), A.RGB_RED), (t, A.RGB_WHITE), (speed_limit, A.RGB_WHITE),
         ]
 
         return infos_and_colors
@@ -250,10 +241,18 @@ class AwesimEnv(gym.Env):
             self.infos_display.to_numpy(),
         ]
 
+    def _get_manhat_to_goal(self) -> float:
+        cur_pos = A.car_get_center(self.agent)
+        goal_pos = self.goal_lane_midpoint
+        if goal_pos is None:
+            return 0.0
+        return abs(cur_pos.x - goal_pos.x) + abs(cur_pos.y - goal_pos.y)
+
     def _get_observation(self) -> np.ndarray:
         frames_list = self._get_obs_as_list_of_images()
-        gridified = self.gridify(frames_list)
-        return gridified.transpose(2, 0, 1)  # channels first
+        # gridified = self.gridify(frames_list)
+        stacked = np.concatenate(frames_list, axis=-1)  # concatenate along channel dimension
+        return stacked.transpose(2, 0, 1)  # channels first
 
     def _get_reward(self) -> float:
         """
@@ -271,7 +270,7 @@ class AwesimEnv(gym.Env):
         Returns:
             bool: True if a collision occurred, False otherwise.
         """
-        situation = A.sim_get_situational_awareness(self.sim, 0)
+        situation = A.sim_get_situational_awareness(self.sim, self.agent.id)
         for vehicle, distance in [
             (situation.lead_vehicle, situation.distance_to_lead_vehicle),
             (situation.following_vehicle, situation.distance_to_following_vehicle),
@@ -316,6 +315,7 @@ class AwesimEnv(gym.Env):
                 self.sim, self.city_width, self.num_cars, 0.02, A.clock_reading(0, 8, 0, 0), A.WEATHER_SUNNY
             )
             first_reset_done = True
+        self.prev_manhat = self._get_manhat_to_goal()
 
         # Configure simulation settings
         if self.synchronized:
@@ -328,12 +328,6 @@ class AwesimEnv(gym.Env):
         self.agent = A.sim_get_agent_car(self.sim)
         self.das = A.sim_get_driving_assistant(self.sim, self.agent.id)
         A.driving_assistant_reset_settings(self.das, self.agent)
-
-        # Configure ADAS features
-        A.driving_assistant_configure_aeb_assistance(self.das, self.agent, self.sim, True)
-        A.driving_assistant_configure_merge_assistance(self.das, self.agent, self.sim, True)
-        A.driving_assistant_configure_follow_mode(self.das, self.agent, self.sim, False)
-        A.driving_assistant_configure_stop_mode(self.das, self.agent, self.sim, False)
 
         # Configure fuel
         A.car_set_fuel_level(self.agent, A.from_gallons(self.init_fuel_gallons))
@@ -366,86 +360,29 @@ class AwesimEnv(gym.Env):
         A.situational_awareness_build(self.sim, self.agent.id)
         sit = A.sim_get_situational_awareness(self.sim, self.agent.id)
 
-        action_follow_mode_probability = action[0]
-        action_speed_target = action[1]
-        action_follow_mode_thw = action[2]
-        action_margin = action[3]
-        action_turn_signal_probability = action[4]
+        action_speed_target = action[0]
+        action_thw_target = action[1]
+        action_turn_signal_probability = action[2]
+        action_stop_at_intersection_probability = action[3]
 
+        # Speed adjustment simplified logic:
+        # do not allow backing up the car deliberately. If the agent is trying to set it to a negative value, we interpret that as the probability of using linear speed control (braking harder), and clip the target speed to 0. This applies even if the current speed is negative for some reason. Negative target speed always means braking harder.
+        speed_target = float(action_speed_target)
+        linear = False
+        if speed_target < 0:
+            linear_control_probability = abs(speed_target) / A.from_mph(15)
+            linear = linear_control_probability > 0.5 if self.deterministic_actions else self.np_random.random() < linear_control_probability
+            speed_target = 0
+        A.driving_assistant_configure_use_linear_speed_control(self.das, self.agent, self.sim, linear)
+        A.driving_assistant_configure_speed_target(self.das, self.agent, self.sim, A.mps(speed_target))
 
+        # Follow mode time-headway adjustment
+        new_thw_target = float(action_thw_target)
+        A.driving_assistant_configure_thw(self.das, self.agent, self.sim, A.seconds(new_thw_target))
 
-        # decide mode.
-        follow_mode = action_follow_mode_probability > 0.5 if self.deterministic_actions else self.np_random.random() < action_follow_mode_probability
-        stop_mode = not follow_mode
-        if (stop_mode):
-            # if there is no intersection or dead end upcoming, then stay in follow mode
-            if not (sit.is_an_intersection_upcoming or sit.is_on_intersection or sit.is_approaching_dead_end or sit.is_on_entry_ramp):
-                follow_mode = True
-                stop_mode = False
-            # if there is a lead vehicle, then stay in follow mode
-            if sit.is_vehicle_ahead:
-                follow_mode = True
-                stop_mode = False
-            # cannot do stop mode if we are reversing
-            if A.car_get_speed(self.agent) < 0:
-                follow_mode = True
-                stop_mode = False
-
-        # if (sit.is_an_intersection_upcoming or sit.is_approaching_dead_end or sit.is_on_entry_ramp) and A.car_get_speed(self.agent) > 0 and not sit.is_vehicle_ahead:
-        #     stop_mode = True
-        #     follow_mode = not stop_mode
-
-        # set the mode settings, then enable the mode in ADAS
-
-        if follow_mode:
-
-            # disable stop mode if it was previously enabled
-            A.driving_assistant_configure_stop_mode(self.das, self.agent, self.sim, False)
-
-            # Speed adjustment
-            speed_target = float(action_speed_target) * self.agent.capabilities.top_speed
-            A.driving_assistant_configure_speed_target(self.das, self.agent, self.sim, A.mps(speed_target))
-
-            # Follow mode time-headway adjustment
-            new_follow_thw = float(action_follow_mode_thw)
-            A.driving_assistant_configure_follow_mode_thw(self.das, self.agent, self.sim, A.seconds(new_follow_thw))
-
-            # Follow mode margin:
-            new_margin = float(action_margin + 1e-8)
-            A.driving_assistant_configure_follow_mode_buffer(self.das, self.agent, self.sim, new_margin)
-            # Set stopping distance target to 0 since it is unused in follow mode
-            A.driving_assistant_configure_stopping_distance_target(self.das, self.agent, self.sim, 0.0)
-
-            # set follow mode
-            A.driving_assistant_configure_follow_mode(self.das, self.agent, self.sim, True)
-
-        else:   # stop mode
-
-            # disable follow mode if it was previously enabled
-            A.driving_assistant_configure_follow_mode(self.das, self.agent, self.sim, False)
-
-            # speed adjustment. Has to be 0.
-            speed_target = 0.0
-            A.driving_assistant_configure_speed_target(self.das, self.agent, self.sim, A.mps(speed_target))
-
-            # follow mode time-headway adjustment. Has no effect in stop mode, but still, since it is used for deciding merge safety, it should be set.
-            new_follow_thw = float(action_follow_mode_thw)
-            A.driving_assistant_configure_follow_mode_thw(self.das, self.agent, self.sim, A.seconds(new_follow_thw))
-
-            # decide stopping distance based on margin from end of lane.
-            new_margin = float(action_margin)
-            stopping_distance = sit.distance_to_end_of_lane_from_leading_edge - new_margin
-            # if we are already past the stopping point, then set stopping distance to 0 so that we stop immediately
-            if stopping_distance < 0:
-                stopping_distance = 0.0
-                new_margin = sit.distance_to_end_of_lane_from_leading_edge - stopping_distance
-                new_margin = max(new_margin, 0.0)  # just in case. Happens when we are already past the end of lane and the margin is negative because we measured from leading edge
-            A.driving_assistant_configure_stopping_distance_target(self.das, self.agent, self.sim, stopping_distance)
-            # set follow mode buffer to a default value, since it is still used for deciding merge safety
-            A.driving_assistant_configure_follow_mode_buffer(self.das, self.agent, self.sim, A.from_feet(3))
-
-            # set stop mode
-            A.driving_assistant_configure_stop_mode(self.das, self.agent, self.sim, True)
+        # set stop at intersection
+        should_stop_at_intersection = abs(action_stop_at_intersection_probability) > 0.5 if self.deterministic_actions else self.np_random.random() < abs(action_stop_at_intersection_probability)
+        A.driving_assistant_configure_should_stop_at_intersection(self.das, self.agent, self.sim, bool(should_stop_at_intersection))
 
         # Merge/turn intent
         should_indicate = abs(action_turn_signal_probability) > 0.5 if self.deterministic_actions else self.np_random.random() < abs(action_turn_signal_probability)
@@ -484,12 +421,11 @@ class AwesimEnv(gym.Env):
 
         if self.verbose:
             print(
-                f"Mode: {'Follow' if follow_mode else 'Stop'}, "
                 f"Action: Speed cap: {A.to_mph(speed_target):.1f} mph (cur = {A.to_mph(A.car_get_speed(self.agent)):.1f} mph), "
-                f"Follow THW: {new_follow_thw:.2f} sec, "
-                f"Margin buffer: {A.to_feet(new_margin):.1f} ft (cur = {A.to_feet(sit.distance_to_end_of_lane_from_leading_edge if stop_mode else np.nan):.1f} ft), "
+                f"THW: {new_thw_target:.2f} sec, "
                 f"{'Merge' if new_merge_intent != A.INDICATOR_NONE else 'Turn' if new_turn_intent != A.INDICATOR_NONE else 'No'} "
                 f"{'Left' if new_merge_intent == A.INDICATOR_LEFT or new_turn_intent == A.INDICATOR_LEFT else 'Right' if new_merge_intent == A.INDICATOR_RIGHT or new_turn_intent == A.INDICATOR_RIGHT else ''}, "
+                f"{'Stop at intersection (if upcoming)' if should_stop_at_intersection else 'No stop at intersection'}"
             )
 
         # Simulate and compute reward
@@ -524,6 +460,17 @@ class AwesimEnv(gym.Env):
                     crashed_on_intersection = True
             if reached_goal:
                 reward += self.goal_reward
+        terminated = crashed or reached_goal or out_of_fuel or timeout
+
+        # shaped reward if goal lane is specified: reward for reducing manhat distance to goal
+        if self.goal_lane is not None and self.reward_shaping:
+            prev_potential = -self.prev_manhat / self.city_width
+            new_potential = -self._get_manhat_to_goal() / self.city_width
+            if reached_goal:
+                new_potential = 0.0  # zero it out since we consider even entering the correct lane as reaching the goal (which is not always 0 manhat distance to the center of the lane)
+            shaped_reward = self.reward_shaping_gamma * new_potential - prev_potential
+            reward += shaped_reward
+            self.prev_manhat = self._get_manhat_to_goal()
 
         fuel_final = A.car_get_fuel_level(self.agent)
         fuel_consumed = fuel_initial - fuel_final
@@ -580,7 +527,6 @@ class AwesimEnv(gym.Env):
         self.steps += 1
         self.synchronized_sim_speedup = self.sim.simulation_speedup  # record this so that we preserve it across resets if it was modified through GUI during the episode
 
-        terminated = crashed or reached_goal or out_of_fuel or timeout
         truncated = False
         return obs, reward, terminated, truncated, info
 
@@ -590,6 +536,10 @@ class AwesimEnv(gym.Env):
         """
         A.sim_disconnect_from_render_server(self.sim)
         A.sim_free(self.sim)
+        for cam in self.cams:
+            A.rgbcam_free(cam)
+        A.infos_display_free(self.infos_display)
+        A.minimap_free(self.minimap)
         super().close()
 
     def render(self) -> np.ndarray:

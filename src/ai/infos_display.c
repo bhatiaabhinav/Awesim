@@ -47,7 +47,7 @@ void infos_display_set_info(InfosDisplay* display, int info_index, double value)
     if (!display) return;
     if (info_index < 0 || info_index >= display->num_infos) return;
     if (value < 0.0 || value > 1.0) {
-        LOG_WARN("InfosDisplay: info value out of range [0.0, 1.0]: %f. Clamping.", value);
+        LOG_WARN("InfosDisplay: info value out of range [0.0, 1.0]: %f at index %d. Clamping.", value, info_index);
         value = (value < 0.0) ? 0.0 : 1.0;
     }
     display->info_data[info_index] = value;

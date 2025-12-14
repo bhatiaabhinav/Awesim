@@ -365,9 +365,9 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
         // If FOLLOW is enabled and there is car ahead and speed target is higher than the lead car's speed, print that in green light color, else set alpha to low value.
         if (das) {
             char follow_str[32];
-            snprintf(follow_str, sizeof(follow_str), " Follow:   %.1f s + %.1f ft", das->follow_mode_thw, to_feet(das->follow_mode_buffer));
+            snprintf(follow_str, sizeof(follow_str), " Follow:   %.1f s + %.1f ft", das->thw, to_feet(DRIVING_ASSISTANT_BUFFER_M));
             Uint8 r = GREEN_LIGHT_COLOR.r, g = GREEN_LIGHT_COLOR.g, b = GREEN_LIGHT_COLOR.b;
-            Uint8 alpha = das->follow_mode && sit->lead_vehicle && das->speed_target > sit->lead_vehicle->speed ? 255 : 64;
+            Uint8 alpha = sit->lead_vehicle && das->speed_target > sit->lead_vehicle->speed ? 255 : 64;
             render_text(renderer, follow_str, 10, 100 + 7 * hud_font_size, r, g, b, alpha,
                         hud_font_size, ALIGN_TOP_LEFT, false, NULL);
         }
@@ -375,9 +375,9 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
         // If STOP is enabled, print that in red light color, else set alpha to low value.
         if (das) {
             char stop_str[32];
-            snprintf(stop_str, sizeof(stop_str), " Stop:      %.1f ft", to_feet(das->stopping_distance_target));
+            snprintf(stop_str, sizeof(stop_str), " Stop");
             Uint8 r = RED_LIGHT_COLOR.r, g = RED_LIGHT_COLOR.g, b = RED_LIGHT_COLOR.b;
-            Uint8 alpha = das->stop_mode ? 255 : 64;
+            Uint8 alpha = das->should_stop_at_intersection ? 255 : 64;
             render_text(renderer, stop_str, 10, 110 + 8 * hud_font_size, r, g, b, alpha,
                         hud_font_size, ALIGN_TOP_LEFT, false, NULL);
         }
