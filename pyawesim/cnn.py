@@ -2,12 +2,12 @@ import torch.nn as nn
 
 
 class SimpleCNN(nn.Module):
-    def __init__(self, hidden_dim: int, c_base: int = 32):
+    def __init__(self, hidden_dim: int, c_in = 3, c_base: int = 32):
         super().__init__()
 
         self.net = nn.Sequential(
             # 128x128 -> 64x64
-            nn.Conv2d(3, c_base, kernel_size=5,
+            nn.Conv2d(c_in, c_base, kernel_size=5,
                       stride=2, padding=2),
             nn.ReLU(inplace=True),
 
@@ -41,13 +41,13 @@ class SimpleCNN(nn.Module):
 
 
 class MinimalRLConv128(nn.Module):
-    def __init__(self, hidden_dim: int, c_base=32):
+    def __init__(self, hidden_dim: int, c_in = 3, c_base=32):
         super().__init__()
         c2, c3, c4 = 2 * c_base, 2 * c_base, 4 * c_base  # 32,64,64,128 if c1=32
 
         self.net = nn.Sequential(
             # 128 -> 64
-            nn.Conv2d(3, c_base, kernel_size=5, stride=2, padding=2),
+            nn.Conv2d(c_in, c_base, kernel_size=5, stride=2, padding=2),
             nn.ReLU(inplace=True),
 
             # 64 -> 32
@@ -85,12 +85,12 @@ def make_very_simple_downsamplingconv(c_in, c_out):
 
 
 class SimpleCNNWith3x3DownsamplingPairs(nn.Module):
-    def __init__(self, hidden_dim: int, c_base: int = 32):
+    def __init__(self, hidden_dim: int, c_in = 3, c_base: int = 32):
         super().__init__()
 
         self.net = nn.Sequential(
             # 128x128 -> 64x64
-            make_very_simple_downsamplingconv(3, c_base),
+            make_very_simple_downsamplingconv(c_in, c_base),
 
             # 64x64 -> 32x32
             make_very_simple_downsamplingconv(c_base, c_base * 2),
