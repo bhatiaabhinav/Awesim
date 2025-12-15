@@ -4,11 +4,10 @@ import sys
 import gymnasium
 import numpy as np
 import torch
-import torch.nn as nn
 from gymenv import AwesimEnv
-from gymenv_utils import VisionEncoder384, LiteVisionEncoder384
 from ppo import Actor
 from gymnasium.vector import SyncVectorEnv, AsyncVectorEnv, AutoresetMode
+from train import ModelArchitecture
 
 TEST_CONFIG = {
     "speedup": 8.0,                     # simulation speedup factor
@@ -35,16 +34,21 @@ ENV_CONFIG = {
     "may_lose_entire_day_wage": False,  # lose entire 8-hour workday wage if not reached by the end of sim_duration
     "init_fuel_gallons": 3.0,           # initial fuel in gallons -- 1/4th of a 12-gallon tank car
     "goal_reward": 1.0,                 # A small positive number to incentivize reaching the goal
-    "deterministic_actions": True,      # If True, actions to select follow-mode vs stop-mode and turn/merge signals are deterministic instead of bernoulli-sampled
+    "reward_shaping": False,
+    "deterministic_actions": True,
 }
 VEC_ENV_CONFIG = {
     "n_envs": 8,
     "async": True,
 }
+NET_CONFIG = {
+    "hidden_dim_per_image": 128,
+    "hidden_dim": 512,
+    "c_base": 32,
+    "cnn_type": "simple",
+}
 POLICY_CONFIG = {
     "norm_obs": True,
-    "hidden_dims": 512,
-    "lite": False,
     "state_dependent_std": True,
     "deterministic": True,
 }
@@ -67,9 +71,13 @@ def test_model(model_path) -> None:
     obs_dim = env.observation_space.shape[0]   # type: ignore
     action_dim = env.action_space.shape[0]     # type: ignore
 
-    VisionEncoder = LiteVisionEncoder384 if POLICY_CONFIG["lite"] else VisionEncoder384
-    actor_model = nn.Sequential(VisionEncoder(POLICY_CONFIG["hidden_dims"]), nn.Flatten(), nn.Linear(POLICY_CONFIG["hidden_dims"], 2 * action_dim if POLICY_CONFIG["state_dependent_std"] else action_dim))
+    actor_dim_out = action_dim * 2 if POLICY_CONFIG["state_dependent_std"] else action_dim
+    actor_model = ModelArchitecture(dim_out=actor_dim_out, **NET_CONFIG)
+    
     actor = Actor(actor_model, env.observation_space, env.action_space, deterministic=POLICY_CONFIG["deterministic"], norm_obs=POLICY_CONFIG["norm_obs"], state_dependent_std=POLICY_CONFIG["state_dependent_std"])    # type: ignore
+    
+    # Load the model
+    print(f"Loading model from {model_path}")
     actor.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
 
     if TEST_CONFIG["parallel"]:
@@ -105,14 +113,23 @@ if __name__ == "__main__":
             if k in TEST_CONFIG:
                 TEST_CONFIG[k] = v
                 found_key = True
-            if k in ENV_CONFIG:
+            elif k in ENV_CONFIG:
                 ENV_CONFIG[k] = v
                 found_key = True
-            if k in POLICY_CONFIG:
-                POLICY_CONFIG[k] = v
+            elif k in NET_CONFIG:
+                NET_CONFIG[k] = v
                 found_key = True
+            elif k in POLICY_CONFIG:
+                POLICY_CONFIG[k] = v    # type: ignore
+                found_key = True
+            
             if not found_key:
                 # print in yellow color
                 print(f"\033[93mWarning: key {k} not found in any config, ignoring the override.\033[0m")
 
-    test_model(sys.argv[1])
+    if len(sys.argv) < 2 or "=" in sys.argv[1]:
+        print("Usage: python test.py <model_path> [key=value ...]")
+        sys.exit(1)
+
+    model_path = sys.argv[1]
+    test_model(model_path)
