@@ -17,7 +17,7 @@ from ppo import Actor, ActorBase, Critic, PPO
 
 class ModelArchitecture(nn.Module):
 
-    def __init__(self, hidden_dim_per_image, hidden_dim: int, dim_out: int, c_base: int = 32, num_images: int = 9, cnn_type="minimal"):
+    def __init__(self, hidden_dim_per_image, hidden_dim: int, dim_out: int,  c_in = 3, c_base: int = 32, num_images: int = 9, cnn_type="minimal"):
         net_name_to_class = {
             "simple": SimpleCNN,
             "minimal": MinimalRLConv128,
@@ -28,18 +28,20 @@ class ModelArchitecture(nn.Module):
         self.hidden_dim_per_image = hidden_dim_per_image
         self.hidden_dim = hidden_dim
         self.num_images = num_images
-        self.cnns = nn.ModuleList([CNN(hidden_dim_per_image, c_base=c_base) for _ in range(num_images)])
+        self.c_in = c_in
+        self.cnns = nn.ModuleList([CNN(hidden_dim_per_image, c_in=c_in, c_base=c_base) for _ in range(num_images)])
         self.hidden_fc = nn.Linear(num_images * hidden_dim_per_image, hidden_dim)
         self.relu = nn.ReLU()
         self.final_fc = nn.Linear(hidden_dim, dim_out)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        assert x.shape[1:4] == (3 * self.num_images, 128, 128), f"Expected input shape (3 * {self.num_images}, 128, 128), but got {x.shape}"
-        cnn_outputs = torch.zeros((x.shape[0], self.num_images * self.hidden_dim_per_image), device=x.device)  # (B, num_images * hidden_dim)
+        assert x.shape[1:] == (self.num_images, self.c_in, 128, 128), f"Expected input shape ({x.shape[0]}, {self.num_images}, {self.c_in}, 128, 128), but got {x.shape}"
+        cnn_outputs = torch.zeros((x.shape[0], self.num_images, self.hidden_dim_per_image), device=x.device)  # (B, num_images, hidden_dim)
         for i, cnn in enumerate(self.cnns):
-            x_i = x[:, i * 3:(i + 1) * 3, :, :]         # (B, 3, H, W)
+            x_i = x[:, i, :, :, :]                      # (B, c_in, 128, 128)
             y_i = cnn(x_i)                              # (B, hidden_dim)
-            cnn_outputs[:, i * self.hidden_dim_per_image:(i + 1) * self.hidden_dim_per_image] = y_i     # (B, hidden_dim)
+            cnn_outputs[:, i, :] = y_i                  # (B, hidden_dim)
+        cnn_outputs = cnn_outputs.view(x.shape[0], -1)  # (B, num_images * hidden_dim)
         x = self.hidden_fc(cnn_outputs)                 # (B, hidden_dim)
         x = self.relu(x)                                # (B, hidden_dim)
         x = self.final_fc(x)                            # (B, dim_out)
@@ -55,6 +57,7 @@ WANDB_CONFIG = {
 }
 ENV_CONFIG = {
     "cam_resolution": (128, 128),       # width, height
+    "framestack": 4,
     "anti_aliasing": True,
     "goal_lane": 84,
     "city_width": 1000,                 # in meters
@@ -98,7 +101,6 @@ PPO_CONFIG = {
     "inference_device": "cuda" if torch.cuda.is_available() else "cpu",
     "verbose": False
 }
-ENV_CONFIG["reward_shaping_gamma"] = PPO_CONFIG["gamma"]
 NET_CONFIG = {
     "hidden_dim_per_image": 128,
     "hidden_dim": 512,
@@ -125,6 +127,9 @@ def setup_training_env() -> VectorEnv:
 
 def train_model() -> Tuple[ActorBase, Critic, PPO]:
     """Train the PPO model with the specified configuration."""
+
+    ENV_CONFIG["reward_shaping_gamma"] = PPO_CONFIG["gamma"]
+    NET_CONFIG["c_in"] = ENV_CONFIG["framestack"] * 3
 
     vec_env = setup_training_env()
 

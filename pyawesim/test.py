@@ -21,6 +21,7 @@ TEST_CONFIG = {
 }
 ENV_CONFIG = {
     "cam_resolution": (128, 128),       # width, height
+    "framestack": 4,
     "anti_aliasing": True,
     "goal_lane": 84,
     "city_width": 1000,                 # in meters
@@ -35,6 +36,7 @@ ENV_CONFIG = {
     "init_fuel_gallons": 3.0,           # initial fuel in gallons -- 1/4th of a 12-gallon tank car
     "goal_reward": 1.0,                 # A small positive number to incentivize reaching the goal
     "reward_shaping": False,
+    "reward_shaping_gamma": 0.999,
     "deterministic_actions": True,
 }
 VEC_ENV_CONFIG = {
@@ -60,6 +62,7 @@ def make_env(env_index: int = 0) -> AwesimEnv:
 
 
 def test_model(model_path) -> None:
+    NET_CONFIG["c_in"] = ENV_CONFIG["framestack"] * 3
 
     env = make_env(0)
     env.should_render = TEST_CONFIG["render"]

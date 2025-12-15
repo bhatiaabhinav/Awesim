@@ -1,23 +1,23 @@
 from typing import Any, Optional, Tuple, Dict
+from collections import deque
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 import bindings as A
-from gymenv_utils import direction_onehot, indicator_onehot
 
 
 class AwesimEnv(gym.Env):
     # Constants
     DEFAULT_CITY_WIDTH = 1000  # City width in meters
     DEFAULT_NUM_CARS = 256  # Number of vehicles in the simulation
-    DEFAULT_DECISION_INTERVAL = 0.1  # Time between agent decisions (seconds)
+    DEFAULT_DECISION_INTERVAL = 1.0  # Time between agent decisions (seconds)
     DEFAULT_SIM_DURATION = 60 * 60  # Simulation duration (seconds, default 1 hour)
     DEFAULT_APPOINTMENT_TIME = 60 * 30  # Default appointment time (seconds, 30 minutes)
     DEFAULT_TIME_PENALTY = 0.0  # Penalty per second for time spent
     DEFAULT_GOAL_REWARD = 1.0  # Reward for reaching the goal lane
     DEFAULT_CRASH_PENALTY = 0.0  # Penalty for crashing
     DEFAULT_RENDER_IP = "127.0.0.1"  # Default IP for rendering server
-    TERMINATION_CHECK_INTERVAL = 0.1  # Interval for checking termination conditions (seconds)
+    TERMINATION_CHECK_INTERVAL = 0.1  # Interval for checking termination conditions (seconds). Also, the frequency with which camera frames are captured
     MIN_THW = 0.2  # Minimum follow time-headway (seconds)
     MAX_THW = 5.0  # Maximum follow time-headway (seconds)
     COST_GAS_PER_GALLON = 3.2  # Average cost of gas per gallon ($) in US
@@ -44,6 +44,7 @@ class AwesimEnv(gym.Env):
         anti_aliasing: bool = False,
         reward_shaping: bool = False,
         reward_shaping_gamma: float = 0.99,
+        framestack: int = 4,
         city_width: int = DEFAULT_CITY_WIDTH,
         goal_lane: Optional[int] = None,
         num_cars: int = DEFAULT_NUM_CARS,
@@ -102,6 +103,7 @@ class AwesimEnv(gym.Env):
         self.anti_aliasing = anti_aliasing
         self.reward_shaping = reward_shaping
         self.reward_shaping_gamma = reward_shaping_gamma
+        self.framestack = framestack
         self.goal_lane = goal_lane
         self.city_width = city_width
         self.num_cars = num_cars
@@ -158,9 +160,11 @@ class AwesimEnv(gym.Env):
             high=np.array([speed_target_high, thw_high, turn_signal_max, stop_prob_max], dtype=np.float32),
         )
 
-        # Define observation space. 9 images: 7 cameras (front main, front wide, front-left, front-right, rear, rear-left, rear-right), one minimap and one image displaying various vehicle, adas and environment state variables. The images are gridified into a single image of shape (9*height, width, 3), then transposed to channels-first format (3, 3*height, 3*width)
+        # Define observation space. 9 images: 7 cameras (front main, front wide, front-left, front-right, rear, rear-left, rear-right), one minimap and one image displaying various vehicle, adas and environment state variables.
+        # The images are stacked along the channel dimension for each camera, and then stacked along a new axis for each camera.
+        # Final shape: (9, 3 * framestack, height, width)
         self.observation_space = spaces.Box(
-            low=0, high=255, shape=(3 * 9, cam_resolution[1], cam_resolution[0]), dtype=np.uint8
+            low=0, high=255, shape=(9, 3 * framestack, cam_resolution[1], cam_resolution[0]), dtype=np.uint8
         )
 
     def _get_info_for_info_display(self) -> list[Tuple[float, A.RGB]]:
@@ -250,10 +254,24 @@ class AwesimEnv(gym.Env):
         return abs(cur_pos.x - goal_pos.x) + abs(cur_pos.y - goal_pos.y)
 
     def _get_observation(self) -> np.ndarray:
-        frames_list = self._get_obs_as_list_of_images()
-        # gridified = self.gridify(frames_list)
-        stacked = np.concatenate(frames_list, axis=-1)  # concatenate along channel dimension
-        return stacked.transpose(2, 0, 1)  # channels first
+        # self.frame_buffer contains `framestack` elements.
+        # Each element is a list of 9 arrays of shape (3, H, W).
+        # We want (9, 3 * framestack, H, W).
+
+        buffer_list = list(self.frame_buffer)
+        num_cams = 9
+
+        final_obs = []
+        for cam_idx in range(num_cams):
+            # Collect frames for this camera
+            cam_frames = [step_obs[cam_idx]
+                          for step_obs in buffer_list]  # List of (3, H, W)
+            # Concatenate along channel dimension (axis 0)
+            stacked_cam = np.concatenate(
+                cam_frames, axis=0)  # (3 * framestack, H, W)
+            final_obs.append(stacked_cam)
+
+        return np.stack(final_obs, axis=0)  # (9, 3 * framestack, H, W)
 
     def _get_reward(self) -> float:
         """
@@ -319,6 +337,18 @@ class AwesimEnv(gym.Env):
             A.sim_connect_to_render_server(self.sim, self.render_server_ip, 4242)
 
         A.sim_set_agent_enabled(self.sim, True)
+        # Initialize frame buffer
+        self.frame_buffer = deque(maxlen=self.framestack)
+
+        # Capture initial observation
+        initial_frames = self._get_obs_as_list_of_images()
+        processed_frames = [f.transpose(2, 0, 1).copy()
+                            for f in initial_frames]  # (3, H, W)
+        
+        # Fill with initial frame
+        for _ in range(self.framestack):
+            self.frame_buffer.append(processed_frames)
+
         A.sim_set_agent_driving_assistant_enabled(self.sim, True)
         self.agent = A.sim_get_agent_car(self.sim)
         self.das = A.sim_get_driving_assistant(self.sim, self.agent.id)
@@ -439,6 +469,14 @@ class AwesimEnv(gym.Env):
             delta_time = min(self.TERMINATION_CHECK_INTERVAL, self.decision_interval - elapsed_time)    # make sure you don't end up simulating more than decision_interval if it is not a multiple of TERMINATION_CHECK_INTERVAL
             t0 = A.sim_get_time(self.sim)
             A.simulate(self.sim, delta_time)  # Advance simulation
+
+            # Capture observation for framestacking
+            current_frames = self._get_obs_as_list_of_images()
+            processed_frames = [f.transpose(2, 0, 1).copy()
+                                for f in current_frames]
+            self.frame_buffer.append(processed_frames)
+
+            
             delta_time = A.sim_get_time(self.sim) - t0  # true delta time (since it is not guaranteed that sim would have simulated exactly for delta_time if it is not a multiple of dt.)
             elapsed_time = A.sim_get_time(self.sim) - sim_time_initial
             A.situational_awareness_build(self.sim, self.agent.id)
