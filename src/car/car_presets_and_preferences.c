@@ -105,3 +105,37 @@ Dimensions3D car_dimensions_get_random_preset(void) {
     return dims[rand_int(count)];
 }
 
+
+void car_dimensions_and_acc_profile_get_random_realistic_preset(Dimensions3D *dims, CarAccelProfile *profile) {
+    const struct {
+        Dimensions3D dims;
+        CarAccelProfile profile;
+    } realistic_presets[] = {
+        // Compacts & Economy
+        {CAR_SIZE_COMPACT, CAR_ACC_PROFILE_GAS_SEDAN},      // Economy compact
+        {CAR_SIZE_COMPACT, CAR_ACC_PROFILE_ELECTRIC_SEDAN}, // Electric compact
+        {CAR_SIZE_COMPACT, CAR_ACC_PROFILE_SPORTS_CAR},     // Sports coupe / Hot hatch
+
+        // Sedans (Typical to Fullsize)
+        {CAR_SIZE_TYPICAL, CAR_ACC_PROFILE_GAS_SEDAN},
+        {CAR_SIZE_TYPICAL, CAR_ACC_PROFILE_ELECTRIC_SEDAN},
+        {CAR_SIZE_MIDSIZE, CAR_ACC_PROFILE_GAS_SEDAN},
+        {CAR_SIZE_MIDSIZE, CAR_ACC_PROFILE_ELECTRIC_SEDAN},
+        {CAR_SIZE_FULLSIZE, CAR_ACC_PROFILE_GAS_SEDAN},
+        {CAR_SIZE_FULLSIZE, CAR_ACC_PROFILE_SPORTS_CAR},    // Muscle car / Performance sedan
+
+        // SUVs & Crossovers
+        {CAR_SIZE_COMPACT_SUV, CAR_ACC_PROFILE_SUV},
+        {CAR_SIZE_COMPACT_SUV, CAR_ACC_PROFILE_ELECTRIC_SEDAN}, // Electric Crossover
+        {CAR_SIZE_LARGE_SUV, CAR_ACC_PROFILE_SUV},
+        {CAR_SIZE_LARGE_SUV, CAR_ACC_PROFILE_TRUCK},        // Large Truck-based SUV
+
+        // Trucks
+        {CAR_SIZE_PICKUP, CAR_ACC_PROFILE_TRUCK},
+        {CAR_SIZE_PICKUP, CAR_ACC_PROFILE_HEAVY_TRUCK},     // Heavy duty pickup
+    };
+    size_t count = sizeof(realistic_presets) / sizeof(realistic_presets[0]);
+    int idx = rand_int(count);
+    *dims = realistic_presets[idx].dims;
+    *profile = realistic_presets[idx].profile;
+}

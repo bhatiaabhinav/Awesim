@@ -9,7 +9,7 @@ if not exist bin mkdir bin
 clang ^
     -O3 -flto -funroll-loops -Iinclude ^
     -D_WIN32_WINNT=0x0A00 ^
-    src/benchmark.c src/utils/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c ^
+    src/benchmark.c src/utils/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c src/bad/*.c ^
     -o .\bin\benchmark.exe ^
     -lm -lws2_32 ^
     -Wall -Wunused-variable

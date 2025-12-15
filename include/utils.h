@@ -247,6 +247,17 @@ Radians from_degrees(Degrees theta);
 Degrees to_degrees(Radians theta);
 
 
+
+// A 2D rectangle with a center point, width, length, and rotation angle.
+typedef struct RotatedRect2D {
+    Coordinates center;
+    Dimensions dimensions;  // width (x) and length (y)
+    Radians rotation;
+} RotatedRect2D;
+
+bool rotated_rects_intersect(RotatedRect2D rect1, RotatedRect2D rect2);
+
+
 //
 // Distance conversion functions
 //

@@ -15,7 +15,7 @@ fi
 clang \
     -O3 -flto -funroll-loops \
     -Iinclude \
-    src/benchmark.c src/utils/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c \
+    src/benchmark.c src/utils/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c src/bad/*.c \
     -o ./bin/benchmark \
     -lm \
     -Wall -Wunused-variable

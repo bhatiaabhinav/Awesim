@@ -262,3 +262,100 @@ Direction direction_opposite(Direction direction) {
             exit(EXIT_FAILURE);
     }
 }
+
+//
+// Rotated Rectangle Intersection
+//
+
+static void get_rect_axes(RotatedRect2D rect, Vec2D axes[2]) {
+    // Optimize: compute cos/sin once
+    double c = cos(rect.rotation);
+    double s = sin(rect.rotation);
+    
+    // Axis 1: along the width (local x-axis) rotated (1, 0) -> (c, s)
+    axes[0] = (Vec2D){c, s};
+    // Axis 2: along the length (local y-axis) rotated (0, 1) -> (-s, c)
+    axes[1] = (Vec2D){-s, c};
+}
+
+static void get_rect_corners(RotatedRect2D rect, Vec2D axes[2], Vec2D corners[4]) {
+    double hw = rect.dimensions.x / 2.0;
+    double hl = rect.dimensions.y / 2.0;
+    
+    Vec2D dx = vec_scale(axes[0], hw);
+    Vec2D dy = vec_scale(axes[1], hl);
+    
+    // TR: center + dx + dy
+    corners[0] = vec_add(rect.center, vec_add(dx, dy));
+    // TL: center - dx + dy
+    corners[1] = vec_add(rect.center, vec_sub(dy, dx));
+    // BL: center - dx - dy
+    corners[2] = vec_sub(rect.center, vec_add(dx, dy));
+    // BR: center + dx - dy
+    corners[3] = vec_sub(rect.center, vec_sub(dy, dx));
+}
+
+static void project_rect(Vec2D axis, Vec2D corners[4], double* min, double* max) {
+    double dot = vec_dot(axis, corners[0]);
+    *min = dot;
+    *max = dot;
+    for (int i = 1; i < 4; i++) {
+        dot = vec_dot(axis, corners[i]);
+        if (dot < *min) *min = dot;
+        if (dot > *max) *max = dot;
+    }
+}
+
+bool rotated_rects_intersect(RotatedRect2D rect1, RotatedRect2D rect2) {
+
+    // Preliminary AABB Check
+
+    Vec2D axes1[2];
+    Vec2D axes2[2];
+    get_rect_axes(rect1, axes1);
+    get_rect_axes(rect2, axes2);
+    
+    // Calculate half-extents for AABB
+    double w1_half = rect1.dimensions.x / 2.0;
+    double h1_half = rect1.dimensions.y / 2.0;
+    double ext1_x = w1_half * fabs(axes1[0].x) + h1_half * fabs(axes1[1].x);
+    double ext1_y = w1_half * fabs(axes1[0].y) + h1_half * fabs(axes1[1].y);
+
+    double w2_half = rect2.dimensions.x / 2.0;
+    double h2_half = rect2.dimensions.y / 2.0;
+    double ext2_x = w2_half * fabs(axes2[0].x) + h2_half * fabs(axes2[1].x);
+    double ext2_y = w2_half * fabs(axes2[0].y) + h2_half * fabs(axes2[1].y);
+
+    // Check AABB overlap
+    if (fabs(rect1.center.x - rect2.center.x) > (ext1_x + ext2_x) ||
+        fabs(rect1.center.y - rect2.center.y) > (ext1_y + ext2_y)) {
+        return false;
+    }
+
+    // SAT Check
+    Vec2D corners1[4];
+    Vec2D corners2[4];
+    get_rect_corners(rect1, axes1, corners1);
+    get_rect_corners(rect2, axes2, corners2);
+    
+    Vec2D axes[4];
+    axes[0] = axes1[0];
+    axes[1] = axes1[1];
+    axes[2] = axes2[0];
+    axes[3] = axes2[1];
+
+    
+    // Check for overlap on all 4 axes
+    for (int i = 0; i < 4; i++) {
+        double min1, max1, min2, max2;
+        project_rect(axes[i], corners1, &min1, &max1);
+        project_rect(axes[i], corners2, &min2, &max2);
+        
+        if (max1 < min2 || max2 < min1) {
+            return false; // Separating axis found
+        }
+    }
+    
+    return true;
+}
+

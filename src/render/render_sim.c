@@ -1,5 +1,6 @@
 #include "utils.h"
 #include "render.h"
+#include "bad.h"
 #include <SDL2/SDL2_gfxPrimitives.h>
 #include <math.h>
 #include <stdio.h>
@@ -9,6 +10,9 @@ static Lidar* highlighted_car_lidar = NULL;
 static RGBCamera* highlighted_car_camera = NULL;
 static InfosDisplay* highlighted_car_infos_display = NULL;
 static MiniMap* highlighted_car_minimap = NULL;
+static Collisions* collisions = NULL;
+static Car* highlighted_car = NULL;
+static SituationalAwareness* situational_awareness_highlighted_car = NULL;
 
 void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, const bool draw_cars,
                 const bool draw_track_lines, const bool draw_traffic_lights, const bool draw_car_ids, const bool draw_car_speeds, const bool draw_lane_ids, const bool draw_road_names, bool draw_lidar, bool draw_camera, bool draw_minimap, bool draw_infos_display, int hud_font_size, const bool benchmark)
@@ -181,6 +185,16 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
         if (benchmark) printf("Traffic Lights: %.2f us\n", elapsed_us);
     }
 
+    if (HIGHLIGHTED_CARS[0] != ID_NULL) {
+        highlighted_car = sim_get_car(sim, HIGHLIGHTED_CARS[0]);
+        situational_awareness_highlighted_car = sim_get_situational_awareness(sim, highlighted_car->id);
+        if (situational_awareness_highlighted_car) {
+            situational_awareness_highlighted_car->is_valid = false; // situational awareness has lots of pointers inside, which cannot be copied across processes (remember rendering happens in a separate process than the simulation and the sim state is communicated over tcp), so we need to rebuild it.
+            situational_awareness_build(sim, highlighted_car->id);
+        }
+    }
+                
+
     // Render all cars in the simulation
     if (draw_cars) {
         start = SDL_GetPerformanceCounter();
@@ -188,20 +202,13 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
         // for the first highlighted car, extract its nearby vehicles
         HIGHLIGHTED_NEARBY_VEHICLES.count = 0; // by default, no nearby vehicles
         HIGHLIGHTED_CAR_AEB_ENGAGED = false;
-        if (HIGHLIGHTED_CARS[0] != -1) {
-            Car *highlighted_car = sim_get_car(sim, HIGHLIGHTED_CARS[0]);
-            if (highlighted_car) {
-                SituationalAwareness *situation = sim_get_situational_awareness(sim, highlighted_car->id);
-                if (situation) {
-                    situation->is_valid = false; // situational awareness has lots of pointers inside, which cannot be copied across processes (remember rendering happens in a separate process than the simulation and the sim state is communicated over tcp), so we need to rebuild it.
-                    situational_awareness_build(sim, highlighted_car->id);
-                    nearby_vehicles_flatten(&situation->nearby_vehicles, &HIGHLIGHTED_NEARBY_VEHICLES, true);
-                }
-                if (sim->is_agent_driving_assistant_enabled) {
-                    DrivingAssistant* das = sim_get_driving_assistant(sim, highlighted_car->id);
-                    if (das) {
-                        HIGHLIGHTED_CAR_AEB_ENGAGED = das->aeb_in_progress;
-                    }
+        if (highlighted_car) {
+            SituationalAwareness *situation = situational_awareness_highlighted_car;
+            nearby_vehicles_flatten(&situation->nearby_vehicles, &HIGHLIGHTED_NEARBY_VEHICLES, true);
+            if (sim->is_agent_driving_assistant_enabled) {
+                DrivingAssistant* das = sim_get_driving_assistant(sim, highlighted_car->id);
+                if (das) {
+                    HIGHLIGHTED_CAR_AEB_ENGAGED = das->aeb_in_progress;
                 }
             }
         }
@@ -217,7 +224,7 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
     }
 
     // render lidar of the car that the camera is centered on
-    if (draw_lidar && HIGHLIGHTED_CARS[0] != ID_NULL) {
+    if (draw_lidar && highlighted_car) {
         Car* highlighted_car = sim_get_car(sim, HIGHLIGHTED_CARS[0]);
         if (highlighted_car_lidar == NULL) {
             highlighted_car_lidar = lidar_malloc((Coordinates){0,0}, 0.0, 360, from_degrees(360), from_feet(255.0)); // 255 feet max depth
@@ -232,11 +239,11 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
     }
 
     // here render the camera (attached to the highlighted car) bonut.
-    if (draw_camera && HIGHLIGHTED_CARS[0] != ID_NULL) {
+    if (draw_camera && highlighted_car) {
         Car* highlighted_car = sim_get_car(sim, HIGHLIGHTED_CARS[0]);
         if (highlighted_car_camera == NULL) {
             // Create a camera with 128x128 resolution, 90 degree fov, 500 meter max depth
-            highlighted_car_camera = rgbcam_malloc((Coordinates){0,0}, 1.0, 0.0, 128, 128, from_degrees(90), meters(500.0));
+            highlighted_car_camera = rgbcam_malloc((Coordinates){0,0}, 1.0, 0.0, 256, 256, from_degrees(90), meters(500.0));
             rgbcam_set_aa_level(highlighted_car_camera, 2);  // 2x anti-aliasing
         }
         if (highlighted_car && highlighted_car_camera) {
@@ -247,7 +254,7 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
     }
 
         // Render infos display for highlighted car
-    if (draw_infos_display && HIGHLIGHTED_CARS[0] != ID_NULL) {
+    if (draw_infos_display && highlighted_car) {
         Car* highlighted_car = sim_get_car(sim, HIGHLIGHTED_CARS[0]);
         if (highlighted_car_infos_display == NULL) {
             highlighted_car_infos_display = infos_display_malloc(128, 128, 9);
@@ -302,7 +309,7 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
     }
 
     // Render minimap for highlighted car
-    if (draw_minimap && HIGHLIGHTED_CARS[0] != ID_NULL) {
+    if (draw_minimap && highlighted_car) {
         Car* highlighted_car = sim_get_car(sim, HIGHLIGHTED_CARS[0]);
         if (highlighted_car_minimap == NULL) {
             highlighted_car_minimap = minimap_malloc(128, 128, map);
@@ -321,6 +328,16 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
             minimap_render(highlighted_car_minimap, sim);
             render_minimap(renderer, highlighted_car_minimap);
         }
+    }
+
+    // render collisions
+    if (collisions == NULL) {
+        collisions = collisions_malloc();
+    }
+    // for each collision, render a red line between the two colliding cars
+    if (collisions) {
+        collisions_detect_all(collisions, sim);
+        render_collisions(renderer, sim, collisions);
     }
 
     // Render time stats
@@ -377,7 +394,7 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
             char stop_str[32];
             snprintf(stop_str, sizeof(stop_str), " Stop");
             Uint8 r = RED_LIGHT_COLOR.r, g = RED_LIGHT_COLOR.g, b = RED_LIGHT_COLOR.b;
-            Uint8 alpha = das->should_stop_at_intersection ? 255 : 64;
+            Uint8 alpha = (das->should_stop_at_intersection && (sit->is_an_intersection_upcoming || sit->is_approaching_dead_end)) ? 255 : 64;
             render_text(renderer, stop_str, 10, 110 + 8 * hud_font_size, r, g, b, alpha,
                         hud_font_size, ALIGN_TOP_LEFT, false, NULL);
         }

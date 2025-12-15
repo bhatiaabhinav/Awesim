@@ -11,7 +11,7 @@ clang ^
     -O3 -flto -funroll-loops ^
     -Iinclude ^
     -D_WIN32_WINNT=0x0A00 ^
-    src/main.c src/utils/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c ^
+    src/main.c src/utils/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c src/bad/*.c ^
     scripts/windows/resource.o ^
     -o .\bin\awesim.exe ^
     -lm -lws2_32 ^
@@ -32,7 +32,7 @@ clang ^
     -O3 -flto -funroll-loops ^
     -Iinclude ^
     -D_WIN32_WINNT=0x0A00 ^
-    src/render_server.c src/utils/*.c src/render/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c ^
+    src/render_server.c src/utils/*.c src/render/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c src/bad/*.c ^
     scripts/windows/resource.o ^
     -o .\bin\awesim_render_server.exe ^
     -lSDL2main -lSDL2 -lSDL2_gfx -lSDL2_ttf -lSDL2_image -lm -lws2_32 ^

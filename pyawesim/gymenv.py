@@ -141,6 +141,7 @@ class AwesimEnv(gym.Env):
                 A.rgbcam_set_aa_level(cam, 2)  # 2x anti-aliasing
         self.infos_display = A.infos_display_malloc(cam_resolution[0], cam_resolution[1], len(self._get_info_for_info_display()))
         self.minimap = A.minimap_malloc(cam_resolution[0], cam_resolution[1], A.sim_get_map(self.sim))
+        self.collision_checker = A.collisions_malloc()
         self.goal_lane_midpoint = A.map_get_lane(A.sim_get_map(self.sim), self.goal_lane).mid_point if self.goal_lane is not None else None
         self.prev_manhat = 0.0  # to be set on first reset
 
@@ -265,19 +266,13 @@ class AwesimEnv(gym.Env):
 
     def _crashed(self) -> bool:
         """
-        Check if the agent has collided with lead or following vehicle.
+        Check if the agent has collided with any vehicle.
 
         Returns:
             bool: True if a collision occurred, False otherwise.
         """
-        situation = A.sim_get_situational_awareness(self.sim, self.agent.id)
-        for vehicle, distance in [
-            (situation.lead_vehicle, situation.distance_to_lead_vehicle),
-            (situation.following_vehicle, situation.distance_to_following_vehicle),
-        ]:
-            if vehicle and distance - (A.car_get_length(self.agent) / 2 + A.car_get_length(vehicle) / 2) <= 0:
-                return True
-        return False
+        A.collisions_detect_for_car(self.collision_checker, self.sim, self.agent.id)
+        return A.collisions_get_count_for_car(self.collision_checker, self.agent.id) > 0
 
     def _reached_destination(self) -> bool:
         """
@@ -328,6 +323,9 @@ class AwesimEnv(gym.Env):
         self.agent = A.sim_get_agent_car(self.sim)
         self.das = A.sim_get_driving_assistant(self.sim, self.agent.id)
         A.driving_assistant_reset_settings(self.das, self.agent)
+    
+        # Configure collision checker
+        A.collisions_reset(self.collision_checker)
 
         # Configure fuel
         A.car_set_fuel_level(self.agent, A.from_gallons(self.init_fuel_gallons))
@@ -540,6 +538,7 @@ class AwesimEnv(gym.Env):
             A.rgbcam_free(cam)
         A.infos_display_free(self.infos_display)
         A.minimap_free(self.minimap)
+        A.collisions_free(self.collision_checker)
         super().close()
 
     def render(self) -> np.ndarray:

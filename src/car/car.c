@@ -237,3 +237,29 @@ void car_update_geometry(Simulation* sim, Car* car) {
         car->corners[i] = vec_add(car_get_center(car), vec_rotate(local_corners[i], car->orientation));
     }
 }
+
+
+bool car_is_colliding(const Car* car1, const Car* car2) {
+
+    // very cheap filter: check if the distance between the centers is larger than 15 meters
+    // Bus diagonal is ~12.25m. Two buses touching would have centers ~12.25m apart.
+    // We use 15m (225 sq) to include a safety margin and allow for slightly larger future vehicles.
+    double dx = car1->center.x - car2->center.x;
+    double dy = car1->center.y - car2->center.y;
+    double dist_sq = dx * dx + dy * dy;
+    if (dist_sq > 225) { // 15^2 = 225
+        return false;
+    }
+
+    RotatedRect2D car1_rect = {
+        car1->center,
+        (Dimensions) {car1->dimensions.y, car1->dimensions.x},
+        car1->orientation
+    };
+    RotatedRect2D car2_rect = {
+        car2->center,
+        (Dimensions) {car2->dimensions.y, car2->dimensions.x},
+        car2->orientation
+    };
+    return rotated_rects_intersect(car1_rect, car2_rect);
+}

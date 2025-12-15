@@ -190,6 +190,9 @@ void car_reset_all_control_variables(Car* self);
 // should be called by the sim engine to update the car's geometry based on its lane, lane progress, and dimensions.
 void car_update_geometry(Simulation* sim, Car* car);
 
+// utility to check collision between two cars.
+bool car_is_colliding(const Car* car1, const Car* car2);
+
 
 
 
@@ -228,3 +231,7 @@ extern const Dimensions3D CAR_SIZE_PICKUP;
 extern const Dimensions3D CAR_SIZE_BUS;
 
 Dimensions3D car_dimensions_get_random_preset(void);
+
+
+// meaningful combinations of dimensions and acceleration profiles:
+void car_dimensions_and_acc_profile_get_random_realistic_preset(Dimensions3D *dims, CarAccelProfile *profile);

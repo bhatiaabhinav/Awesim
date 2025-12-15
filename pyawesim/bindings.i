@@ -47,6 +47,7 @@
 #include "../include/car.h"
 #include "../include/ai.h"
 #include "../include/sim.h"
+#include "../include/bad.h"
 #include "../include/awesim.h"
 %}
 
@@ -57,6 +58,7 @@
 %include "../include/car.h"
 %include "../include/ai.h"
 %include "../include/sim.h"
+%include "../include/bad.h"
 %include "../include/awesim.h"
 
 %extend RGBCamera {

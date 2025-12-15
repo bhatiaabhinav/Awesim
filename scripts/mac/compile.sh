@@ -17,7 +17,7 @@ fi
 clang \
     -O3 -flto -funroll-loops \
     -Iinclude \
-    src/main.c src/utils/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c \
+    src/main.c src/utils/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c src/bad/*.c \
     -o ./bin/awesim \
     -lm \
     -Wall -Wunused-variable
@@ -43,7 +43,7 @@ fi
 clang \
     -O3 -flto -funroll-loops \
     -Iinclude \
-    src/render_server.c src/render/*.c src/utils/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c \
+    src/render_server.c src/render/*.c src/utils/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c src/bad/*.c \
     -o ./bin/awesim_render_server \
     `sdl2-config --cflags --libs` \
     `pkg-config --cflags --libs sdl2_ttf` \

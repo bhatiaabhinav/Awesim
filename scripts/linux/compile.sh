@@ -17,7 +17,7 @@ fi
 clang \
     -O3 -flto -funroll-loops \
     -Iinclude \
-    src/main.c src/utils/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c \
+    src/main.c src/utils/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c src/bad/*.c \
     -o ./bin/awesim \
     -lm -lrt \
     -Wall -Wunused-variable
@@ -36,7 +36,7 @@ echo "Compiling render server source files..."
 clang \
     -O3 -flto -funroll-loops \
     -Iinclude \
-    src/render_server.c src/render/*.c src/utils/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c \
+    src/render_server.c src/render/*.c src/utils/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c src/bad/*.c \
     -o ./bin/awesim_render_server \
     -lSDL2 -lSDL2_gfx -lSDL2_ttf -lSDL2_image -lm -lrt \
     -Wall -Wunused-variable

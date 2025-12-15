@@ -5,6 +5,7 @@
 #include "map.h"
 #include "car.h"
 #include "sim.h"
+#include "bad.h"
 
 // Settings
 extern int WINDOW_SIZE_WIDTH;
@@ -116,6 +117,9 @@ void render_infos_display(SDL_Renderer* renderer, const InfosDisplay* display);
 
 // Renders a minimap
 void render_minimap(SDL_Renderer* renderer, const MiniMap* minimap);
+
+// Renders all collisions
+void render_collisions(SDL_Renderer* renderer, Simulation* sim, Collisions* collisions);
 
 // Renders the entire simulation state: roads, cars, lanes, traffic.
 void render_sim(SDL_Renderer* renderer, Simulation* sim, const bool draw_lanes, const bool draw_cars, const bool draw_track_lines, const bool draw_traffic_lights, const bool draw_car_ids, const bool draw_car_speeds, const bool draw_lane_ids, const bool draw_road_names, bool draw_lidar, bool draw_camera, bool draw_minimap, bool draw_infos_display, int hud_font_size, const bool benchmark);

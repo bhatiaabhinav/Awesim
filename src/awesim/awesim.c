@@ -47,10 +47,17 @@ void awesim_setup(Simulation* sim, Meters city_width, int num_cars, Seconds dt, 
     }
     for(int i = 0; i < num_cars; i++) {
         Car* car = sim_get_new_car(sim);
-        Dimensions3D dims = car_dimensions_get_random_preset();
+        Dimensions3D dims;
+        CarAccelProfile capable_acc_profile;
+        if (i == 0) {  // Keep agent car typical
+            dims = CAR_SIZE_TYPICAL;
+            capable_acc_profile = CAR_ACC_PROFILE_GAS_SEDAN;
+        } else {
+            car_dimensions_and_acc_profile_get_random_realistic_preset(&dims, &capable_acc_profile);
+        }
         CarPersonality prefs = preferences_sample_random();
         Liters fuel_tank_capacity = INFINITY; // Default to infinite fuel tank capacity
-        car_init(car, dims, (CarCapabilities){CAR_ACC_PROFILE_SPORTS_CAR, from_mph(120), 0.0}, fuel_tank_capacity, prefs);
+        car_init(car, dims, (CarCapabilities){capable_acc_profile, from_mph(120), 0.0}, fuel_tank_capacity, prefs);
         LOG_TRACE("Car id %d init: Dimensions: width = %.2f meters, length = %.2f meters, height = %.2f meters", car->id, car_get_width(car), car_get_length(car), car_get_height(car));
         Road* random_road;
         Lane* random_lane;
