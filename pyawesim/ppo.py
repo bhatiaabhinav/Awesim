@@ -783,7 +783,7 @@ class PPO:
                  clip_ratio: float = 0.2,
                  decay_clip_ratio: bool = False,
                  min_clip_ratio: float = 0.01,
-                 target_kl: float = np.inf,
+                 target_kl: Optional[float] = None,
                  early_stop_critic: bool = False,
                  value_loss_coef: float = 0.5,
                  entropy_coef: float = 0.0,
@@ -1340,7 +1340,7 @@ class PPO:
                 # Early stop if measured KL exceeds 1.5 * target_kl to avoid over-updating.
                 with torch.no_grad():
                     kl = self.actor.get_kl_div(obs_buf, actions_buf, log_probs_buf).item()
-                    if kl > 1.5 * self.target_kl:
+                    if self.target_kl is not None and kl > 1.5 * self.target_kl:
                         stop_actor_training = True
                         if self.early_stop_critic:
                             break

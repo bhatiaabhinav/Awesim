@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 import wandb
 from gymenv import AwesimEnv
-from cnn import SimpleCNN, SimpleCNNWith3x3DownsamplingPairs, MinimalRLConv128
+from cnn import MinimalCNN, SimpleCNN, DeepCNN, DeepResidualCNN
 from gymnasium.spaces import Box
 from gymnasium.vector import SyncVectorEnv, AsyncVectorEnv, AutoresetMode, VectorEnv
 from ppo import Actor, ActorBase, Critic, PPO
@@ -17,11 +17,12 @@ from ppo import Actor, ActorBase, Critic, PPO
 
 class ModelArchitecture(nn.Module):
 
-    def __init__(self, hidden_dim_per_image, hidden_dim: int, dim_out: int,  c_in = 3, c_base: int = 32, num_images: int = 9, cnn_type="minimal"):
+    def __init__(self, hidden_dim_per_image, hidden_dim: int, dim_out: int, c_in: int = 3, c_base: int = 32, num_images: int = 9, cnn_type="minimal", groupnorm=False, num_groups=32):
         net_name_to_class = {
             "simple": SimpleCNN,
-            "minimal": MinimalRLConv128,
-            "simplefancy": SimpleCNNWith3x3DownsamplingPairs,
+            "minimal": MinimalCNN,
+            "deep": DeepCNN,
+            "deep-residual": DeepResidualCNN,
         }
         CNN = net_name_to_class[cnn_type]
         super().__init__()
@@ -29,7 +30,7 @@ class ModelArchitecture(nn.Module):
         self.hidden_dim = hidden_dim
         self.num_images = num_images
         self.c_in = c_in
-        self.cnns = nn.ModuleList([CNN(hidden_dim_per_image, c_in=c_in, c_base=c_base) for _ in range(num_images)])
+        self.cnns = nn.ModuleList([CNN(hidden_dim_per_image, c_in=c_in, c_base=c_base, groupnorm=groupnorm, num_groups=num_groups) for _ in range(num_images)])
         self.hidden_fc = nn.Linear(num_images * hidden_dim_per_image, hidden_dim)
         self.relu = nn.ReLU()
         self.final_fc = nn.Linear(hidden_dim, dim_out)
@@ -105,7 +106,9 @@ NET_CONFIG = {
     "hidden_dim_per_image": 128,
     "hidden_dim": 512,
     "c_base": 32,
-    "cnn_type": "simple",
+    "cnn_type": "simple",       # can be "simple", "minimal", "deep", "deep-residual"
+    "groupnorm": False,
+    "num_groups": 32,
 }
 POLICY_CONFIG = {
     "norm_obs": True,
@@ -151,8 +154,11 @@ def train_model() -> Tuple[ActorBase, Critic, PPO]:
 
     actor_dim_out = action_dim * 2 if POLICY_CONFIG["state_dependent_std"] else action_dim
     actor_model = ModelArchitecture(dim_out=actor_dim_out, **NET_CONFIG)
+    total_params = sum(p.numel() for p in actor_model.parameters())
+    trainable_params = sum(p.numel() for p in actor_model.parameters() if p.requires_grad)
     print("Actor model:")
     print(actor_model)
+    print(f"Total parameters: {total_params}, trainable parameters: {trainable_params}")
     critic_model = ModelArchitecture(dim_out=1, **NET_CONFIG)
 
     actor = Actor(actor_model, obs_space, action_space, norm_obs=POLICY_CONFIG["norm_obs"], state_dependent_std=POLICY_CONFIG["state_dependent_std"])    # type: ignore

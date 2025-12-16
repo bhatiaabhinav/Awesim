@@ -340,20 +340,11 @@ class AwesimEnv(gym.Env):
         # Initialize frame buffer
         self.frame_buffer = deque(maxlen=self.framestack)
 
-        # Capture initial observation
-        initial_frames = self._get_obs_as_list_of_images()
-        processed_frames = [f.transpose(2, 0, 1).copy()
-                            for f in initial_frames]  # (3, H, W)
-        
-        # Fill with initial frame
-        for _ in range(self.framestack):
-            self.frame_buffer.append(processed_frames)
-
         A.sim_set_agent_driving_assistant_enabled(self.sim, True)
         self.agent = A.sim_get_agent_car(self.sim)
         self.das = A.sim_get_driving_assistant(self.sim, self.agent.id)
         A.driving_assistant_reset_settings(self.das, self.agent)
-    
+
         # Configure collision checker
         A.collisions_reset(self.collision_checker)
 
@@ -363,6 +354,15 @@ class AwesimEnv(gym.Env):
 
         self.steps = 0
         self.fuel_drive_beginning = A.car_get_fuel_level(self.agent)
+
+        # Capture initial observation
+        initial_frames = self._get_obs_as_list_of_images()
+        processed_frames = [f.transpose(2, 0, 1).copy()
+                            for f in initial_frames]  # (3, H, W)
+
+        # Fill with initial frame
+        for _ in range(self.framestack):
+            self.frame_buffer.append(processed_frames)
 
         return self._get_observation(), {}
 
@@ -476,7 +476,6 @@ class AwesimEnv(gym.Env):
                                 for f in current_frames]
             self.frame_buffer.append(processed_frames)
 
-            
             delta_time = A.sim_get_time(self.sim) - t0  # true delta time (since it is not guaranteed that sim would have simulated exactly for delta_time if it is not a multiple of dt.)
             elapsed_time = A.sim_get_time(self.sim) - sim_time_initial
             A.situational_awareness_build(self.sim, self.agent.id)
