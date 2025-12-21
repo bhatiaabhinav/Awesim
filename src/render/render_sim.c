@@ -10,6 +10,7 @@ static Lidar* highlighted_car_lidar = NULL;
 static RGBCamera* highlighted_car_camera = NULL;
 static InfosDisplay* highlighted_car_infos_display = NULL;
 static MiniMap* highlighted_car_minimap = NULL;
+static PathPlanner* highlighted_car_path_planner = NULL;
 static Collisions* collisions = NULL;
 static Car* highlighted_car = NULL;
 static SituationalAwareness* situational_awareness_highlighted_car = NULL;
@@ -313,6 +314,7 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
         Car* highlighted_car = sim_get_car(sim, HIGHLIGHTED_CARS[0]);
         if (highlighted_car_minimap == NULL) {
             highlighted_car_minimap = minimap_malloc(128, 128, map);
+            highlighted_car_path_planner = path_planner_create(sim_get_map(sim), false);
         }
         
         if (highlighted_car && highlighted_car_minimap) {
@@ -323,6 +325,8 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
             if (lane84) {
                 highlighted_car_minimap->marked_landmarks[0] = lane84->center;
                 highlighted_car_minimap->marked_landmark_colors[0] = (RGB){0, 0, 255};
+                path_planner_compute_shortest_path(highlighted_car_path_planner, map_get_lane(map, highlighted_car->lane_id), car_get_lane_progress_meters(highlighted_car), lane84, 0.5 * lane84->length);
+                highlighted_car_minimap->marked_path = highlighted_car_path_planner;
             }
             
             minimap_render(highlighted_car_minimap, sim);

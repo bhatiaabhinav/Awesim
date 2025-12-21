@@ -182,6 +182,8 @@ void infos_display_free(InfosDisplay* display);
 void infos_display_clear(InfosDisplay* display);
 void infos_display_render(InfosDisplay* display);
 
+typedef struct PathPlanner PathPlanner; // forward declaration for MiniMap
+
 struct MiniMap {
     int width;
     int height;
@@ -197,6 +199,8 @@ struct MiniMap {
     CarId marked_car_id;
     Coordinates marked_landmarks[8];
     RGB marked_landmark_colors[8];
+    PathPlanner* marked_path;
+    PathPlanner* debug_planner; // For visualizing the decision graph
 };
 typedef struct MiniMap MiniMap;
 
@@ -555,3 +559,121 @@ void driving_assistant_configure_use_linear_speed_control(DrivingAssistant* das,
 
 // Manually disengage AEB. `aeb_manually_disengaged` flag will stay true and won't reset until standard disengagement conditions are also met
 void driving_assistant_aeb_manually_disengage(DrivingAssistant* das, const Car* car, const Simulation* sim);
+
+
+//
+// Path Planning
+// 
+
+
+
+
+/* One outgoing edge in adjacency list */
+typedef struct DG_Edge {
+    int to;                 /* destination node */
+    double weight;          /* non-negative */
+    struct DG_Edge* next;   /* next edge in list */
+} DG_Edge;
+
+/* Simple directed graph: adj[u] is a linked list of outgoing edges */
+typedef struct DirectedGraph {
+    int num_nodes;   /* how many nodes are currently "in use" */
+    int max_nodes;   /* fixed capacity */
+    DG_Edge** adj;   /* size=max_nodes; only [0..num_nodes-1] are valid */
+} DirectedGraph;
+
+/* Make a graph with N nodes (0..N-1). Returns NULL on failure. */
+DirectedGraph* dg_create(int num_nodes);
+
+/* Add a node, returns its ID (0..max_nodes-1), or -1 if full/NULL */
+int dg_add_node(DirectedGraph* g);
+
+/* Free the graph and all edges. Safe on NULL. */
+void dg_free(DirectedGraph* g);
+
+/* Add directed edge u->v with weight=1. Returns 1 on success, 0 on fail. */
+int dg_add_edge(DirectedGraph* g, int from, int to);
+
+/* Add directed edge u->v with custom non-negative weight. */
+int dg_add_edge_w(DirectedGraph* g, int from, int to, double weight);
+
+/* Dijkstra shortest path from start to end.
+   Writes nodes [start..end] into node_array_out.
+    node_array_len_out is the capacity of node_array_out.
+    cost_out is set to the total cost of the path.
+   Returns:
+     >0 path length
+      0 no path
+     -1 bad args / OOM
+     -2 output buffer too small
+
+*/
+int dg_dijkstra_path(const DirectedGraph* g,
+                     int start,
+                     int end,
+                     int* node_array_out,
+                     int node_array_len_out,
+                     double* cost_out);
+
+
+
+// use it in the path planner:
+
+
+#define MAX_NODES_PER_LANE 100    // Estimate
+#define MAX_SOLUTION_CAPACITY 128
+#define MAX_GRAPH_NODES (MAX_NUM_LANES * MAX_NODES_PER_LANE)
+
+// Navigation Actions
+typedef enum {
+    NAV_STRAIGHT,
+    NAV_TURN_LEFT,
+    NAV_TURN_RIGHT,
+    NAV_LANE_CHANGE_LEFT,
+    NAV_LANE_CHANGE_RIGHT,
+    NAV_MERGE_LEFT,
+    NAV_MERGE_RIGHT,
+    NAV_EXIT_LEFT,
+    NAV_EXIT_RIGHT,
+    NAV_NONE,
+    NAV_NUM_ACTIONS // Number of actions
+} NavAction;
+
+typedef struct MapNode {
+    LaneId lane_id;          // Lane ID
+    Meters progress;         // Progress along the lane (in meters)
+} MapNode;
+
+// A simple path planner that finds the shortest path between two lanes on the map, using Dijkstra's algorithm.
+// The cost of each lane is determined by its length if consider_speed_limits is false, or by the time to traverse the lane at its speed limit if consider_speed_limits is true. The overall cost of the path is the sum of the costs of the lanes in the path. Only forward motion is considered (i.e., reversals).
+typedef struct PathPlanner {
+    Map* map;                                       // Pointer to the map
+    bool consider_speed_limits;                     // Whether to consider speed limits when computing lane costs. Should not be changed after creation.
+
+    LaneId start_lane_id;                           // Starting lane for the path planning
+    Meters start_progress;                          // Progress along the starting lane (in meters)
+    LaneId end_lane_id;                             // Ending lane for the path planning
+    Meters end_progress;                            // Progress along the ending lane (in meters)
+    
+    MapNode solution_nodes[MAX_SOLUTION_CAPACITY];                        // Array of nodes in the optimal path (including start and end)
+    NavAction solution_actions[MAX_SOLUTION_CAPACITY - 1];                    // Array of navigation actions corresponding to each edge in the optimal path.
+    int num_solution_actions;
+    double optimal_cost;                            // Cost associated with the optimal path
+    bool path_exists;                               // Whether a valid path exists
+    
+
+    // precomputed structures:
+
+    DirectedGraph* decision_graph;                  // Directed graph representing the decision graph for path planning
+    MapNode map_nodes[MAX_GRAPH_NODES];             // Array of map nodes corresponding to the node ids in the decision graph
+
+    int solution_intermediate_node_ids[MAX_SOLUTION_CAPACITY - 2];              // Array of node ids in the optimal path excluding start and end
+
+    int lane_id_to_node_ids_count[MAX_NUM_LANES];   // Count of node ids for each lane id.
+    int lane_id_to_node_ids_list[MAX_NUM_LANES][MAX_NODES_PER_LANE]; // Mapping from lane id to list of node ids in the decision graph. -1 indicates end of list.
+} PathPlanner;
+
+
+PathPlanner* path_planner_create(Map* map, bool consider_speed_limits);     // allocates data and precomputes useful structures
+void path_planner_free(PathPlanner* planner);   // does not free the map
+void path_planner_compute_shortest_path(PathPlanner* planner, const Lane* start_lane, Meters start_progress, const Lane* end_lane, Meters end_progress);    // updates the planner with the optimal path information

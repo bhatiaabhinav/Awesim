@@ -13,6 +13,8 @@ static const RGB COLOR_ROAD_DEFAULT = {255, 255, 255};
 static const RGB COLOR_ROAD_DARKER = {200, 200, 200};
 // static const RGB COLOR_BACKGROUND = {0, 0, 0};
 static const RGB COLOR_CAR = {255, 0, 0}; // Red for car
+static const RGB COLOR_GRAPH_NODE = {165, 42, 42}; // brown
+static const RGB COLOR_GRAPH_EDGE = {255, 165, 0}; // Orange
 
 // Helper to set a pixel
 static void set_pixel(uint8_t* buffer, int width, int height, int x, int y, RGB color) {
@@ -185,6 +187,8 @@ MiniMap* minimap_malloc(int width, int height, Map* map) {
     minimap->data = (uint8_t*)malloc(3 * width * height);
     minimap->static_data = (uint8_t*)malloc(3 * width * height);
     minimap->marked_car_id = ID_NULL;
+    minimap->marked_path = NULL;
+    minimap->debug_planner = path_planner_create(map, false);
     
     for(int i=0; i<8; i++) {
         minimap->marked_landmarks[i] = (Coordinates){0,0};
@@ -257,17 +261,90 @@ void minimap_free(MiniMap* minimap) {
     if (minimap) {
         if (minimap->data) free(minimap->data);
         if (minimap->static_data) free(minimap->static_data);
+        if (minimap->debug_planner) path_planner_free(minimap->debug_planner);
         free(minimap);
     }
 }
 
 #define MINIMAP_CONGESTION_SEGMENT_LENGTH 25.0
 
+static void get_lane_point(Lane* lane, double progress, Coordinates* out_point) {
+    if (!lane || !out_point) return;
+    
+    double t = progress / lane->length;
+    if (t < 0) t = 0;
+    if (t > 1) t = 1;
+
+    if (lane->type == LINEAR_LANE) {
+        out_point->x = lane->start_point.x + t * (lane->end_point.x - lane->start_point.x);
+        out_point->y = lane->start_point.y + t * (lane->end_point.y - lane->start_point.y);
+    } else if (lane->type == QUARTER_ARC_LANE) {
+        double theta = lane->start_angle + t * (lane->end_angle - lane->start_angle);
+        out_point->x = lane->center.x + lane->radius * cos(theta);
+        out_point->y = lane->center.y + lane->radius * sin(theta);
+    }
+}
+
+static void minimap_render_graph(MiniMap* minimap) {
+    if (!minimap || !minimap->debug_planner || !minimap->debug_planner->map || !minimap->debug_planner->decision_graph) return;
+    
+    PathPlanner* planner = minimap->debug_planner;
+    DirectedGraph* g = planner->decision_graph;
+    
+    // Draw Edges first (so nodes are on top)
+    for (int u_id = 0; u_id < g->num_nodes; ++u_id) {
+        MapNode* u_node = &planner->map_nodes[u_id];
+        Lane* lane_u = map_get_lane(planner->map, u_node->lane_id);
+        Coordinates p1;
+        get_lane_point(lane_u, u_node->progress, &p1);
+        
+        int x1, y1;
+        world_to_pixel(minimap, p1, &x1, &y1);
+
+        DG_Edge* edge = g->adj[u_id];
+        while (edge) {
+            int v_id = edge->to;
+            MapNode* v_node = &planner->map_nodes[v_id];
+            Lane* lane_v = map_get_lane(planner->map, v_node->lane_id);
+            
+            Coordinates p2;
+            get_lane_point(lane_v, v_node->progress, &p2);
+            
+            int x2, y2;
+            world_to_pixel(minimap, p2, &x2, &y2);
+            
+            draw_line(minimap->data, minimap->width, minimap->height, x1, y1, x2, y2, COLOR_GRAPH_EDGE, 1);
+            
+            edge = edge->next;
+        }
+    }
+
+    // Draw Nodes
+    for (int i = 0; i < g->num_nodes; ++i) {
+        MapNode* u = &planner->map_nodes[i];
+        Lane* lane_u = map_get_lane(planner->map, u->lane_id);
+        Coordinates p;
+        get_lane_point(lane_u, u->progress, &p);
+        
+        int x, y;
+        world_to_pixel(minimap, p, &x, &y);
+        
+        set_pixel(minimap->data, minimap->width, minimap->height, x, y, COLOR_GRAPH_NODE);
+    }
+}
+
+// #define RENDER_DEBUG_GRAPH
+
 void minimap_render(MiniMap* minimap, Simulation* sim) {
     if (!minimap || !minimap->data || !minimap->static_data) return;
 
     // Copy static background
     memcpy(minimap->data, minimap->static_data, 3 * minimap->width * minimap->height);
+    
+    // Render Graph
+#ifdef RENDER_DEBUG_GRAPH
+    minimap_render_graph(minimap);
+#endif
 
     // Draw traffic congestion on straight roads
     for (int i = 0; i < sim->map.num_roads; i++) {
@@ -351,6 +428,91 @@ void minimap_render(MiniMap* minimap, Simulation* sim) {
 
         free(speed_sum);
         free(car_count);
+    }
+
+    // Draw marked path
+    if (minimap->marked_path && minimap->marked_path->path_exists) {
+        RGB color_path = {0, 0, 255}; // Blue
+        int thickness = 2;
+
+        PathPlanner* planner = minimap->marked_path;
+
+        for (int i = 0; i < planner->num_solution_actions; i++) {
+            MapNode* u = &planner->solution_nodes[i];
+            MapNode* v = &planner->solution_nodes[i+1];
+            
+            Lane* lane_u = map_get_lane(sim_get_map(sim), u->lane_id);
+            Lane* lane_v = map_get_lane(sim_get_map(sim), v->lane_id);
+            
+            if (!lane_u || !lane_v) continue;
+
+            if (u->lane_id == v->lane_id) {
+                // Same lane segment
+                double start_m = u->progress;
+                double end_m = v->progress;
+                
+                // Draw segment on lane
+                if (lane_u->type == LINEAR_LANE) {
+                    double t1 = start_m / lane_u->length;
+                    double t2 = end_m / lane_u->length;
+                    
+                    Coordinates p1 = {
+                        lane_u->start_point.x + t1 * (lane_u->end_point.x - lane_u->start_point.x),
+                        lane_u->start_point.y + t1 * (lane_u->end_point.y - lane_u->start_point.y)
+                    };
+                    Coordinates p2 = {
+                        lane_u->start_point.x + t2 * (lane_u->end_point.x - lane_u->start_point.x),
+                        lane_u->start_point.y + t2 * (lane_u->end_point.y - lane_u->start_point.y)
+                    };
+                    
+                    int x0, y0, x1, y1;
+                    world_to_pixel(minimap, p1, &x0, &y0);
+                    world_to_pixel(minimap, p2, &x1, &y1);
+                    draw_line(minimap->data, minimap->width, minimap->height, x0, y0, x1, y1, color_path, thickness);
+                } else if (lane_u->type == QUARTER_ARC_LANE) {
+                    double t_start = start_m / lane_u->length;
+                    double t_end = end_m / lane_u->length;
+                    
+                    double angle_start = lane_u->start_angle + t_start * (lane_u->end_angle - lane_u->start_angle);
+                    double angle_end = lane_u->start_angle + t_end * (lane_u->end_angle - lane_u->start_angle);
+
+                    int segments = 10; 
+                    double step = (angle_end - angle_start) / segments;
+
+                    for (int j = 0; j < segments; j++) {
+                        double theta1 = angle_start + j * step;
+                        double theta2 = angle_start + (j + 1) * step;
+                        
+                        Coordinates p1_world = {
+                            lane_u->center.x + lane_u->radius * cos(theta1),
+                            lane_u->center.y + lane_u->radius * sin(theta1)
+                        };
+                        Coordinates p2_world = {
+                            lane_u->center.x + lane_u->radius * cos(theta2),
+                            lane_u->center.y + lane_u->radius * sin(theta2)
+                        };
+                        
+                        int x1, y1, x2, y2;
+                        world_to_pixel(minimap, p1_world, &x1, &y1);
+                        world_to_pixel(minimap, p2_world, &x2, &y2);
+                        
+                        draw_line(minimap->data, minimap->width, minimap->height, x1, y1, x2, y2, color_path, thickness);
+                    }
+                }
+            } else {
+                // Different lanes (connection/change/merge)
+                // Draw straight line between u and v
+                Coordinates p1, p2;
+                get_lane_point(lane_u, u->progress, &p1);
+                get_lane_point(lane_v, v->progress, &p2);
+                
+                int x1, y1, x2, y2;
+                world_to_pixel(minimap, p1, &x1, &y1);
+                world_to_pixel(minimap, p2, &x2, &y2);
+                
+                draw_line(minimap->data, minimap->width, minimap->height, x1, y1, x2, y2, color_path, thickness);
+            }
+        }
     }
 
     // Draw landmarks

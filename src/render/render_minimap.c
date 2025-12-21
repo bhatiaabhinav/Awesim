@@ -5,6 +5,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <string.h>
 
 // Render at top right corner of the screen
 void render_minimap(SDL_Renderer* renderer, const MiniMap* minimap) {
@@ -57,6 +58,51 @@ void render_minimap(SDL_Renderer* renderer, const MiniMap* minimap) {
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255); // White border
     SDL_Rect border_rect = { dest_rect.x - 2, dest_rect.y - 2, dest_rect.w + 4, dest_rect.h + 4 };
     SDL_RenderDrawRect(renderer, &border_rect);
+
+    // Draw text below minimap if path is marked
+    if (minimap->marked_path && minimap->marked_path->path_exists) {
+        PathPlanner* planner = minimap->marked_path;
+        
+        // Find first non-straight action, within next 5 actions
+        NavAction next_action = NAV_STRAIGHT;
+        for (int i = 0; i < planner->num_solution_actions && i < 5; ++i) {
+            if (planner->solution_actions[i] != NAV_STRAIGHT) {
+                next_action = planner->solution_actions[i];
+                break;
+            }
+        }
+        
+        const char* action_str = "Straight";
+        switch (next_action) {
+            case NAV_STRAIGHT: action_str = "Straight"; break;
+            case NAV_TURN_LEFT: action_str = "Turn Left"; break;
+            case NAV_TURN_RIGHT: action_str = "Turn Right"; break;
+            case NAV_LANE_CHANGE_LEFT: action_str = "Lane Change Left"; break;
+            case NAV_LANE_CHANGE_RIGHT: action_str = "Lane Change Right"; break;
+            case NAV_MERGE_LEFT: action_str = "Merge Left"; break;
+            case NAV_MERGE_RIGHT: action_str = "Merge Right"; break;
+            case NAV_EXIT_LEFT: action_str = "Exit Left"; break;
+            case NAV_EXIT_RIGHT: action_str = "Exit Right"; break;
+            default: action_str = "Unknown"; break;
+        }
+        
+        char info_text[128];
+        if (planner->consider_speed_limits) {
+            // Cost is time in seconds
+            double minutes = planner->optimal_cost / 60.0;
+            snprintf(info_text, sizeof(info_text), "%s, ETA: %.1f min", action_str, minutes);
+        } else {
+            // Cost is distance in meters
+            snprintf(info_text, sizeof(info_text), "%s, DTG: %.0f m", action_str, planner->optimal_cost);
+        }
+        
+        // Draw text right-aligned below the minimap
+        int text_width = strlen(info_text) * 8;
+        int text_x = dest_rect.x + dest_rect.w - text_width;
+        int text_y = dest_rect.y + dest_rect.h + 5; // 5px padding below minimap
+        
+        stringRGBA(renderer, text_x, text_y, info_text, 255, 255, 255, 255);
+    }
 
     SDL_RenderCopy(renderer, texture, NULL, &dest_rect);
     SDL_DestroyTexture(texture);
