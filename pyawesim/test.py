@@ -20,8 +20,9 @@ TEST_CONFIG = {
     "video_interval": 10,               # interval for video recording (in episodes), None to disable
 }
 ENV_CONFIG = {
+    "use_das": True,
     "cam_resolution": (128, 128),       # width, height
-    "framestack": 4,
+    "framestack": 3,
     "anti_aliasing": True,
     "goal_lane": 84,
     "city_width": 1000,                 # in meters
@@ -34,20 +35,25 @@ ENV_CONFIG = {
     "cost_lost_wage_per_hour": 40,      # of a decent job in NYC (USD)
     "may_lose_entire_day_wage": False,  # lose entire 8-hour workday wage if not reached by the end of sim_duration
     "init_fuel_gallons": 3.0,           # initial fuel in gallons -- 1/4th of a 12-gallon tank car
-    "goal_reward": 1.0,                 # A small positive number to incentivize reaching the goal
-    "reward_shaping": False,
-    "reward_shaping_gamma": 0.999,
+    "goal_reward": 100.0,                 # A positive number to incentivize reaching the goal
+    "crash_penalty": 100.0,               # Dense signal for crashing
+    "reward_shaping": True,
+    "reward_shaping_gamma": 1.0,
     "deterministic_actions": True,
 }
 VEC_ENV_CONFIG = {
-    "n_envs": 8,
+    "n_envs": 16,
     "async": True,
 }
 NET_CONFIG = {
     "hidden_dim_per_image": 128,
     "hidden_dim": 512,
     "c_base": 32,
-    "cnn_type": "simple",
+    "deep_downsample": False,
+    "residual": False,
+    "groupnorm": False,
+    "num_groups": 32,
+    "act": "relu",
 }
 POLICY_CONFIG = {
     "norm_obs": True,
@@ -71,17 +77,14 @@ def test_model(model_path) -> None:
     env.render_server_ip = TEST_CONFIG["render_server_ip"]
     env.verbose = TEST_CONFIG["verbose"]
 
-    obs_dim = env.observation_space.shape[0]   # type: ignore
     action_dim = env.action_space.shape[0]     # type: ignore
-
     actor_dim_out = action_dim * 2 if POLICY_CONFIG["state_dependent_std"] else action_dim
     actor_model = ModelArchitecture(dim_out=actor_dim_out, **NET_CONFIG)
-    
     actor = Actor(actor_model, env.observation_space, env.action_space, deterministic=POLICY_CONFIG["deterministic"], norm_obs=POLICY_CONFIG["norm_obs"], state_dependent_std=POLICY_CONFIG["state_dependent_std"])    # type: ignore
-    
+
     # Load the model
     print(f"Loading model from {model_path}")
-    actor.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
+    actor.load_state_dict(torch.load(model_path, map_location=torch.device('cuda' if torch.cuda.is_available() else 'cpu')))
 
     if TEST_CONFIG["parallel"]:
         vec_cls = AsyncVectorEnv if VEC_ENV_CONFIG["async"] else SyncVectorEnv
@@ -119,13 +122,16 @@ if __name__ == "__main__":
             elif k in ENV_CONFIG:
                 ENV_CONFIG[k] = v
                 found_key = True
+            elif k in VEC_ENV_CONFIG:
+                VEC_ENV_CONFIG[k] = v
+                found_key = True
             elif k in NET_CONFIG:
                 NET_CONFIG[k] = v
                 found_key = True
             elif k in POLICY_CONFIG:
                 POLICY_CONFIG[k] = v    # type: ignore
                 found_key = True
-            
+
             if not found_key:
                 # print in yellow color
                 print(f"\033[93mWarning: key {k} not found in any config, ignoring the override.\033[0m")
