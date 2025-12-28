@@ -1031,6 +1031,8 @@ class PPO:
 
             n_batches = total // self.batch_size
             for mb_num in range(n_batches):
+                if self.verbose:
+                    print(f"Training epoch {epoch + 1}/{self.nepochs}, minibatch {mb_num + 1}/{n_batches}", end='\r')
                 start = mb_num * self.batch_size
                 end = min(start + self.batch_size, total)
                 mb_idxs = idxs[start:end]

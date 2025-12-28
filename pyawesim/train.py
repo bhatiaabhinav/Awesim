@@ -60,70 +60,80 @@ class ConvBlockDeepDownsample(nn.Module):
 
 class ModelArchitecture(nn.Module):
 
-    def __init__(self, hidden_dim_per_image, hidden_dim: int, dim_out: int, c_in: int = 3, c_base: int = 32, num_images: int = 9, deep_downsample=False, residual=False, groupnorm=False, num_groups=32, act='relu'):
+    def __init__(self, hidden_dim_per_image, hidden_dim: int, dim_out: int, c_in: int = 3, c_base: int = 32, num_images: int = 9, deep=False, residual=False, groupnorm=False, layernorm=False, imagenet_norm=False, num_groups=32, act='relu'):
         super().__init__()
         self.hidden_dim_per_imagestack = hidden_dim_per_image
         self.hidden_dim = hidden_dim
         self.num_images = num_images
         self.num_cams = num_images - 2  # cameras + minimap + speedometer etc.
         self.c_in = c_in    # per cam
+        self.imagenet_norm = imagenet_norm
+        self.per_channel_mean = torch.tensor([0.485, 0.456, 0.406], requires_grad=False, dtype=torch.float32).view(1, 3, 1, 1)
+        self.per_channel_std = torch.tensor([0.229, 0.224, 0.225], requires_grad=False, dtype=torch.float32).view(1, 3, 1, 1)
 
         if c_in % 3 != 0:
             raise ValueError(
                 "c_in must be divisible by 3 (stacked RGB frames)")
         self.framestack_per_cam = c_in // 3
 
-        c1, c2, c3, c4, c5 = c_base, c_base * 2, c_base * 4, c_base * 4, c_base * 4
-        self.flatten_out = c5 * 6 * 6
+        c1, c2, c3, c4 = c_base, c_base * 2, c_base * 4, c_base * 8
+        self.flatten_out = c4 * 8 * 8
+
+        def conv_block(c_in, c_out, kernel_size, stride, padding):
+            return ConvBlock(c_in, c_out, kernel_size, stride, padding, groupnorm, num_groups, act)
 
         def downsample_block(c_in, c_out):
-            if deep_downsample:
+            if deep:
                 return ConvBlockDeepDownsample(c_in, c_out, groupnorm, num_groups, act, residual)
             else:
                 return ConvBlock(c_in, c_out, 4, 2, 1, groupnorm, num_groups, act)
 
+        def linear(d_in, d_out, _act):
+            layers = [nn.Linear(d_in, d_out)]
+            if layernorm:
+                layers.append(nn.LayerNorm(d_out))  # type: ignore
+            if _act is not None:
+                layers.append(activation_fn(_act))   # type: ignore
+            return nn.Sequential(*layers)
+
         # Shared stem: first two conv layers applied separately to each frame for each camera. All frames are in the batch dimension. No temporal mixing here, only spatial feature extraction.
         self.stem_cams = nn.Sequential(
-            ConvBlock(3, c1, 5, 2, 2, groupnorm, num_groups, act),  # 128x128x3 -> 64x64xc1
+            downsample_block(3, c1),  # 128x128x3 -> 64x64xc1
             downsample_block(c1, c2)   # 64x64xc1 -> 32x32xc2
         )
 
         # Remaining network operating on temporally stacked features. Different cameras are in the batch dimension now, so spatio-temporal mixing happens for each camera separately, using shared weights.
         self.cnn_cams = nn.Sequential(
-            ConvBlock(c2 * self.framestack_per_cam, c2, 1, 1, 0, groupnorm, num_groups, act),  # 1x1 conv to compress temporal info
+            conv_block(c2 * self.framestack_per_cam, c2, 1, 1, 0),  # 1x1 conv to compress temporal info
             downsample_block(c2, c3),  # 32x32x(c2) -> 16x16x(c3)
             downsample_block(c3, c4),  # 16x16x(c3) -> 8x8x(c4)
-            ConvBlock(c4, c5, 3, 1, 0, groupnorm, num_groups, act),  # 8x8x(c4) -> 6x6x(c5)
             nn.Flatten(),
         )
 
-        self.hidden_cams = nn.ModuleList([nn.Sequential(nn.Linear(self.flatten_out, self.hidden_dim_per_imagestack), activation_fn(act)) for _ in range(self.num_cams)])
+        self.hidden_cams = nn.ModuleList([linear(self.flatten_out, self.hidden_dim_per_imagestack, act) for _ in range(self.num_cams)])
 
         # for minimap, need only the latest frame in the stack (there is no useful temporal info in minimap, so we discard other frames)
         self.cnn_minimap = nn.Sequential(
-            ConvBlock(3, c1, 5, 2, 2, groupnorm, num_groups, act),  # 128x128x3 -> 64x64xc1
+            downsample_block(3, c1),   # 128x128x3 -> 64x64xc1
             downsample_block(c1, c2),  # 64x64xc1 -> 32x32xc2
             downsample_block(c2, c3),  # 32x32x(c2) -> 16x16x(c3)
             downsample_block(c3, c4),  # 16x16x(c3) -> 8x8x(c4)
-            ConvBlock(c4, c5, 3, 1, 0, groupnorm, num_groups, act),  # 8x8x(c4) -> 6x6x(c5)
             nn.Flatten(),
         )
-        self.hidden_minimap = nn.Sequential(nn.Linear(self.flatten_out, self.hidden_dim_per_imagestack), activation_fn(act))
+        self.hidden_minimap = linear(self.flatten_out, self.hidden_dim_per_imagestack, act)
 
         # for info panel, keep only the latest frame in the stack
         self.cnn_info = nn.Sequential(
-            ConvBlock(3, c1, 5, 2, 2, groupnorm, num_groups, act),  # 128x128x3 -> 64x64xc1
+            downsample_block(3, c1),   # 128x128x3 -> 64x64xc1
             downsample_block(c1, c2),  # 64x64xc1 -> 32x32xc2
             downsample_block(c2, c3),  # 32x32x(c2) -> 16x16x(c3)
             downsample_block(c3, c4),  # 16x16x(c3) -> 8x8x(c4)
-            ConvBlock(c4, c5, 3, 1, 0, groupnorm, num_groups, act),  # 8x8x(c4) -> 6x6x(c5)
             nn.Flatten(),
         )
-        self.hidden_info = nn.Sequential(nn.Linear(self.flatten_out, self.hidden_dim_per_imagestack), activation_fn(act))
+        self.hidden_info = linear(self.flatten_out, self.hidden_dim_per_imagestack, act)
 
         # everything fused
-        self.hidden_fused = nn.Linear(num_images * hidden_dim_per_image, hidden_dim)
-        self.relu = nn.ReLU()
+        self.hidden_fused = linear(self.num_images * self.hidden_dim_per_imagestack, hidden_dim, act)
         self.final_fc = nn.Linear(hidden_dim, dim_out)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -136,6 +146,11 @@ class ModelArchitecture(nn.Module):
 
         # stem using shared weights for spatial feature extraction
         cam_x = cam_x.reshape(-1, 3, H, W)         # (B * num_cams * framestack_per_cam, 3, 128, 128)
+
+        # imagenet like normalization:
+        if self.imagenet_norm:
+            cam_x = (cam_x - self.per_channel_mean.to(cam_x.device)) / self.per_channel_std.to(cam_x.device)
+
         cam_x = self.stem_cams(cam_x)           # (B * num_cams * framestack_per_cam, c2, 32, 32)
 
         # temporal mixing per cam using shared weights
@@ -149,19 +164,22 @@ class ModelArchitecture(nn.Module):
         # do minimap
         minimap_x = x[:, -2, :, :, :]                     # (B, c_in, 128, 128)
         minimap_x = minimap_x[:, -3:, :, :]               # (B, 3, 128, 128) -- keep only latest frame
+        if self.imagenet_norm:
+            minimap_x = (minimap_x - self.per_channel_mean.to(minimap_x.device)) / self.per_channel_std.to(minimap_x.device)
         minimap_x = self.cnn_minimap(minimap_x)           # (B, flatten_out)
         minimap_x = self.hidden_minimap(minimap_x)        # (B, hidden_dim_per_imagestack)
 
         # do info panel
         info_x = x[:, -1, :, :, :]                        # (B, c_in, 128, 128)
         info_x = info_x[:, -3:, :, :]                     # (B, 3, 128, 128) -- keep only latest frame
+        if self.imagenet_norm:
+            info_x = (info_x - self.per_channel_mean.to(info_x.device)) / self.per_channel_std.to(info_x.device)
         info_x = self.cnn_info(info_x)                    # (B, flatten_out)
         info_x = self.hidden_info(info_x)                 # (B, hidden_dim_per_imagestack)
 
         # fuse all
         x = torch.concat([cam_x, minimap_x, info_x], dim=1)  # (B, num_images * hidden_dim_per_imagestack)
         x = self.hidden_fused(x)                             # (B, hidden_dim)
-        x = self.relu(x)
 
         # final output
         x = self.final_fc(x)                              # (B, dim_out)
@@ -179,6 +197,7 @@ WANDB_CONFIG = {
 }
 ENV_CONFIG = {
     "use_das": True,                   # use driving assistance system (DAS) with speed target, time headway target, indicator and stop at intersection controls. Else, use acceleration control.
+    "merge_assist": True,              # use merge assistance in DAS mode
     "cam_resolution": (128, 128),       # width, height
     "framestack": 3,
     "anti_aliasing": True,
@@ -231,10 +250,12 @@ PPO_CONFIG = {
 NET_CONFIG = {
     "hidden_dim_per_image": 128,
     "hidden_dim": 512,
-    "c_base": 32,
-    "deep_downsample": False,
+    "c_base": 16,
+    "deep": False,
     "residual": False,
     "groupnorm": False,
+    "layernorm": False,
+    "imagenet_norm": False,
     "num_groups": 32,
     "act": "relu",
 }

@@ -41,6 +41,7 @@ class AwesimEnv(gym.Env):
     def __init__(
         self,
         use_das: bool = True,
+        merge_assist: bool = True,
         cam_resolution: Tuple[int, int] = DEFAULT_CAM_RESOLUTION,
         anti_aliasing: bool = False,
         reward_shaping: bool = False,
@@ -101,6 +102,7 @@ class AwesimEnv(gym.Env):
 
         # Environment configuration
         self.use_das = use_das
+        self.merge_assist = merge_assist
         self.cam_resolution = cam_resolution
         self.anti_aliasing = anti_aliasing
         self.reward_shaping = reward_shaping
@@ -379,6 +381,8 @@ class AwesimEnv(gym.Env):
             A.sim_set_agent_driving_assistant_enabled(self.sim, True)
             self.das = A.sim_get_driving_assistant(self.sim, self.agent.id)
             A.driving_assistant_reset_settings(self.das, self.agent)
+            if not self.merge_assist:
+                A.driving_assistant_configure_merge_assistance(self.das, self.agent, self.sim, False)
 
         # Configure collision checker
         A.collisions_reset(self.collision_checker)
