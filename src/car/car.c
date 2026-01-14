@@ -209,15 +209,86 @@ void car_update_geometry(Simulation* sim, Car* car) {
         car->center = vec_add(start, vec_scale(delta, car->lane_progress));
         car->orientation = angle_normalize(atan2(delta.y, delta.x));
     } else if (lane->type == QUARTER_ARC_LANE) {
+        // Compute theoretical position on the ideal circular arc
         double theta = lane->start_angle + car->lane_progress * (lane->end_angle - lane->start_angle);
         theta = angle_normalize(theta);
-        car->center.x = lane->center.x + lane->radius * cos(theta);
-        car->center.y = lane->center.y + lane->radius * sin(theta);
+        Vec2D theoretical_pos = {
+            lane->center.x + lane->radius * cos(theta),
+            lane->center.y + lane->radius * sin(theta)
+        };
+
+        // Compute theoretical start (p=0) and end (p=1) positions
+        Vec2D theoretical_start = {
+            lane->center.x + lane->radius * cos(lane->start_angle),
+            lane->center.y + lane->radius * sin(lane->start_angle)
+        };
+        Vec2D theoretical_end = {
+            lane->center.x + lane->radius * cos(lane->end_angle),
+            lane->center.y + lane->radius * sin(lane->end_angle)
+        };
+
+        // Get actual start/end points from connecting lanes to fix misalignment
+        Map* map = sim_get_map(sim);
+        Lane* incoming = lane_get_connection_incoming_straight(lane, map);
+        Lane* outgoing = lane_get_connection_straight(lane, map);
+
+        Vec2D actual_start = incoming ? incoming->end_point : lane->start_point;
+        Vec2D actual_end = outgoing ? outgoing->start_point : lane->end_point;
+
+        // Interpolate the offset
+        Vec2D offset_start = vec_sub(actual_start, theoretical_start);
+        Vec2D offset_end = vec_sub(actual_end, theoretical_end);
+        double p = car->lane_progress;
+        Vec2D current_offset = vec_add(vec_scale(offset_start, 1.0 - p), vec_scale(offset_end, p));
+
+        // Apply offset
+        car->center = vec_add(theoretical_pos, current_offset);
+
+        // Orientation smoothing
+        // 1. Theoretical orientation on the arc
+        double theoretical_orient;
         if (lane->direction == DIRECTION_CCW) {
-            car->orientation = angles_add(theta, M_PI / 2); // CCW: tangent is +90 deg
+            theoretical_orient = angles_add(theta, M_PI_2);
         } else {
-            car->orientation = angles_add(theta, -M_PI / 2); // CW: tangent is -90 deg
+            theoretical_orient = angles_add(theta, -M_PI_2);
         }
+        
+        // 2. Actual orientations at boundaries
+        double actual_start_orient;
+        if (incoming && incoming->type == LINEAR_LANE) {
+            Vec2D d = vec_sub(incoming->end_point, incoming->start_point);
+            actual_start_orient = angle_normalize(atan2(d.y, d.x));
+        } else {
+            // Fallback to theoretical start tangent
+            double angle = lane->start_angle;
+            actual_start_orient = (lane->direction == DIRECTION_CCW) ? angles_add(angle, M_PI_2) : angles_add(angle, -M_PI_2);
+        }
+
+        double actual_end_orient;
+        if (outgoing && outgoing->type == LINEAR_LANE) {
+            Vec2D d = vec_sub(outgoing->end_point, outgoing->start_point);
+            actual_end_orient = angle_normalize(atan2(d.y, d.x));
+        } else {
+             // Fallback to theoretical end tangent
+             double angle = lane->end_angle;
+             actual_end_orient = (lane->direction == DIRECTION_CCW) ? angles_add(angle, M_PI_2) : angles_add(angle, -M_PI_2);
+        }
+
+        // 3. Theoretical orientations at boundaries
+        double theoretical_start_orient = (lane->direction == DIRECTION_CCW) ? angles_add(lane->start_angle, M_PI_2) : angles_add(lane->start_angle, -M_PI_2);
+        double theoretical_end_orient = (lane->direction == DIRECTION_CCW) ? angles_add(lane->end_angle, M_PI_2) : angles_add(lane->end_angle, -M_PI_2);
+
+        // 4. Interpolate the angular offsets
+        double diff_start = actual_start_orient - angle_normalize(theoretical_start_orient);
+        while (diff_start <= -M_PI) diff_start += 2 * M_PI;
+        while (diff_start > M_PI) diff_start -= 2 * M_PI;
+
+        double diff_end = actual_end_orient - angle_normalize(theoretical_end_orient);
+        while (diff_end <= -M_PI) diff_end += 2 * M_PI;
+        while (diff_end > M_PI) diff_end -= 2 * M_PI;
+
+        double current_orient_offset = diff_start * (1.0 - p) + diff_end * p;
+        car->orientation = angle_normalize(theoretical_orient + current_orient_offset);
     } else {
         LOG_ERROR("Cannot update geometry for car %d: unknown lane type.", car->id);
         return;

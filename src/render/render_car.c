@@ -145,7 +145,7 @@ static void render_indicator(SDL_Renderer* renderer, const Car* car, CarIndicato
 }
 
 
-void render_car(SDL_Renderer* renderer, const Car* car, Map* map, const bool paint_id, const bool paint_speed) {
+void render_car(SDL_Renderer* renderer, const Car* car, Map* map, bool paint_id, bool paint_speed) {
 
     if (CAMERA_CENTERED_ON_CAR_ENABLED && car->id == CAMERA_CENTERED_ON_CAR_ID) {
         PAN_X = (int)(car->center.x * SCALE);

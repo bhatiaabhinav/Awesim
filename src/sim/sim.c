@@ -52,6 +52,32 @@ ClockReading clock_reading_add(const ClockReading clock1, const ClockReading clo
     );
 }
 
+const ClockReading Monday_12_AM = { 0, 0, 0, 0.0, MONDAY };
+const ClockReading Monday_1_AM = { 0, 1, 0, 0.0, MONDAY };
+const ClockReading Monday_2_AM = { 0, 2, 0, 0.0, MONDAY };
+const ClockReading Monday_3_AM = { 0, 3, 0, 0.0, MONDAY };
+const ClockReading Monday_4_AM = { 0, 4, 0, 0.0, MONDAY };
+const ClockReading Monday_5_AM = { 0, 5, 0, 0.0, MONDAY };
+const ClockReading Monday_6_AM = { 0, 6, 0, 0.0, MONDAY };
+const ClockReading Monday_7_AM = { 0, 7, 0, 0.0, MONDAY };
+const ClockReading Monday_8_AM = { 0, 8, 0, 0.0, MONDAY };
+const ClockReading Monday_9_AM = { 0, 9, 0, 0.0, MONDAY };
+const ClockReading Monday_10_AM = { 0, 10, 0, 0.0, MONDAY };
+const ClockReading Monday_11_AM = { 0, 11, 0, 0.0, MONDAY };
+
+const ClockReading Monday_12_PM = { 0, 12, 0, 0.0, MONDAY };
+const ClockReading Monday_1_PM = { 0, 13, 0, 0.0, MONDAY };
+const ClockReading Monday_2_PM = { 0, 14, 0, 0.0, MONDAY };
+const ClockReading Monday_3_PM = { 0, 15, 0, 0.0, MONDAY };
+const ClockReading Monday_4_PM = { 0, 16, 0, 0.0, MONDAY };
+const ClockReading Monday_5_PM = { 0, 17, 0, 0.0, MONDAY };
+const ClockReading Monday_6_PM = { 0, 18, 0, 0.0, MONDAY };
+const ClockReading Monday_7_PM = { 0, 19, 0, 0.0, MONDAY };
+const ClockReading Monday_8_PM = { 0, 20, 0, 0.0, MONDAY };
+const ClockReading Monday_9_PM = { 0, 21, 0, 0.0, MONDAY };
+const ClockReading Monday_10_PM = { 0, 22, 0, 0.0, MONDAY };
+const ClockReading Monday_11_PM = { 0, 23, 0, 0.0, MONDAY };
+
 // --- Simulation Core Functions ---
 
 Simulation* sim_malloc() {

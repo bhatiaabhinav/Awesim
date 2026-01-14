@@ -376,9 +376,31 @@ void situational_awareness_build(Simulation* sim, CarId car_id) {
         bool is_NS = (lane_dir == DIRECTION_NORTH || lane_dir == DIRECTION_SOUTH);
         switch (intersection_upcoming->state) {
             case FOUR_WAY_STOP:
-                situation->light_for_turn[INDICATOR_LEFT] = TRAFFIC_LIGHT_STOP;
-                situation->light_for_turn[INDICATOR_NONE] = TRAFFIC_LIGHT_STOP;
-                situation->light_for_turn[INDICATOR_RIGHT] = TRAFFIC_LIGHT_STOP;
+                situation->light_for_turn[INDICATOR_LEFT] = TRAFFIC_LIGHT_STOP_FCFS;
+                situation->light_for_turn[INDICATOR_NONE] = TRAFFIC_LIGHT_STOP_FCFS;
+                situation->light_for_turn[INDICATOR_RIGHT] = TRAFFIC_LIGHT_STOP_FCFS;
+                break;
+            case T_JUNC_NS:
+                if (is_NS) {
+                    situation->light_for_turn[INDICATOR_LEFT] = TRAFFIC_LIGHT_GREEN_YIELD;
+                    situation->light_for_turn[INDICATOR_NONE] = TRAFFIC_LIGHT_GREEN;
+                    situation->light_for_turn[INDICATOR_RIGHT] = TRAFFIC_LIGHT_GREEN;
+                } else {
+                    situation->light_for_turn[INDICATOR_LEFT] = TRAFFIC_LIGHT_GREEN_YIELD;
+                    situation->light_for_turn[INDICATOR_NONE] = TRAFFIC_LIGHT_RED;          // should not exist
+                    situation->light_for_turn[INDICATOR_RIGHT] = TRAFFIC_LIGHT_GREEN_YIELD;
+                }
+                break;
+            case T_JUNC_EW:
+                if (is_NS) {
+                    situation->light_for_turn[INDICATOR_LEFT] = TRAFFIC_LIGHT_GREEN_YIELD;
+                    situation->light_for_turn[INDICATOR_NONE] = TRAFFIC_LIGHT_RED;          // should not exist
+                    situation->light_for_turn[INDICATOR_RIGHT] = TRAFFIC_LIGHT_GREEN_YIELD;
+                } else {
+                    situation->light_for_turn[INDICATOR_LEFT] = TRAFFIC_LIGHT_GREEN_YIELD;
+                    situation->light_for_turn[INDICATOR_NONE] = TRAFFIC_LIGHT_GREEN;
+                    situation->light_for_turn[INDICATOR_RIGHT] = TRAFFIC_LIGHT_GREEN;
+                }
                 break;
             case NS_GREEN_EW_RED:
                 if (is_NS) {
@@ -466,6 +488,13 @@ void situational_awareness_build(Simulation* sim, CarId car_id) {
     LaneId straight_outcome_id = situation->lane_target_for_indicator[INDICATOR_NONE] ? situation->lane_target_for_indicator[INDICATOR_NONE]->id : ID_NULL;
     LaneId right_outcome_id = situation->lane_target_for_indicator[INDICATOR_RIGHT] ? situation->lane_target_for_indicator[INDICATOR_RIGHT]->id : ID_NULL;
     LOG_TRACE("Car %d: Lane indicator outcomes: left=%d (is a merge = %d), none=%d, right=%d (is an exit = %d)", car->id, left_outcome_id, situation->merges_into_lane != NULL, straight_outcome_id, right_outcome_id, situation->exit_lane != NULL);
+    
+    situation->is_my_turn_at_stop_sign_fcfs = intersection_upcoming && intersection_upcoming->state == FOUR_WAY_STOP && intersection_upcoming->cars_at_stop_sign_fcfs_queue[0] == car->id;
+    if (situation->is_my_turn_at_stop_sign_fcfs) {
+        LOG_TRACE("Car %d: It is my turn at the four-way stop sign (FCFS).", car->id);
+    } else {
+        LOG_TRACE("Car %d: It is NOT my turn at the four-way stop sign (FCFS).", car->id);
+    }
 
 
 

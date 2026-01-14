@@ -339,12 +339,12 @@ double to_gallons(Liters l);
 
 // Enum representing compass directions and rotation.
 typedef enum {
-    DIRECTION_CCW,    // Counter-clockwise
-    DIRECTION_CW,     // Clockwise
     DIRECTION_EAST,
     DIRECTION_WEST,
     DIRECTION_NORTH,
     DIRECTION_SOUTH,
+    DIRECTION_CCW,    // Counter-clockwise
+    DIRECTION_CW,     // Clockwise
 } Direction;
 
 // Returns the unit vector for a direction (N, S, E, W only).
@@ -355,6 +355,12 @@ Vec2D direction_perpendicular_vector(Direction direction);
 
 // Returns the opposite of a given direction.
 Direction direction_opposite(Direction direction);
+
+// Returns the direction obtained by rotating the given direction 90 degrees clockwise. N->E->S->W->N
+Direction direction_perp_cw(Direction direction);
+
+// Returns the direction obtained by rotating the given direction 90 degrees counter-clockwise. N->W->S->E->N
+Direction direction_perp_ccw(Direction direction);
 
 
 

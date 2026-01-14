@@ -83,16 +83,16 @@ SDL_Point to_screen_coords(const Coordinates point, const int width, const int h
 void render_lane_center_line(SDL_Renderer* renderer, const Lane* lane, Map* map, const SDL_Color color, bool dotted);
 
 // Renders a linear lane, optionally painting lane lines and arrows.
-void render_lane_linear(SDL_Renderer* renderer, const Lane* lane, Map* map, const bool paint_lines, const bool paint_arrows, const bool paint_id);
+void render_lane_linear(SDL_Renderer* renderer, const Lane* lane, Map* map, bool paint_lines, bool paint_arrows, bool paint_id);
 
 // Renders a quarter arc lane, optionally painting lane lines and arrows.
-void render_lane_quarterarc(SDL_Renderer* renderer, const Lane* lane, Map* map, const bool paint_lines, const bool paint_arrows, const bool paint_id);
+void render_lane_quarterarc(SDL_Renderer* renderer, const Lane* lane, Map* map, bool paint_lines, bool paint_arrows, bool paint_id);
 
 // Renders an intersection area and its traffic lights.
 void render_intersection(SDL_Renderer* renderer, const Intersection* intersection, Map* map);
 
 // Renders a generic lane by delegating to the appropriate lane type renderer.
-void render_lane(SDL_Renderer* renderer, const Lane* lane, Map* map, const bool paint_lines, const bool paint_arrows, const bool paint_id);
+void render_lane(SDL_Renderer* renderer, const Lane* lane, Map* map, bool paint_lines, bool paint_arrows, bool paint_id);
 
 // Draws a dotted line between two screen points using the specified color.
 void draw_dotted_line(SDL_Renderer* renderer, const SDL_Point start, const SDL_Point end, const SDL_Color color);
@@ -104,7 +104,7 @@ void drawFilledInwardRoundedRect(SDL_Renderer *renderer, const int x, const int 
 void drawQuarterCircleOutline(SDL_Renderer *renderer, const int center_x, const int center_y, const int radius, const int quadrant, const int thickness);
 
 // Renders a car based on its current lane and position.
-void render_car(SDL_Renderer* renderer, const Car* car, Map* map, const bool paint_id, const bool paint_speed);
+void render_car(SDL_Renderer* renderer, const Car* car, Map* map, bool paint_id, bool paint_speed);
 
 // Renders a lidar
 void render_lidar(SDL_Renderer* renderer, const Lidar* lidar);
@@ -122,7 +122,7 @@ void render_minimap(SDL_Renderer* renderer, const MiniMap* minimap);
 void render_collisions(SDL_Renderer* renderer, Simulation* sim, Collisions* collisions);
 
 // Renders the entire simulation state: roads, cars, lanes, traffic.
-void render_sim(SDL_Renderer* renderer, Simulation* sim, const bool draw_lanes, const bool draw_cars, const bool draw_track_lines, const bool draw_traffic_lights, const bool draw_car_ids, const bool draw_car_speeds, const bool draw_lane_ids, const bool draw_road_names, bool draw_lidar, bool draw_camera, bool draw_minimap, bool draw_infos_display, int hud_font_size, const bool benchmark);
+void render_sim(SDL_Renderer* renderer, Simulation* sim, bool draw_lanes, bool draw_cars, bool draw_track_lines, bool draw_traffic_lights, bool draw_car_ids, bool draw_car_speeds, bool draw_lane_ids, bool draw_road_names, bool draw_lidar, bool draw_camera, bool draw_minimap, bool draw_infos_display, int hud_font_size, bool benchmark);
 
 // thickLineRGBA(renderer, p1.x, p1.y, p2.x, p2.y, thickness, color.r, color.g, color.b, color.a);
 

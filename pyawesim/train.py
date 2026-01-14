@@ -1,7 +1,7 @@
 import ast
 import os
 import sys
-from typing import Tuple
+from typing import Tuple, Optional
 
 import gymnasium
 import matplotlib.pyplot as plt
@@ -27,7 +27,7 @@ class ConvBlock(nn.Module):
     def __init__(self, c_in, c_out, kernel_size, stride, padding, groupnorm, num_groups, act):
         super().__init__()
         self.conv = nn.Conv2d(c_in, c_out, kernel_size=kernel_size, stride=stride, padding=padding)
-        self.gn = None if not groupnorm else nn.GroupNorm(min(num_groups, c_out), c_out)
+        self.gn = None if (not groupnorm or c_out <= 8) else nn.GroupNorm(min(num_groups, c_out), c_out)
         self.act = activation_fn(act) if act is not None else None
 
     def forward(self, x):
@@ -60,16 +60,19 @@ class ConvBlockDeepDownsample(nn.Module):
 
 class ModelArchitecture(nn.Module):
 
-    def __init__(self, hidden_dim_per_image, hidden_dim: int, dim_out: int, c_in: int = 3, c_base: int = 32, num_images: int = 9, deep=False, residual=False, groupnorm=False, layernorm=False, imagenet_norm=False, num_groups=32, act='relu'):
+    def __init__(self, hidden_dim_per_image, hidden_dim: int, dim_out: int, c_in: int = 3, c_base: int = 32, num_images: int = 9, deep=False, residual=False, shared_cnn_cams=False, groupnorm=False, layernorm=False, imagenet_norm=False, num_groups=32, act='relu', attention_fusion=False, num_encoder_layers=1, num_heads=4):
         super().__init__()
+        self.attention_fusion = attention_fusion
         self.hidden_dim_per_imagestack = hidden_dim_per_image
         self.hidden_dim = hidden_dim
         self.num_images = num_images
         self.num_cams = num_images - 2  # cameras + minimap + speedometer etc.
         self.c_in = c_in    # per cam
         self.imagenet_norm = imagenet_norm
+        self.post_attn_act = activation_fn(act)
         self.per_channel_mean = torch.tensor([0.485, 0.456, 0.406], requires_grad=False, dtype=torch.float32).view(1, 3, 1, 1)
         self.per_channel_std = torch.tensor([0.229, 0.224, 0.225], requires_grad=False, dtype=torch.float32).view(1, 3, 1, 1)
+        self.shared_cnn_cams = shared_cnn_cams
 
         if c_in % 3 != 0:
             raise ValueError(
@@ -102,13 +105,18 @@ class ModelArchitecture(nn.Module):
             downsample_block(c1, c2)   # 64x64xc1 -> 32x32xc2
         )
 
-        # Remaining network operating on temporally stacked features. Different cameras are in the batch dimension now, so spatio-temporal mixing happens for each camera separately, using shared weights.
-        self.cnn_cams = nn.Sequential(
-            conv_block(c2 * self.framestack_per_cam, c2, 1, 1, 0),  # 1x1 conv to compress temporal info
-            downsample_block(c2, c3),  # 32x32x(c2) -> 16x16x(c3)
-            downsample_block(c3, c4),  # 16x16x(c3) -> 8x8x(c4)
-            nn.Flatten(),
-        )
+        def make_cnn_cam():
+            return nn.Sequential(
+                conv_block(c2 * self.framestack_per_cam, c2, 1, 1, 0),  # 1x1 conv to compress temporal info
+                downsample_block(c2, c3),  # 32x32x(c2) -> 16x16x(c3)
+                downsample_block(c3, c4),  # 16x16x(c3) -> 8x8x(c4)
+                nn.Flatten(),
+            )
+        if shared_cnn_cams:
+            # Remaining network operating on temporally stacked features. Different cameras are in the batch dimension now, so spatio-temporal mixing happens for each camera separately, using shared weights.
+            self.cnn_cams = make_cnn_cam()
+        else:
+            self.cnn_cams = nn.ModuleList([make_cnn_cam() for _ in range(self.num_cams)])
 
         self.hidden_cams = nn.ModuleList([linear(self.flatten_out, self.hidden_dim_per_imagestack, act) for _ in range(self.num_cams)])
 
@@ -132,6 +140,12 @@ class ModelArchitecture(nn.Module):
         )
         self.hidden_info = linear(self.flatten_out, self.hidden_dim_per_imagestack, act)
 
+        if self.attention_fusion:
+            encoder_layer = nn.TransformerEncoderLayer(d_model=self.hidden_dim_per_imagestack, nhead=num_heads, dim_feedforward=self.hidden_dim_per_imagestack*4, batch_first=True, dropout=0)
+            self.attention = nn.TransformerEncoder(encoder_layer, num_layers=num_encoder_layers)
+            self.cam_pos_embedding = nn.Parameter(torch.zeros(1, self.num_cams, self.hidden_dim_per_imagestack))
+            nn.init.trunc_normal_(self.cam_pos_embedding, std=0.02)
+
         # everything fused
         self.hidden_fused = linear(self.num_images * self.hidden_dim_per_imagestack, hidden_dim, act)
         self.final_fc = nn.Linear(hidden_dim, dim_out)
@@ -153,13 +167,32 @@ class ModelArchitecture(nn.Module):
 
         cam_x = self.stem_cams(cam_x)           # (B * num_cams * framestack_per_cam, c2, 32, 32)
 
-        # temporal mixing per cam using shared weights
-        cam_x = cam_x.view(B * self.num_cams, -1, cam_x.shape[2], cam_x.shape[3])  # (B * num_cams, c2 * framestack_per_cam, 32, 32)
-        cam_x = self.cnn_cams(cam_x)                                               # (B * num_cams, flatten_out)
+        if self.shared_cnn_cams:
+            # temporal mixing per cam using shared weights
+            cam_x = cam_x.view(B * self.num_cams, -1, cam_x.shape[2], cam_x.shape[3])  # (B * num_cams, c2 * framestack_per_cam, 32, 32)
+            cam_x = self.cnn_cams(cam_x)                                               # (B * num_cams, flatten_out)
 
-        # per-cam hidden and conca
-        cam_x = cam_x.view(B, self.num_cams, -1)               # (B, num_cams, flatten_out)
-        cam_x = torch.concat([self.hidden_cams[i](cam_x[:, i, :]) for i in range(self.num_cams)], dim=1)  # (B, num_cams * hidden_dim_per_imagestack)
+            # per-cam hidden and conca
+            cam_x = cam_x.view(B, self.num_cams, -1)               # (B, num_cams, flatten_out)
+            cam_features_list = [self.hidden_cams[i](cam_x[:, i, :]) for i in range(self.num_cams)]
+        else:
+            # temporal mixing per cam using separate weights
+            cam_x = cam_x.view(B, self.num_cams, -1, cam_x.shape[2], cam_x.shape[3])  # (B, num_cams, c2 * framestack_per_cam, 32, 32)
+            # Apply each cnn_cam to corresponding camera slice
+            cam_features_list = []
+            for i in range(self.num_cams):
+                out = self.cnn_cams[i](cam_x[:, i])  # (B, flatten_out)
+                out = self.hidden_cams[i](out)       # (B, hidden_dim_per_imagestack)
+                cam_features_list.append(out)
+
+        if self.attention_fusion:
+            cam_features_stacked = torch.stack(cam_features_list, dim=1)  # (B, num_cams, hidden_dim_per_imagestack)
+            cam_features_stacked = cam_features_stacked + self.cam_pos_embedding
+            cam_features_stacked = self.attention(cam_features_stacked)
+            cam_features_stacked = self.post_attn_act(cam_features_stacked)
+            cam_x = cam_features_stacked.flatten(1)  # (B, num_cams * hidden_dim_per_imagestack)
+        else:
+            cam_x = torch.concat(cam_features_list, dim=1)  # (B, num_cams * hidden_dim_per_imagestack)
 
         # do minimap
         minimap_x = x[:, -2, :, :, :]                     # (B, c_in, 128, 128)
@@ -198,11 +231,15 @@ WANDB_CONFIG = {
 ENV_CONFIG = {
     "use_das": True,                   # use driving assistance system (DAS) with speed target, time headway target, indicator and stop at intersection controls. Else, use acceleration control.
     "merge_assist": True,              # use merge assistance in DAS mode
+    "follow_assist": True,             # use follow assistance in DAS mode to match speed of lead vehicle with follow distance proportional to speed (3 second headway rule)
+    "aeb_assist": True,                # use automatic emergency braking assistance in DAS mode
+    "stop_assist": True,               # use stop at intersection assistance in DAS mode using a stop action
     "cam_resolution": (128, 128),       # width, height
+    "deprecated_info_display": False,  # use the old info display method if True
     "framestack": 3,
     "anti_aliasing": True,
     "goal_lane": 84,
-    "city_width": 1000,                 # in meters
+    "city_width": 1500,                 # in meters
     "num_cars": 256,                    # number of other cars in the environment
     "decision_interval": 1.0,             # in seconds, how often the agent can take an action (reconfigure the driving assist), or how often the acceleration is applied in non-DAS mode
     "sim_duration": 60 * 60,            # 60 minutes max duration after which the episode ends and wage for entire 8-hour workday is lost
@@ -214,6 +251,7 @@ ENV_CONFIG = {
     "init_fuel_gallons": 3.0,           # initial fuel in gallons -- 1/4th of a 12-gallon tank car
     "goal_reward": 100.0,                 # A positive number to incentivize reaching the goal
     "crash_penalty": 100.0,               # Dense signal for crashing
+    "crash_ends_episode": True,
     "reward_shaping": True,
     "reward_shaping_gamma": 1.0,
 }
@@ -251,16 +289,20 @@ NET_CONFIG = {
     "hidden_dim_per_image": 128,
     "hidden_dim": 512,
     "c_base": 16,
-    "deep": False,
+    "deep": True,
     "residual": False,
+    "shared_cnn_cams": True,
     "groupnorm": False,
     "layernorm": False,
     "imagenet_norm": False,
     "num_groups": 32,
     "act": "relu",
+    "attention_fusion": False,
+    "num_encoder_layers": 1,
+    "num_heads": 4,
 }
 POLICY_CONFIG = {
-    "norm_obs": True,
+    "norm_obs": True,   # by running mean and std of observations
     "state_dependent_std": True,
 }
 
@@ -288,7 +330,7 @@ def train_model() -> Tuple[ActorBase, Critic, PPO]:
         wandb.init(
             project=WANDB_CONFIG["project"],
             name=WANDB_CONFIG["experiment_name"],
-            config={**ENV_CONFIG, **VEC_ENV_CONFIG, **PPO_CONFIG, **POLICY_CONFIG},
+            config={**ENV_CONFIG, **VEC_ENV_CONFIG, **PPO_CONFIG, **POLICY_CONFIG, **NET_CONFIG},
             notes=WANDB_CONFIG["notes"],
             save_code=True,
         )
@@ -441,7 +483,7 @@ if __name__ == "__main__":
                 print(f"\033[93mWarning: key {k} not found in any config, ignoring the override.\033[0m")
 
     print("Final configuration:")
-    CONFIG = {**WANDB_CONFIG, **ENV_CONFIG, **VEC_ENV_CONFIG, **PPO_CONFIG, **POLICY_CONFIG}
+    CONFIG = {**WANDB_CONFIG, **ENV_CONFIG, **VEC_ENV_CONFIG, **PPO_CONFIG, **POLICY_CONFIG, **NET_CONFIG}
     for k, v in CONFIG.items():
         print(f"  {k}: {v}")
 

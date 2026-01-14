@@ -18,7 +18,7 @@ typedef enum {
     TRAFFIC_LIGHT_YELLOW_YIELD,
     TRAFFIC_LIGHT_RED,
     TRAFFIC_LIGHT_RED_YIELD,
-    TRAFFIC_LIGHT_STOP,
+    TRAFFIC_LIGHT_STOP_FCFS,
     TRAFFIC_LIGHT_YIELD,
     TRAFFIC_LIGHT_NONE,
 } TrafficLight;
@@ -277,6 +277,7 @@ struct SituationalAwareness {
     const Lane* merges_into_lane;           // Lane that this lane merges into
     const Lane* exit_lane;                  // Lane that this lane exits into
     const Lane* lane_target_for_indicator[3];   // Potential target lane for the lane change indicator (left, none, right)
+    bool is_my_turn_at_stop_sign_fcfs;     // If at a four-way stop sign, is it my turn to go based on FCFS?
     
 
     // Surrounding Vehicles
@@ -341,7 +342,7 @@ MetersPerSecondSquared car_compute_acceleration_adaptive_cruise(const Car* car, 
 
 BrakingDistance car_compute_braking_distance(const Car* car);
 
-bool car_should_yield_at_intersection(const Car* car, Simulation* sim, const SituationalAwareness* situation, CarIndicator turn_indicator);
+bool car_has_something_to_yield_to_at_intersection(const Car* car, Simulation* sim, const SituationalAwareness* situation, CarIndicator turn_indicator);
 
 
 
@@ -491,7 +492,7 @@ MetersPerSecondSquared control_speed_compute_bounded_accel(ControlError error, M
 #define AEB_DISENGAGE_MAX_SPEED_MPS 0.0045              // AEB disengages when ego speed falls below 0.0045 m/s (≈ 0.01 mph)
 #define AEB_ENGAGE_BEST_CASE_BRAKING_GAP_M 0.9144       // AEB engages if best-case gap under maximum braking is less than 0.9144 m (≈ 3 ft)
 #define AEB_DISENGAGE_BEST_CASE_BRAKING_GAP_M 1.8288    // AEB disengages if best-case gap under maximum braking exceeds 1.8288 m (≈ 6 ft)
-#define DRIVING_ASSISTANT_BUFFER_M 1.0                  // Buffer distance for driving assistant to stop at intersection (in feet) and for stopping behind a lead vehicle (if it exists and is stopped)
+#define DRIVING_ASSISTANT_BUFFER_M STOP_LINE_BUFFER_METERS                  // Buffer distance for driving assistant to stop at intersection (in meters) and for stopping behind a lead vehicle (if it exists and is stopped)
 
 typedef struct DrivingAssistant {
     Seconds last_configured_at;         // Timestamp of the driving assistant's last settings update
@@ -506,6 +507,7 @@ typedef struct DrivingAssistant {
     Seconds thw;                        // Time headway distance to the next vehicle (if exists). Also, the time headway for determining merge safety when merge assistance is active.
     bool should_stop_at_intersection;          // Whether to stop at the next intersection. The car will try to brake as smoothly as possible to stop DRIVING_ASSISTANT_BUFFER_M meter before the intersection. If stop_at_intersection is invoked later than the smoothest braking distance, braking intensity will be automatically adjusted to stop DRIVING_ASSISTANT_BUFFER_M meter before the intersection. If it slightly overshoots over the buffer, it will back up. But if it is impossible to brake in time, the car will still brake hard even though it will overshoot the legal stop line. Once already overshot, this variable is ignored because there is no intersection ahead and the only way the speed still reduces is if the speed_target reduces. This variable also triggers stopping at dead ends.
 
+    bool follow_assistance;         // when false, disables follow mode even if there is a lead vehicle, so that the car will always try to reach speed_target regardless of lead vehicle.
     // Safety assistants
     bool merge_assistance;          // Whether indicated lane change happens only when it is safe to merge, which is when post merging, the distance from the lead car and the following car is geq follow_mode_thw
     bool aeb_assistance;            // Auto-Emergency-Braking (AEB). Whether to apply max braking if our car is projected to be dangerously close, even after max braking, to the lead car (with lead's acceleration accounted). Precisely, it is triggered when this best case braking gap <= AEB_ENGAGE_BEST_CASE_BRAKING_GAP. Moreover, ego vehicle speed must be equal or above AEB_ENGAGE_MIN_SPEED.
@@ -537,6 +539,7 @@ bool driving_assistant_get_should_stop_at_intersection(const DrivingAssistant* d
 CarIndicator driving_assistant_get_merge_intent(const DrivingAssistant* das);
 CarIndicator driving_assistant_get_turn_intent(const DrivingAssistant* das);
 Seconds driving_assistant_get_thw(const DrivingAssistant* das);
+bool driving_assistant_get_follow_assistance(const DrivingAssistant* das);
 bool driving_assistant_get_merge_assistance(const DrivingAssistant* das);
 bool driving_assistant_get_aeb_assistance(const DrivingAssistant* das);
 bool driving_assistant_get_aeb_in_progress(const DrivingAssistant* das);
@@ -552,6 +555,7 @@ void driving_assistant_configure_should_stop_at_intersection(DrivingAssistant* d
 void driving_assistant_configure_merge_intent(DrivingAssistant* das, const Car* car, const Simulation* sim, CarIndicator merge_intent);
 void driving_assistant_configure_turn_intent(DrivingAssistant* das, const Car* car, const Simulation* sim, CarIndicator turn_intent);
 void driving_assistant_configure_thw(DrivingAssistant* das, const Car* car, const Simulation* sim, Seconds thw);
+void driving_assistant_configure_follow_assistance(DrivingAssistant* das, const Car* car, const Simulation* sim, bool follow_assistance);
 void driving_assistant_configure_merge_assistance(DrivingAssistant* das, const Car* car, const Simulation* sim, bool merge_assistance);
 void driving_assistant_configure_aeb_assistance(DrivingAssistant* das, const Car* car, const Simulation* sim, bool aeb_assistance);
 void driving_assistant_configure_use_preferred_accel_profile(DrivingAssistant* das, const Car* car, const Simulation* sim, bool use_preferred_accel_profile);
@@ -621,7 +625,7 @@ int dg_dijkstra_path(const DirectedGraph* g,
 
 
 #define MAX_NODES_PER_LANE 100    // Estimate
-#define MAX_SOLUTION_CAPACITY 128
+#define MAX_SOLUTION_CAPACITY 256
 #define MAX_GRAPH_NODES (MAX_NUM_LANES * MAX_NODES_PER_LANE)
 
 // Navigation Actions

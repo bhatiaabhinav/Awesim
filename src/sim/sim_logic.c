@@ -40,7 +40,7 @@ void sim_integrate(Simulation* self, Seconds time_period) {
 
         for (int i = 0; i < map->num_intersections; i++) {
             const Intersection* intersection = map_get_intersection(map, i);
-            intersection_update((Intersection*)intersection, dt);
+            intersection_update((Intersection*)intersection, self, dt);
         }
         LOG_TRACE("Updated intersections");
 

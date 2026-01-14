@@ -155,6 +155,10 @@ Road* straight_road_create_from_center_dir_len(Map* map, Coordinates center, Dir
 
     Vec2D perp_vector = direction_perpendicular_vector(direction);
 
+    for (int i = 0; i < MAX_NUM_LANES_PER_ROAD; i++) {
+        road->lane_ids[i] = ID_NULL;
+    }
+
     for (int i = 0; i < num_lanes; i++) {
         double offset = (((double)num_lanes - 1) / 2 - i) * lane_width;
         Coordinates lane_center = vec_add(center, vec_scale(perp_vector, offset));
@@ -225,7 +229,7 @@ Road* straight_road_make_opposite_and_update_adjacents(Map* map, Road* road) {
 Road* straight_road_split_at_and_update_connections(Road* road, Map* map, const Meters position, const Meters gap) {
     assert(road->type == STRAIGHT && "Cannot split a non-straight road");
     if (position <= 0 || position >= road->length) {
-        LOG_ERROR("Position out of bounds");
+        LOG_ERROR("Position out of bounds: position=%.2f, road->length=%.2f, road='%s'", position, road->length, road->name);
         return NULL;
     }
     if (gap < 0) {

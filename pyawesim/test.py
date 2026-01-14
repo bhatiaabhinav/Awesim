@@ -19,47 +19,19 @@ TEST_CONFIG = {
     "episodes": 100,                    # number of episodes to run for evaluation
     "video_interval": 10,               # interval for video recording (in episodes), None to disable
 }
-ENV_CONFIG = {
-    "use_das": True,
-    "cam_resolution": (128, 128),       # width, height
-    "framestack": 3,
-    "anti_aliasing": True,
-    "goal_lane": 84,
-    "city_width": 1000,                 # in meters
-    "num_cars": 256,                    # number of other cars in the environment
-    "decision_interval": 1,             # in seconds, how often the agent can take an action (reconfigure the driving assist)
-    "sim_duration": 60 * 60,            # 60 minutes max duration after which the episode ends and wage for entire 8-hour workday is lost
-    "appointment_time": 60 * 20,        # 20 minutes to reach the appointment
-    "cost_gas_per_gallon": 4.0,         # in NYC (USD)
-    "cost_car": 0,                      # cost of the car (USD), incurred if crashed (irrespective of severity)
-    "cost_lost_wage_per_hour": 40,      # of a decent job in NYC (USD)
-    "may_lose_entire_day_wage": False,  # lose entire 8-hour workday wage if not reached by the end of sim_duration
-    "init_fuel_gallons": 3.0,           # initial fuel in gallons -- 1/4th of a 12-gallon tank car
-    "goal_reward": 100.0,                 # A positive number to incentivize reaching the goal
-    "crash_penalty": 100.0,               # Dense signal for crashing
-    "reward_shaping": True,
-    "reward_shaping_gamma": 1.0,
+from train import ENV_CONFIG
+ENV_CONFIG.update({
     "deterministic_actions": True,
-}
+})
 VEC_ENV_CONFIG = {
     "n_envs": 16,
     "async": True,
 }
-NET_CONFIG = {
-    "hidden_dim_per_image": 128,
-    "hidden_dim": 512,
-    "c_base": 32,
-    "deep_downsample": False,
-    "residual": False,
-    "groupnorm": False,
-    "num_groups": 32,
-    "act": "relu",
-}
-POLICY_CONFIG = {
-    "norm_obs": True,
-    "state_dependent_std": True,
+from train import NET_CONFIG
+from train import POLICY_CONFIG
+POLICY_CONFIG.update({
     "deterministic": True,
-}
+})
 
 
 def make_env(env_index: int = 0) -> AwesimEnv:

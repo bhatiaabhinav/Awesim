@@ -6,16 +6,18 @@
 
 // Constants
 #define MAX_CARS_PER_LANE 64
-#define MAX_NUM_ROADS 128
+#define MAX_NUM_ROADS 512
 #define MAX_NUM_LANES_PER_ROAD 4
-#define MAX_NUM_INTERSECTIONS 10
+#define MAX_NUM_INTERSECTIONS 64
 #define MAX_NUM_LANES_PER_INTERSECTION 32
-#define MAX_NUM_LANES 350
-#define LANE_DEGRADATIONS_BUCKETS 5
+#define MAX_NUM_LANES 2048
+#define LANE_DEGRADATIONS_BUCKETS 4
 #define GREEN_DURATION 13
 #define YELLOW_DURATION 5
 #define MINOR_RED_EXTENSION 2
 #define ID_NULL -1
+#define LANE_LENGTH_EPSILON 0.1
+#define STOP_LINE_BUFFER_METERS 1.524  // Stop line distance from end of lane in meters
 
 // Typedef Definitions
 
@@ -276,12 +278,13 @@ typedef enum {
     NS_RED_EW_GREEN,
     EW_YELLOW_NS_RED,
     ALL_RED_BEFORE_NS_GREEN,
+    NUM_TRAFFIC_CONTROL_CYCLIC_STATES,  // Not a real state, just to keep track of number of cyclic states
     FOUR_WAY_STOP,
+    T_JUNC_NS,   // For T-junctions aligned north-south
+    T_JUNC_EW,   // For T-junctions aligned east-west
 } IntersectionState;
 
-#define NUM_TRAFFIC_CONTROL_STATES 6
-
-extern const Seconds TRAFFIC_STATE_DURATIONS[NUM_TRAFFIC_CONTROL_STATES];
+extern const Seconds TRAFFIC_STATE_DURATIONS[NUM_TRAFFIC_CONTROL_CYCLIC_STATES];
 
 typedef struct Intersection {
     // Road base;
@@ -305,8 +308,12 @@ typedef struct Intersection {
     Meters turn_radius;
     bool left_lane_turns_left_only;
     bool right_lane_turns_right_only;
+    bool is_T_junction;
+    bool is_T_junction_north_south; // true if the T junction is north-south oriented, false if east-west oriented (or it's not a T junction)
     IntersectionState state;
     Seconds countdown;
+
+    CarId cars_at_stop_sign_fcfs_queue[4]; // For four-way stop intersections, the IDs of up to 4 cars currently waiting at the stop sign, in the order they arrived. For other intersection types, all are ID_NULL.
 } Intersection;
 
 // Intersection Setters
@@ -334,6 +341,14 @@ Road* intersection_get_road_northbound_from(const Intersection* self, Map* map);
 Road* intersection_get_road_northbound_to(const Intersection* self, Map* map);
 Road* intersection_get_road_southbound_from(const Intersection* self, Map* map);
 Road* intersection_get_road_southbound_to(const Intersection* self, Map* map);
+
+// Fancier functions
+
+// Gets the foremost vehicle (the vehicle whose leading edge is closest to the intersection center) among all lanes of the intersection.
+Car* intersection_get_foremost_vehicle(const Intersection* self, Simulation* sim);
+
+// Checks where there is any car *on* the intersection (i.e., in any of its lanes)
+bool intersection_is_any_car_on_intersection(const Intersection* self, Simulation* sim);
 
 // Intersection Creaters
 
@@ -366,7 +381,7 @@ Intersection* intersection_create_from_crossing_roads_and_update_connections(
     MetersPerSecond speed_limit,
     double grip
 );
-void intersection_update(Intersection* self, Seconds dt);
+void intersection_update(Intersection* self, Simulation* sim, Seconds dt);
 void print_traffic_state(const Intersection* intersection);
 
 Intersection* road_leads_to_intersection(const Road* road, Map* map);

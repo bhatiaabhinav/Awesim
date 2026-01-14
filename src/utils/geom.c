@@ -263,6 +263,30 @@ Direction direction_opposite(Direction direction) {
     }
 }
 
+Direction direction_perp_cw(Direction direction) {
+    switch (direction) {
+        case DIRECTION_EAST:  return DIRECTION_SOUTH;
+        case DIRECTION_WEST:  return DIRECTION_NORTH;
+        case DIRECTION_NORTH: return DIRECTION_EAST;
+        case DIRECTION_SOUTH: return DIRECTION_WEST;
+        default:
+            fprintf(stderr, "Unsupported direction for perp_cw: %d\n", direction);
+            exit(EXIT_FAILURE);
+    }
+}
+
+Direction direction_perp_ccw(Direction direction) {
+    switch (direction) {
+        case DIRECTION_EAST:  return DIRECTION_NORTH;
+        case DIRECTION_WEST:  return DIRECTION_SOUTH;
+        case DIRECTION_NORTH: return DIRECTION_WEST;
+        case DIRECTION_SOUTH: return DIRECTION_EAST;
+        default:
+            fprintf(stderr, "Unsupported direction for perp_ccw: %d\n", direction);
+            exit(EXIT_FAILURE);
+    }
+}
+
 //
 // Rotated Rectangle Intersection
 //

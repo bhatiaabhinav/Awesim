@@ -54,7 +54,8 @@ void render_intersection_name(SDL_Renderer* renderer, const Intersection* inters
         LOG_ERROR("Cannot render intersection name: intersection is NULL");
         return;
     }
-    const char* name = intersection->name;
+    char name[256];
+    snprintf(name, sizeof(name), "%s (%d)", intersection->name, intersection->id);
     Coordinates center = intersection->center;
     SDL_Point center_screen = to_screen_coords(center, WINDOW_SIZE_WIDTH, WINDOW_SIZE_HEIGHT);
     int text_x = center_screen.x;

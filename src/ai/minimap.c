@@ -13,8 +13,13 @@ static const RGB COLOR_ROAD_DEFAULT = {255, 255, 255};
 static const RGB COLOR_ROAD_DARKER = {200, 200, 200};
 // static const RGB COLOR_BACKGROUND = {0, 0, 0};
 static const RGB COLOR_CAR = {255, 0, 0}; // Red for car
+
+// #define RENDER_DEBUG_GRAPH
+
+#ifdef RENDER_DEBUG_GRAPH
 static const RGB COLOR_GRAPH_NODE = {165, 42, 42}; // brown
 static const RGB COLOR_GRAPH_EDGE = {255, 165, 0}; // Orange
+#endif
 
 // Helper to set a pixel
 static void set_pixel(uint8_t* buffer, int width, int height, int x, int y, RGB color) {
@@ -285,6 +290,9 @@ static void get_lane_point(Lane* lane, double progress, Coordinates* out_point) 
     }
 }
 
+
+
+#ifdef RENDER_DEBUG_GRAPH
 static void minimap_render_graph(MiniMap* minimap) {
     if (!minimap || !minimap->debug_planner || !minimap->debug_planner->map || !minimap->debug_planner->decision_graph) return;
     
@@ -332,8 +340,9 @@ static void minimap_render_graph(MiniMap* minimap) {
         set_pixel(minimap->data, minimap->width, minimap->height, x, y, COLOR_GRAPH_NODE);
     }
 }
+#endif
 
-// #define RENDER_DEBUG_GRAPH
+
 
 void minimap_render(MiniMap* minimap, Simulation* sim) {
     if (!minimap || !minimap->data || !minimap->static_data) return;

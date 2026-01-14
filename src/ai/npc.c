@@ -19,8 +19,9 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
     // Meters lane_progress = situation->lane_progress;
     Meters lane_progress_m = situation->lane_progress_m;
     Meters car_position = lane_progress_m;          // alias for lane_progress_m
-    Meters distance_to_stop_line = situation->distance_to_end_of_lane - car_half_length - meters(2); // if we had to stop at the end of the lane, how far would we be from the stop line?
+    Meters distance_to_stop_line = situation->distance_to_end_of_lane_from_leading_edge - STOP_LINE_BUFFER_METERS; // if we had to stop at the end of the lane, how far would we be from the stop line?
     MetersPerSecond speed_cruise = lane_get_speed_limit(lane) + self->preferences.average_speed_offset;  // incorporate preference into speed limit
+    speed_cruise = fmax(speed_cruise, from_mph(1)); // ensure at least 1 mph speed
 
     // the following parameters will determine the outputs
     Meters position_target;
@@ -106,7 +107,7 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
     }
 
     // Next up is to determine the acceleration. If there is a vehicle ahead, then we just need to follow it with its speed. If nothing ahead, we just cruise. But we should override to a slower acceleration if we are close to an intersection (and approaching yellow / red), or approaching a dead end. It is possible that the lead vehicle is going faster than it should be!
-    MetersPerSecondSquared accel;
+    MetersPerSecondSquared accel = 0.0;
     
     if (situation->is_vehicle_ahead) {
         // printf("1. Lead vehicle detected\n");
@@ -150,203 +151,154 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
     } else {
         if (!situation->is_approaching_dead_end && (situation->is_approaching_end_of_lane || situation->braking_distance.preferred_smooth >= distance_to_stop_line)) {
             // start changing speed to match speed limit of the next lane
-            accel = car_compute_acceleration_cruise(self, lane_get_speed_limit(situation->lane_next_after_turn[turn_indicator]) + self->preferences.average_speed_offset, true);
+            accel = car_compute_acceleration_cruise(self, fmax(lane_get_speed_limit(situation->lane_next_after_turn[turn_indicator]) + self->preferences.average_speed_offset, from_mph(1)), true);
         } else {
             accel = car_compute_acceleration_cruise(self, speed_cruise, true);
         }
     }
 
-    bool should_brake = false;
+    bool should_brake_for_full_stop = false;    // e.g., approaching red light or stop sign. Target the stop line.
+    bool should_brake_for_yield = false;        // e.g., yielding at intersection. Stop by end of lane if needed (kinda creeping beyond stop line).
     
     if (situation->is_approaching_dead_end) {
-        // printf("3. But, approaching dead end\n");
-        // printf("4. Distance to stop line: %f\n", distance_to_stop_line + meters(1));
-        should_brake = true;
+        should_brake_for_full_stop = true;
     }
 
     if (situation->is_an_intersection_upcoming) {
         TrafficLight light = situation->light_for_turn[turn_indicator];
-        bool is_emergency_braking_possible = (situation->braking_distance.capable <= distance_to_stop_line + meters(1) + 1e-6);
-        bool is_comfy_braking_possible = (situation->braking_distance.preferred_smooth <= distance_to_stop_line + 1e-6);
+        bool is_emergency_braking_possible = (situation->braking_distance.capable < situation->distance_to_end_of_lane_from_leading_edge);
+        bool is_comfy_braking_possible = (situation->braking_distance.preferred_smooth < distance_to_stop_line);
 
         switch (light) {
-        case TRAFFIC_LIGHT_STOP:
+        case TRAFFIC_LIGHT_STOP_FCFS:
+            // Must first stop or be stopping. After that, we should check if it is our turn based on first-come-first-serve.
+            if (is_emergency_braking_possible && (situation->distance_to_end_of_lane_from_leading_edge > STOP_LINE_BUFFER_METERS - meters(0.1)) && car_get_speed(self) > from_mph(0.1)) { // can stop before lane end, but it still moving and not yet at the stop line (which it will really reach in infinite time (if comfy braking possible) due to asymptotic approach of PD control, so we use a small threshold)
+                should_brake_for_full_stop = true;
+            } else if (fabs(car_get_speed(self)) <= from_mph(0.1)) { // If stopped or barely moving
+                bool all_clear = !intersection_is_any_car_on_intersection(situation->intersection, sim);
+                if (situation->is_my_turn_at_stop_sign_fcfs && all_clear) {
+                    should_brake_for_full_stop = false; // Our turn
+                } else {
+                    should_brake_for_full_stop = true; // Not permitted, remain stopped.
+                }
+            } else { // Approaching but cannot stop in time or already past line and moving.
+                 should_brake_for_full_stop = false;
+            }
+            break;
         case TRAFFIC_LIGHT_RED:
-            should_brake = true;
+            should_brake_for_full_stop = true;
             if (!is_emergency_braking_possible) {
-                should_brake = false;
+                should_brake_for_full_stop = false;
             }
             break;
         case TRAFFIC_LIGHT_YELLOW:
             if (is_comfy_braking_possible) {
-                should_brake = true;
+                should_brake_for_full_stop = true;
             } else {
-                should_brake = !self->preferences.run_yellow_light;
-                if (should_brake && !is_emergency_braking_possible) {
-                    should_brake = false;
+                should_brake_for_full_stop = !self->preferences.run_yellow_light;
+                if (should_brake_for_full_stop && !is_emergency_braking_possible) {
+                    should_brake_for_full_stop = false;
                 }
             }
             break;
 
         case TRAFFIC_LIGHT_GREEN_YIELD:
-        case TRAFFIC_LIGHT_YELLOW_YIELD:
-            if (light == TRAFFIC_LIGHT_YELLOW_YIELD) {
-                bool try_to_stop_for_yellow = true;
-                if (is_comfy_braking_possible) {
-                    try_to_stop_for_yellow = true;
-                } else {
-                    try_to_stop_for_yellow = !self->preferences.run_yellow_light;
-                    if (try_to_stop_for_yellow && !is_emergency_braking_possible) {
-                        try_to_stop_for_yellow = false; 
-                    }
-                }
-                if (try_to_stop_for_yellow) {
-                    should_brake = true; 
-                    break; 
-                }
-            }
-            if (car_should_yield_at_intersection(self, sim, situation, turn_indicator)) {
-                should_brake = true;
+            should_brake_for_full_stop = false;
+            if (car_has_something_to_yield_to_at_intersection(self, sim, situation, turn_indicator)) {
+                should_brake_for_yield = true;
             } else {
-                should_brake = false; 
+                should_brake_for_yield = false;
             }
             break;
-
-        case TRAFFIC_LIGHT_RED_YIELD:
-            // Must first obey the RED aspect (stop or be stopping).
-            if (fabs(car_get_speed(self)) > meters(0.5) && // If moving with some speed
-                (is_comfy_braking_possible || is_emergency_braking_possible) && // and can stop
-                (situation->distance_to_end_of_lane - car_half_length > meters(0.5))) { // and not yet at the line
-                should_brake = true; // Enforce stop for the RED part.
-            } else if (fabs(car_get_speed(self)) <= meters(0.5)) { // If stopped or barely moving at the line
-                // Check if it's a permitted turn (usually right) and if it's clear
-                if (situation->is_turn_possible[turn_indicator] &&
-                    (turn_indicator == INDICATOR_RIGHT /* Add other conditions if exits, e.g. specific ramp merges */) &&
-                    !car_should_yield_at_intersection(self, sim, situation, turn_indicator)) {
-                    should_brake = false; // Safe to proceed with the yield turn.
-                } else {
-                    should_brake = true; // Not safe or not a permitted turn, remain stopped.
+        case TRAFFIC_LIGHT_YELLOW_YIELD:
+            if (is_comfy_braking_possible) {
+                should_brake_for_full_stop = true;
+            } else {
+                should_brake_for_full_stop = !self->preferences.run_yellow_light;
+                if (should_brake_for_full_stop && !is_emergency_braking_possible) {
+                    should_brake_for_full_stop = false;
                 }
-            } else { // Approaching but cannot stop in time or already past line - this is a red light running scenario
-                 should_brake = false; // Run the red (already determined by lack of braking possibility for RED)
+            }
+            if (!should_brake_for_full_stop) {  // planning to go through
+                if (is_emergency_braking_possible && car_has_something_to_yield_to_at_intersection(self, sim, situation, turn_indicator)) {
+                    should_brake_for_yield = true;  // yield if possible and needed
+                } else {
+                    should_brake_for_yield = false; 
+                }
+            }
+            break;
+        case TRAFFIC_LIGHT_RED_YIELD:
+            if (is_emergency_braking_possible) {
+                bool not_stopped_yet = (situation->distance_to_end_of_lane_from_leading_edge > STOP_LINE_BUFFER_METERS - meters(0.1)) && car_get_speed(self) > from_mph(0.1);
+                if (not_stopped_yet) {
+                    should_brake_for_full_stop = true;
+                } else {
+                    should_brake_for_full_stop = false;
+                }
+                if (car_has_something_to_yield_to_at_intersection(self, sim, situation, turn_indicator)) {
+                    should_brake_for_yield = true;
+                } else {
+                    should_brake_for_yield = false;
+                }
+            } else {
+                should_brake_for_full_stop = false;
+                should_brake_for_yield = false;
             }
             break;
         
         case TRAFFIC_LIGHT_YIELD: // General yield sign
-            if (car_should_yield_at_intersection(self, sim, situation, turn_indicator)) {
-                should_brake = true;
+            if (car_has_something_to_yield_to_at_intersection(self, sim, situation, turn_indicator)) {
+                should_brake_for_yield = true;
             } else {
-                should_brake = false;
+                should_brake_for_yield = false;
             }
             break;
-
         case TRAFFIC_LIGHT_GREEN:
         case TRAFFIC_LIGHT_NONE:
         default:
-            should_brake = false;
+            should_brake_for_full_stop = false;
+            should_brake_for_yield = false;
             break;
+        }
+
+        // Finally, as you enter the intersection (e.g., going straight), and someone else in front of you just went to a different lane (e.g., turned left), we should brake a bit to let them make some distance. Basically, check all outgoing connections and see if there is a car very close to the intersection in front of us but in a different lane.
+        for (int turn_dir = 0; turn_dir < 3; turn_dir++) {
+            const Lane* next_lane = situation->lane_next_after_turn[turn_dir];
+            if (next_lane != NULL && next_lane != situation->lane_next_after_turn[turn_indicator] && lane_get_num_cars(next_lane) > 0) {
+                Car* closest_car = lane_get_car(next_lane, sim, lane_get_num_cars(next_lane) - 1); // last car in the lane is the closest to us
+                Meters closest_car_progress = closest_car->lane_progress_meters;
+                if (closest_car_progress < car_get_length(closest_car) + car_get_length(self)) {
+                    should_brake_for_yield = true;
+                }
+            }
+        }
+
+        // // for debugging:
+        // should_brake_for_full_stop = false;
+        // should_brake_for_yield = false;
+    }
+
+    if (should_brake_for_full_stop || should_brake_for_yield) {
+        if (should_brake_for_full_stop) {   // takes precedence
+            // Brake smoothly to target stop at the end of the lane
+            position_target = car_position + fmax(distance_to_stop_line, meters(0)); // the fmax is needed to prevent reversing if the car has already crossed the stop line (could happen if light turned red while crossing)
+            speed_at_target = 0;
+            MetersPerSecondSquared accel_to_stop_at_lane_end = car_compute_acceleration_chase_target(self, position_target, speed_at_target, fmax(situation->distance_to_end_of_lane_from_leading_edge - position_target, meters(0)), speed_cruise, true);
+            accel = fmin(accel, accel_to_stop_at_lane_end); // take the minimum of the two accelerations
+        } else {
+            // Brake smoothly to target stop by the end of the lane (i.e., can creep beyond stop line)
+            position_target = car_position + fmax(situation->distance_to_end_of_lane_from_leading_edge, meters(0)); // the fmax is needed in case the leading edge is already beyond the lane end once the car moved but the car center is not. If that happened, and now suddenly yield is true due to new traffic, we want to stop right where we are and not reverse.
+            speed_at_target = 0;
+            MetersPerSecond speed_cruise_for_yield = situation->distance_to_end_of_lane_from_leading_edge <= STOP_LINE_BUFFER_METERS ? fmin(from_mph(5.0), speed_cruise) : speed_cruise; // limit speed after crossing stop line to 5 mph (creep speed)
+            MetersPerSecondSquared accel_to_yield_at_lane_end = car_compute_acceleration_chase_target(self, position_target, speed_at_target, 0, speed_cruise_for_yield, true);
+            accel = fmin(accel, accel_to_yield_at_lane_end); // take the minimum of the two accelerations
         }
     }
 
-    // If we are at an intersection and making a left turn, then we should stop immediately (not necessarily at the stop line). Same case for right turn from right lane.
-    if (should_brake && car_should_yield_at_intersection(self, sim, situation, turn_indicator)) {
-        // printf("Breaking on Left Yield!\n");
-        MetersPerSecondSquared accel_to_stop_asap = car_compute_acceleration_stop(self, false);
-        accel = fmin(accel, accel_to_stop_asap); // take the minimum of the two accelerations
-    }
-    else if (should_brake) {
-        // printf("10. Potentially braking\n");
-        position_target = car_position + distance_to_stop_line;
-        position_target_overshoot_buffer = meters(1);
-        speed_at_target = 0;
-        MetersPerSecondSquared accel_to_stop_at_lane_end = car_compute_acceleration_chase_target(self, position_target, speed_at_target, position_target_overshoot_buffer, speed_cruise, true);
-        accel = fmin(accel, accel_to_stop_at_lane_end); // take the minimum of the two accelerations
-    }
-
     // Set the decision variables
-    // printf("11. Setting acceleration to %f\n\n", accel);
     accel = 0.95 * accel + 0.05 * car_get_acceleration(self); // smooth the acceleration
     car_set_acceleration(self, accel);
     car_set_indicator_turn_and_request(self, turn_indicator);
     car_set_indicator_lane(self, lane_change_indicator);
     car_set_request_indicated_lane(self, !indicate_only && lane_change_indicator != INDICATOR_NONE);
 }
-
-
-// For testing modular npc behavior
-// typedef enum {
-//     NPC_ACT_NONE = 0,
-//     NPC_ACT_LEFT_TURN,
-//     NPC_ACT_RIGHT_TURN,
-//     NPC_ACT_MERGE_LEFT,
-//     NPC_ACT_MERGE_RIGHT,
-//     NPC_ACT_PASS,
-//     NPC_ACT_CRUISE
-// } NPCActionType;
-
-// static NPCActionType  g_action[MAX_CARS]      = { NPC_ACT_NONE };
-// static float          g_param[MAX_CARS]       = { 0.0f };   /* generic per-action parameter */
-
-// static NPCActionType _pick_new_action(const SituationalAwareness *s)
-// {
-//     /* Simple probability table – tweak to taste. */
-//     double r = rand_0_to_1();
-//     if (r < 0.15)                     return NPC_ACT_LEFT_TURN;
-//     else if (r < 0.30)                return NPC_ACT_RIGHT_TURN;
-//     else if (r < 0.50 && s->is_lane_change_left_possible)
-//                                       return NPC_ACT_MERGE_LEFT;
-//     else if (r < 0.70 && s->is_lane_change_right_possible)
-//                                       return NPC_ACT_MERGE_RIGHT;
-//     else if (r < 0.85 && s->is_vehicle_ahead)
-//                                       return NPC_ACT_PASS;
-//     else                              return NPC_ACT_CRUISE;
-// }
-
-// void npc_car_make_decisions(Car *self, Simulation *sim) {
-//     const int cid = car_get_id(self) < MAX_CARS ? car_get_id(self) : MAX_CARS-1;
-//     const SituationalAwareness *s = sim_get_situational_awareness(sim, cid);
-
-//     /* 1 ─ choose an action if we do not currently have one */
-//     if (g_action[cid] == NPC_ACT_NONE)
-//     {
-//         g_action[cid] = _pick_new_action(s);
-
-//         /* One-off parameter setup for the newly chosen action.            *
-//          * g_param is only used by NPC_ACT_CRUISE but keeps the code tiny. */
-//         if (g_action[cid] == NPC_ACT_CRUISE)
-//         {
-//             double offset = rand_uniform(from_mph(-5), from_mph(5));
-//             g_param[cid]  = lane_get_speed_limit(s->lane) + offset;
-//         }
-//     }
-
-//     /* 2 ─ keep calling the selected action until it is finished */
-//     bool finished = true;
-//     switch (g_action[cid])
-//     {
-//         case NPC_ACT_LEFT_TURN:
-//             finished = left_turn(self, sim);
-//         case NPC_ACT_RIGHT_TURN:
-//             finished = right_turn(self, sim);
-//         case NPC_ACT_MERGE_LEFT:
-//             finished = merge(self, sim, "left", 5.0);
-//         case NPC_ACT_MERGE_RIGHT:
-//             finished = merge(self, sim, "right", 5.0);
-//         case NPC_ACT_PASS:
-//             if (s->is_vehicle_ahead)
-//                 finished = pass_vehicle(self, sim, s->lead_vehicle,
-//                                          /*auto-merge back*/true,
-//                                          meters(2.0), from_mph(5), 10.0);
-//             break;
-//         case NPC_ACT_CRUISE:
-//             finished = cruise(self, g_param[cid]);
-//         default: break;
-//     }
-
-//     /* 3 ─ clear state when the current manoeuvre has completed */
-//     if (finished)
-//     {
-//         g_action[cid] = NPC_ACT_NONE;
-//         g_param[cid]  = 0.0f;
-//     }
-// }

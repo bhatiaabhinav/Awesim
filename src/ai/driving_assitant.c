@@ -18,6 +18,7 @@ bool driving_assistant_reset_settings(DrivingAssistant* das, Car* car) {
     das->merge_intent = INDICATOR_NONE;
     das->turn_intent = INDICATOR_NONE;
     das->thw = DEFAULT_TIME_HEADWAY;      // Default time headway
+    das->follow_assistance = true;  // Default to true
     das->merge_assistance = true;   // Default to true
     das->aeb_assistance = true;     // Default to true
     das->aeb_in_progress = false;    // Reset AEB state
@@ -197,8 +198,10 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
 
     if (!das->aeb_in_progress) {
         // ------------- Follow lead vehicle ------------------------
-        MetersPerSecondSquared accel_cruise = car_compute_acceleration_adaptive_cruise(car, sa, fmax(das->speed_target, 0), das->thw, DRIVING_ASSISTANT_BUFFER_M, das->use_preferred_accel_profile); // follow next car or adjust speed. Doesn't work for negative speed target.
-        accel = fmin(accel, accel_cruise);
+        if (das->follow_assistance) {
+            MetersPerSecondSquared accel_cruise = car_compute_acceleration_adaptive_cruise(car, sa, fmax(das->speed_target, 0), das->thw, DRIVING_ASSISTANT_BUFFER_M, das->use_preferred_accel_profile); // follow next car or adjust speed. Doesn't work for negative speed target.
+            accel = fmin(accel, accel_cruise);
+        }
 
         // ----------- Speed adjustment ------------------------
          MetersPerSecondSquared accel_speed_adjust = das->use_linear_speed_control ? car_compute_acceleration_adjust_speed_linear(car, das->speed_target, das->use_preferred_accel_profile) : car_compute_acceleration_adjust_speed(car, das->speed_target, das->use_preferred_accel_profile); // works for negative speed targets as well
@@ -320,6 +323,7 @@ bool driving_assistant_get_should_stop_at_intersection(const DrivingAssistant* d
 CarIndicator driving_assistant_get_merge_intent(const DrivingAssistant* das) { return das->merge_intent; }
 CarIndicator driving_assistant_get_turn_intent(const DrivingAssistant* das) { return das->turn_intent; }
 Seconds driving_assistant_get_thw(const DrivingAssistant* das) { return das->thw; }
+bool driving_assistant_get_follow_assistance(const DrivingAssistant* das) { return das->follow_assistance; }
 bool driving_assistant_get_merge_assistance(const DrivingAssistant* das) { return das->merge_assistance; }
 bool driving_assistant_get_aeb_assistance(const DrivingAssistant* das) { return das->aeb_assistance; }
 bool driving_assistant_get_aeb_in_progress(const DrivingAssistant* das) { return das->aeb_in_progress; }
@@ -384,6 +388,14 @@ void driving_assistant_configure_thw(DrivingAssistant* das, const Car* car, cons
         thw = 0;
     }
     das->thw = thw;
+    das->last_configured_at = sim_get_time(sim);
+}
+
+void driving_assistant_configure_follow_assistance(DrivingAssistant* das, const Car* car, const Simulation* sim, bool follow_assistance) {
+    if (!validate_input(car, das, sim)) {
+        return;
+    }
+    das->follow_assistance = follow_assistance;
     das->last_configured_at = sim_get_time(sim);
 }
 

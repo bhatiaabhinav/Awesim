@@ -603,6 +603,26 @@ static void render_lane_markings(RGBCamera* camera, Lane* lane, Map* map, Coordi
 #else
         int segments = TURN_SEGMENTS * 2;
 #endif
+
+        // Calculate offsets for smooth interpolation (fix for asymmetric intersections)
+        Vec2D theoretical_start = {
+            lane->center.x + lane->radius * cos(lane->start_angle),
+            lane->center.y + lane->radius * sin(lane->start_angle)
+        };
+        Vec2D theoretical_end = {
+            lane->center.x + lane->radius * cos(lane->end_angle),
+            lane->center.y + lane->radius * sin(lane->end_angle)
+        };
+        
+        Lane* incoming = lane_get_connection_incoming_straight(lane, map);
+        Lane* outgoing = lane_get_connection_straight(lane, map);
+        
+        Vec2D actual_start = incoming ? incoming->end_point : lane->start_point;
+        Vec2D actual_end = outgoing ? outgoing->start_point : lane->end_point;
+        
+        Vec2D offset_start = vec_sub(actual_start, theoretical_start);
+        Vec2D offset_end = vec_sub(actual_end, theoretical_end);
+
         double step = (lane->end_angle - lane->start_angle) / segments;
         
         if (draw_left) {
@@ -612,10 +632,15 @@ static void render_lane_markings(RGBCamera* camera, Lane* lane, Map* map, Coordi
                 double a1 = lane->start_angle + i * step;
                 double a2 = lane->start_angle + (i+1) * step;
                 double seg_len = fabs(step * r_left);
+
+                double p1_ratio = (double)i / segments;
+                double p2_ratio = (double)(i+1) / segments;
+                Vec2D off1 = vec_add(vec_scale(offset_start, 1.0 - p1_ratio), vec_scale(offset_end, p1_ratio));
+                Vec2D off2 = vec_add(vec_scale(offset_start, 1.0 - p2_ratio), vec_scale(offset_end, p2_ratio));
                 
                 if (!dashed_left || drawing) {
-                    Coordinates3D p0 = {lane->center.x + r_left * cos(a1), lane->center.y + r_left * sin(a1), LANE_MARKING_Z};
-                    Coordinates3D p1 = {lane->center.x + r_left * cos(a2), lane->center.y + r_left * sin(a2), LANE_MARKING_Z};
+                    Coordinates3D p0 = {lane->center.x + r_left * cos(a1) + off1.x, lane->center.y + r_left * sin(a1) + off1.y, LANE_MARKING_Z};
+                    Coordinates3D p1 = {lane->center.x + r_left * cos(a2) + off2.x, lane->center.y + r_left * sin(a2) + off2.y, LANE_MARKING_Z};
                     rasterize_line_segment(camera, p0, p1, LANE_MARKING_WIDTH, color_left, cam_pos, cos_o, sin_o);
                 }
                 
@@ -634,10 +659,15 @@ static void render_lane_markings(RGBCamera* camera, Lane* lane, Map* map, Coordi
                 double a1 = lane->start_angle + i * step;
                 double a2 = lane->start_angle + (i+1) * step;
                 double seg_len = fabs(step * r_right);
+
+                double p1_ratio = (double)i / segments;
+                double p2_ratio = (double)(i+1) / segments;
+                Vec2D off1 = vec_add(vec_scale(offset_start, 1.0 - p1_ratio), vec_scale(offset_end, p1_ratio));
+                Vec2D off2 = vec_add(vec_scale(offset_start, 1.0 - p2_ratio), vec_scale(offset_end, p2_ratio));
                 
                 if (!dashed_right || drawing) {
-                    Coordinates3D p0 = {lane->center.x + r_right * cos(a1), lane->center.y + r_right * sin(a1), LANE_MARKING_Z};
-                    Coordinates3D p1 = {lane->center.x + r_right * cos(a2), lane->center.y + r_right * sin(a2), LANE_MARKING_Z};
+                    Coordinates3D p0 = {lane->center.x + r_right * cos(a1) + off1.x, lane->center.y + r_right * sin(a1) + off1.y, LANE_MARKING_Z};
+                    Coordinates3D p1 = {lane->center.x + r_right * cos(a2) + off2.x, lane->center.y + r_right * sin(a2) + off2.y, LANE_MARKING_Z};
                     rasterize_line_segment(camera, p0, p1, LANE_MARKING_WIDTH, color_right, cam_pos, cos_o, sin_o);
                 }
                 
@@ -1299,6 +1329,10 @@ static void render_scene_internal(RGBCamera* camera, Simulation* sim, void** exc
         } else if (state == ALL_RED_BEFORE_NS_GREEN || state == ALL_RED_BEFORE_EW_GREEN || state == FOUR_WAY_STOP) {
             c_ns = TL_RED_RGB; // Red
             c_ew = TL_RED_RGB; // Red
+        } else if (state == T_JUNC_NS || state == T_JUNC_EW) {
+            // For T-junctions, we can set all to green
+            c_ns = TL_GREEN_RGB;
+            c_ew = TL_GREEN_RGB;
         }
 
         // Cube faces: Top, Bottom, Front (S), Back (N), Left (W), Right (E)

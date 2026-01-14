@@ -15,8 +15,8 @@ static Collisions* collisions = NULL;
 static Car* highlighted_car = NULL;
 static SituationalAwareness* situational_awareness_highlighted_car = NULL;
 
-void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, const bool draw_cars,
-                const bool draw_track_lines, const bool draw_traffic_lights, const bool draw_car_ids, const bool draw_car_speeds, const bool draw_lane_ids, const bool draw_road_names, bool draw_lidar, bool draw_camera, bool draw_minimap, bool draw_infos_display, int hud_font_size, const bool benchmark)
+void render_sim(SDL_Renderer *renderer, Simulation *sim, bool draw_lanes, bool draw_cars,
+                bool draw_track_lines, bool draw_traffic_lights, bool draw_car_ids, bool draw_car_speeds, bool draw_lane_ids, bool draw_road_names, bool draw_lidar, bool draw_camera, bool draw_minimap, bool draw_infos_display, int hud_font_size, bool benchmark)
 {
     Map *map = sim_get_map(sim);
 
@@ -127,6 +127,22 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, const bool draw_lanes, 
                 switch (state) {
                     case FOUR_WAY_STOP:
                         light_color = FOUR_WAY_STOP_COLOR;
+                        break;
+                    case T_JUNC_NS:
+                        light_color = GREEN_LIGHT_COLOR;
+                        if (is_NS) {
+                            yield = dir == DIRECTION_CCW;                   // Left turns yield
+                        } else {
+                            yield = true;                                       // All vehicles must yield
+                        }
+                        break;
+                    case T_JUNC_EW:
+                        light_color = GREEN_LIGHT_COLOR;
+                        if (is_NS) {
+                            yield = true;                                   // All vehicles must yield
+                        } else {
+                            yield = dir == DIRECTION_CCW;                   // Left turns yield
+                        }
                         break;
                     case NS_GREEN_EW_RED:
                         if (is_NS) {

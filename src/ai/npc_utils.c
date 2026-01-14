@@ -1,4 +1,5 @@
 #include "ai.h"
+#include "logging.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
@@ -87,174 +88,108 @@ bool car_is_lane_change_dangerous(Car* car, Simulation* sim, const SituationalAw
 }
 
 
-static bool intersection_has_oncoming_vehicle(const Road* approach_road,
-                        Map* map,
-                        Simulation* sim,
-                        const Car* self,
-                        double time_threshold_s,
-                        Meters slow_speed_cutoff)
-{
-    for (int i = 0; i < road_get_num_lanes(approach_road); ++i) {
-        const Lane* base_lane = road_get_lane(approach_road, map, i);
-        if (!base_lane) continue;
+bool car_has_something_to_yield_to_at_intersection(const Car* self, Simulation* sim, const SituationalAwareness* situation, CarIndicator turn_indicator) {
+    Map* map = sim_get_map(sim);
 
-        const Lane* lanes_to_check[2] = {
-            base_lane,
-            lane_get_connection_straight(base_lane, map)   /* may be NULL */
-        };
+    const Intersection* intersection = situation->intersection;
 
-        for (int l = 0; l < 2; ++l) {
-            const Lane* lane = lanes_to_check[l];
-            if (!lane) continue;
+    Road* inbound_roads[4] = {
+        [DIRECTION_EAST] = intersection_get_road_eastbound_from(intersection, map),
+        [DIRECTION_WEST] = intersection_get_road_westbound_from(intersection, map),
+        [DIRECTION_NORTH] = intersection_get_road_northbound_from(intersection, map),
+        [DIRECTION_SOUTH] = intersection_get_road_southbound_from(intersection, map),
+    };
+    Direction my_dir = situation->lane->direction;
+    Road* road_from_left = inbound_roads[direction_perp_cw(my_dir)];
+    Road* road_from_right = inbound_roads[direction_perp_ccw(my_dir)];
+    Road* road_from_opposite = inbound_roads[direction_opposite(my_dir)];
 
-            for (int k = 0; k < lane_get_num_cars(lane); ++k) {
-                const Car* c = lane_get_car(lane, sim, k);
-                if (!c) continue;
+    Lane* incoming_lanes_to_worry_about[3 * MAX_NUM_LANES_PER_ROAD] = {NULL};           // max 3 roads to worry about, each with max lanes.
+    int num_incoming_lanes_to_worry_about = 0;
+    Lane* intersection_lanes_to_worry_about[MAX_NUM_LANES_PER_INTERSECTION] = {NULL};    // lanes that must not have cars on them
+    int num_intersection_lanes_to_worry_about = 0;
 
-                /* --- distance & time to the “center” of intersection ---- */
-                Meters progress = car_get_lane_progress_meters(c);
-                Meters car_len  = car_get_length(c);
-                Meters lane_len = lane_get_length(lane);
-                Meters dist_to_center =
-                    lane_len - progress - (car_len / 2.0);   /* ≈ stop-line */
-
-                Meters speed = car_get_speed(c);
-
-                double t_to_center = (speed > slow_speed_cutoff)
-                                   ? dist_to_center / speed
-                                   : INFINITY;
-
-                bool conflict = lane->is_at_intersection ||
-                                (t_to_center <= time_threshold_s);
-
-                /* ---------- DEBUG LOG ------------------------- */
-                #ifdef NPCUTILS_DEBUG
-                Seconds sim_s  = sim_get_time(sim);
-                int hh = (8 + (int)sim_s / 3600) % 24;
-                int mm = ((int)sim_s % 3600) / 60;
-                int ss =  (int)sim_s % 60;
-                printf("%02d:%02d:%02d | ego %d vs car %d "
-                       "speed %.2f m/s, t_center %.2f s, conflict %d\n",
-                       hh, mm, ss,
-                       car_get_id(self), car_get_id(c),
-                       (double)speed, t_to_center, conflict);
-                #endif
-                /* ------------------------------------------------------- */
-
-                if (conflict) return true;
+    if (intersection->is_T_junction) {
+        bool i_am_merging = (intersection->is_T_junction_north_south && (my_dir == DIRECTION_EAST || my_dir == DIRECTION_WEST)) ||
+                            (!intersection->is_T_junction_north_south && (my_dir == DIRECTION_NORTH || my_dir == DIRECTION_SOUTH));
+        if (i_am_merging) {
+            // If turning right, worry about the rightmost lane on the road coming from the left
+            if (turn_indicator == INDICATOR_RIGHT) {
+                incoming_lanes_to_worry_about[num_incoming_lanes_to_worry_about++] = road_get_rightmost_lane(road_from_left, map);
+                intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_straight(road_get_rightmost_lane(road_from_left, map), map);
+            } else if (turn_indicator == INDICATOR_LEFT) {
+                // If turning left, worry about the leftmost lane on the road coming from the right and all lanes on the road coming from left
+                incoming_lanes_to_worry_about[num_incoming_lanes_to_worry_about++] = road_get_leftmost_lane(road_from_right, map);
+                intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_straight(road_get_leftmost_lane(road_from_right, map), map);
+                for (int i = 0; i < road_get_num_lanes(road_from_left); i++) {
+                    incoming_lanes_to_worry_about[num_incoming_lanes_to_worry_about++] = road_get_lane(road_from_left, map, i);
+                    intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_straight(road_get_lane(road_from_left, map, i), map);
+                }
+                // also worry about the traffic exiting left from the road coming from the right as it has the right of way over us
+                intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_left(road_get_leftmost_lane(road_from_right, map), map);
+            } else {
+                // Not possible to go straight in a T-junction
+            }
+        } else {
+            if (turn_indicator == INDICATOR_RIGHT) {
+                // free exit
+            } else if (turn_indicator == INDICATOR_LEFT) {
+                // exit while yeilding to oncoming traffic
+                for (int i = 0; i < road_get_num_lanes(road_from_opposite); i++) {
+                    incoming_lanes_to_worry_about[num_incoming_lanes_to_worry_about++] = road_get_lane(road_from_opposite, map, i);
+                    intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_straight(road_get_lane(road_from_opposite, map, i), map);
+                    // if we are exiting on to a single lane road, we need to worry about the oncoming traffic turning into that lane as well
+                    if (road_get_num_lanes(road_from_right) == 1) { // assuming both road_from_right and road_to_left have same number of lanes
+                        intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_right(road_get_rightmost_lane(road_from_opposite, map), map);
+                    }
+                }
+            } else {
+                // free straight through
             }
         }
-    }
-    return false;
-}
-
-
-bool car_should_yield_at_intersection(const Car* self, Simulation* sim, const SituationalAwareness* situation, CarIndicator turn_indicator) {
-    Map* map = sim_get_map(sim);
-    // Not at an intersection
-    if (!situation->is_an_intersection_upcoming && !situation->is_on_intersection) {
+    } else if (intersection->state != FOUR_WAY_STOP) {
+        if (turn_indicator == INDICATOR_RIGHT) {
+            // If turning right, worry about the rightmost lane on the road coming from the left
+            incoming_lanes_to_worry_about[num_incoming_lanes_to_worry_about++] = road_get_rightmost_lane(road_from_left, map);
+            intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_straight(road_get_rightmost_lane(road_from_left, map), map);
+        } else if (turn_indicator == INDICATOR_LEFT) {
+            // If turning left, worry about all the lanes on the road coming from the opposite direction
+            for (int i = 0; i < road_get_num_lanes(road_from_opposite); i++) {
+                incoming_lanes_to_worry_about[num_incoming_lanes_to_worry_about++] = road_get_lane(road_from_opposite, map, i);
+                intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_straight(road_get_lane(road_from_opposite, map, i), map);
+            }
+            // if we are turning left onto a single lane road, we need to worry about the oncoming traffic turning into that lane as well
+            if (road_get_num_lanes(road_from_right) == 1) { // assuming both road_from_right and road_to_left have same number of lanes
+                intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_right(road_get_rightmost_lane(road_from_opposite, map), map);
+            }
+        }
+    } else {
+        // Yeilding not revelevant for four-way stop
         return false;
     }
-     // Not at an intersection
-    const Intersection* intersection_obj = situation->intersection;
-    if (!intersection_obj) {
-        return false;
-    }
 
-    // Meters car_speed = car_get_speed(self);
-    Meters self_half_length = car_get_length(self) / 2;
-    Meters car_front_bumper_dist_to_stop_line = situation->distance_to_end_of_lane - self_half_length;
-
-    // 1. Left Turn Yield (e.g., TRAFFIC_LIGHT_GREEN_YIELD, self intends INDICATOR_LEFT)
-    if (turn_indicator == INDICATOR_LEFT &&
-        (situation->light_for_turn[INDICATOR_LEFT] == TRAFFIC_LIGHT_GREEN_YIELD ||
-         (situation->light_for_turn[INDICATOR_LEFT] == TRAFFIC_LIGHT_YELLOW_YIELD && self->preferences.run_yellow_light))) {
-        
-        const Meters YIELD_DECISION_PROXIMITY_THRESHOLD = meters(5.0);
-        if (car_front_bumper_dist_to_stop_line > YIELD_DECISION_PROXIMITY_THRESHOLD) {
-            return false;
-        }
-
-        Direction my_dir = situation->lane->direction;
-        const Road* opposite_approach_straight_road = NULL;
-
-        switch (my_dir) {
-            case DIRECTION_EAST:
-                opposite_approach_straight_road = intersection_get_road_westbound_from(intersection_obj, map);
-                break;
-            case DIRECTION_WEST:
-                opposite_approach_straight_road = intersection_get_road_eastbound_from(intersection_obj, map);
-                break;
-            case DIRECTION_NORTH:
-                opposite_approach_straight_road = intersection_get_road_southbound_from(intersection_obj, map);
-                break;
-            case DIRECTION_SOUTH:
-                opposite_approach_straight_road = intersection_get_road_northbound_from(intersection_obj, map);
-                break;
-            default:
-                return false; 
-        }
-
-        // Nothing to worry about ....
-        if (!opposite_approach_straight_road) {
-            return false; 
-        }
-
-        const Road* opposite_approach_road = opposite_approach_straight_road;
-        
-        // Left Turn on Yield
-        // If the oncoming vehicle is in the intersection or the n second rule is violated, then yield
-        if (intersection_has_oncoming_vehicle(opposite_approach_road,
-                            map, sim, self,
-                            4.0, // Time threshold
-                            meters(0.25))) {
-            return true;   /* yield */
+    // Go through the intersection lanes to worry about and if any of them have cars, we have to yield.
+    for (int i = 0; i < num_intersection_lanes_to_worry_about; i++) {
+        Lane* lane = intersection_lanes_to_worry_about[i];
+        if (lane && lane_get_num_cars(lane) > 0) {
+            return true;    // have to yield
         }
     }
 
-    // 2. Right Turn on Red Yield / General Yield Sign
-    if ((turn_indicator == INDICATOR_RIGHT && situation->light_for_turn[INDICATOR_RIGHT] == TRAFFIC_LIGHT_RED_YIELD) ||
-        situation->light_for_turn[INDICATOR_RIGHT] == TRAFFIC_LIGHT_YIELD) {
-
-        Meters yield_decision_proximity_threshold = meters(5.0);
-        // Keep inching up (Car can get closer to front line)
-        if (car_front_bumper_dist_to_stop_line > yield_decision_proximity_threshold) {
-            return false;
-        }
-
-        Direction my_dir = situation->lane->direction;
-        const Road* left_approach_straight_road = NULL;
-
-        // NOTE: Assuming intersection_get_road_... functions exist
-        switch (my_dir) {
-            case DIRECTION_NORTH:
-                left_approach_straight_road = intersection_get_road_westbound_from(intersection_obj, map);
-                break;
-            case DIRECTION_EAST:
-                left_approach_straight_road = intersection_get_road_northbound_from(intersection_obj, map);
-                break;
-            case DIRECTION_SOUTH:
-                left_approach_straight_road = intersection_get_road_eastbound_from(intersection_obj, map);
-                break;
-            case DIRECTION_WEST:
-                left_approach_straight_road = intersection_get_road_southbound_from(intersection_obj, map);
-                break;
-            default:
-                return false;
-        }
-        
-        // Nothing to worry about ....
-        if (!left_approach_straight_road) {
-            return false;
-        }
-
-        const Road* left_approach_road = left_approach_straight_road;
-
-        if (intersection_has_oncoming_vehicle(left_approach_road,
-                            map, sim, self,
-                            3.0, // Time threshold
-                            meters(0.25))) {
-            return true;   /* yield */
+    // Go through the leading cars on incoming lanes and if any of them are less than 3 seconds away from their lane end, then we have to yield.
+    for (int i = 0; i < num_incoming_lanes_to_worry_about; i++) {
+        Lane* lane = incoming_lanes_to_worry_about[i];
+        if (!lane || lane_get_num_cars(lane) == 0) continue;
+        Car* c = lane_get_car(lane, sim, 0); // get the leading car
+        if (c) {
+            Meters progress_m = car_get_lane_progress_meters(c);
+            Meters lane_length = lane_get_length(lane);
+            Meters distance_to_end_m = lane_length - progress_m - car_get_length(c) / 2;
+            Meters speed = car_get_speed(c);
+            Seconds time_to_end_s = (speed > 0) ? fmax(distance_to_end_m, 0) / speed : INFINITY;
+            if (time_to_end_s < 3.0) {
+                return true;    // have to yield if coming in fast or has reached the stop line even if slow
+            }
         }
     }
     return false;

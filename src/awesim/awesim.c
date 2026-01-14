@@ -4,6 +4,349 @@
 #include "logging.h"
 #include <stdio.h>
 #include <math.h>
+#include <stdlib.h>
+
+typedef enum {
+    LOOP_CW,
+    LOOP_CCW,
+    LOOP_BOTH
+} LoopDirection;
+
+typedef enum {
+    SKIP_TURN_NONE = 0,
+    SKIP_TURN_TL = 1 << 0, // Top-Left (North-West)
+    SKIP_TURN_TR = 1 << 1, // Top-Right (North-East)
+    SKIP_TURN_BR = 1 << 2, // Bottom-Right (South-East)
+    SKIP_TURN_BL = 1 << 3, // Bottom-Left (South-West)
+    SKIP_TURN_ALL = 0xF
+} SkipTurnMask;
+
+void create_square_loop(Map* map, Coordinates center, Meters side_length, int num_lanes, Meters lane_width, MetersPerSecond speed_limit, Meters turn_radius, LoopDirection direction, int skip_turns_mask, Meters side_extentions_length, const char* prefix) {
+    char name_buffer[128];
+    Meters half_side = side_length / 2.0;
+    double grip = 1.0;
+
+    // Offset for local 2-way roads (distance from the center of the edge to the center of each directional road)
+    double road_offset = 0.5 * lane_width * num_lanes;
+    double one_way_road_width = lane_width * num_lanes;
+    // Length of the straight road segment
+    Meters road_len = side_length - 2 * one_way_road_width - 2.0 * turn_radius;
+    if (side_extentions_length > 0) {
+        if (direction != LOOP_BOTH) {
+            LOG_ERROR("Side extentions are only supported for two-way loops");
+        }
+        if (skip_turns_mask != SKIP_TURN_ALL) {
+            LOG_ERROR("Side extentions are only supported when all turns are skipped");
+        }
+        road_len += side_extentions_length;
+    }
+
+    Road *west_nb = NULL, *west_sb = NULL;
+    Road *east_sb = NULL, *east_nb = NULL;
+    Road *north_eb = NULL, *north_wb = NULL;
+    Road *south_wb = NULL, *south_eb = NULL;
+
+    bool create_inner = (direction == LOOP_CW || direction == LOOP_BOTH);
+    bool create_outer = (direction == LOOP_CCW || direction == LOOP_BOTH);
+
+    // --- Create 4 Sides ---
+
+    // West Edge (Left side of loop)
+    if (create_inner) {
+        // Inner: Northbound. x = center.x - half_side + road_offset
+        Coordinates c_west_nb = { center.x - half_side + road_offset, center.y };
+        snprintf(name_buffer, sizeof(name_buffer), "%s West NB", prefix);
+        west_nb = straight_road_create_from_center_dir_len(map, c_west_nb, DIRECTION_NORTH, road_len, num_lanes, lane_width, speed_limit, grip);
+        road_set_name(west_nb, name_buffer);
+    }
+    if (create_outer) {
+        // Outer: Southbound.
+        snprintf(name_buffer, sizeof(name_buffer), "%s West SB", prefix);
+        if (create_inner && west_nb) {
+            west_sb = straight_road_make_opposite_and_update_adjacents(map, west_nb);
+        } else {
+             Coordinates c_west_sb = { center.x - half_side - road_offset, center.y };
+             west_sb = straight_road_create_from_center_dir_len(map, c_west_sb, DIRECTION_SOUTH, road_len, num_lanes, lane_width, speed_limit, grip);
+        }
+        road_set_name(west_sb, name_buffer);
+    }
+
+    // East Edge (Right side of loop)
+    if (create_inner) {
+        // Inner: Southbound. x = center.x + half_side - road_offset
+        Coordinates c_east_sb = { center.x + half_side - road_offset, center.y };
+        snprintf(name_buffer, sizeof(name_buffer), "%s East SB", prefix);
+        east_sb = straight_road_create_from_center_dir_len(map, c_east_sb, DIRECTION_SOUTH, road_len, num_lanes, lane_width, speed_limit, grip);
+        road_set_name(east_sb, name_buffer);
+    }
+    if (create_outer) {
+        // Outer: Northbound.
+        snprintf(name_buffer, sizeof(name_buffer), "%s East NB", prefix);
+        if (create_inner && east_sb) {
+            east_nb = straight_road_make_opposite_and_update_adjacents(map, east_sb);
+        } else {
+            Coordinates c_east_nb = { center.x + half_side + road_offset, center.y };
+            east_nb = straight_road_create_from_center_dir_len(map, c_east_nb, DIRECTION_NORTH, road_len, num_lanes, lane_width, speed_limit, grip);
+        }
+        road_set_name(east_nb, name_buffer);
+    }
+
+    // North Edge (Top side of loop)
+    if (create_inner) {
+        // Inner: Eastbound. y = center.y + half_side - road_offset
+        Coordinates c_north_eb = { center.x, center.y + half_side - road_offset };
+        snprintf(name_buffer, sizeof(name_buffer), "%s North EB", prefix);
+        north_eb = straight_road_create_from_center_dir_len(map, c_north_eb, DIRECTION_EAST, road_len, num_lanes, lane_width, speed_limit, grip);
+        road_set_name(north_eb, name_buffer);
+    }
+    if (create_outer) {
+        // Outer: Westbound.
+        snprintf(name_buffer, sizeof(name_buffer), "%s North WB", prefix);
+         if (create_inner && north_eb) {
+             north_wb = straight_road_make_opposite_and_update_adjacents(map, north_eb);
+         } else {
+             Coordinates c_north_wb = { center.x, center.y + half_side + road_offset };
+             north_wb = straight_road_create_from_center_dir_len(map, c_north_wb, DIRECTION_WEST, road_len, num_lanes, lane_width, speed_limit, grip);
+         }
+         road_set_name(north_wb, name_buffer);
+    }
+
+    // South Edge (Bottom side of loop)
+    if (create_inner) {
+        // Inner: Westbound. y = center.y - half_side + road_offset
+        Coordinates c_south_wb = { center.x, center.y - half_side + road_offset };
+        snprintf(name_buffer, sizeof(name_buffer), "%s South WB", prefix);
+        south_wb = straight_road_create_from_center_dir_len(map, c_south_wb, DIRECTION_WEST, road_len, num_lanes, lane_width, speed_limit, grip);
+        road_set_name(south_wb, name_buffer);
+    }
+    if (create_outer) {
+        // Outer: Eastbound.
+        snprintf(name_buffer, sizeof(name_buffer), "%s South EB", prefix);
+        if (create_inner && south_wb) {
+            south_eb = straight_road_make_opposite_and_update_adjacents(map, south_wb);
+        } else {
+            Coordinates c_south_eb = { center.x, center.y - half_side - road_offset };
+            south_eb = straight_road_create_from_center_dir_len(map, c_south_eb, DIRECTION_EAST, road_len, num_lanes, lane_width, speed_limit, grip);
+        }
+        road_set_name(south_eb, name_buffer);
+    }
+
+    // --- Turn Connectors (Corners) ---
+    MetersPerSecond turn_speed = speed_limit * 0.8;
+    
+    Road *tl_inner = NULL, *tr_inner = NULL, *br_inner = NULL, *bl_inner = NULL;
+
+    // Inner Loop (CW)
+    if (create_inner) {
+        if (!(skip_turns_mask & SKIP_TURN_TL))
+            tl_inner = turn_create_and_set_connections_and_adjacents(map, west_nb, north_eb, DIRECTION_CW, turn_speed, grip, NULL); // TL Inner
+        if (!(skip_turns_mask & SKIP_TURN_TR))
+            tr_inner = turn_create_and_set_connections_and_adjacents(map, north_eb, east_sb, DIRECTION_CW, turn_speed, grip, NULL); // TR Inner
+        if (!(skip_turns_mask & SKIP_TURN_BR))
+            br_inner = turn_create_and_set_connections_and_adjacents(map, east_sb, south_wb, DIRECTION_CW, turn_speed, grip, NULL); // BR Inner
+        if (!(skip_turns_mask & SKIP_TURN_BL))
+            bl_inner = turn_create_and_set_connections_and_adjacents(map, south_wb, west_nb, DIRECTION_CW, turn_speed, grip, NULL); // BL Inner
+    }
+    
+    // Outer Loop (CCW)
+    if (create_outer) {
+        // Pass NULL for inner turn if inner loop wasn't created OR if skipped
+        if (!(skip_turns_mask & SKIP_TURN_BL))
+            turn_create_and_set_connections_and_adjacents(map, west_sb, south_eb, DIRECTION_CCW, turn_speed, grip, bl_inner); // BL Outer
+        if (!(skip_turns_mask & SKIP_TURN_BR))
+            turn_create_and_set_connections_and_adjacents(map, south_eb, east_nb, DIRECTION_CCW, turn_speed, grip, br_inner); // BR Outer
+        if (!(skip_turns_mask & SKIP_TURN_TR))
+            turn_create_and_set_connections_and_adjacents(map, east_nb, north_wb, DIRECTION_CCW, turn_speed, grip, tr_inner); // TR Outer
+        if (!(skip_turns_mask & SKIP_TURN_TL))
+            turn_create_and_set_connections_and_adjacents(map, north_wb, west_sb, DIRECTION_CCW, turn_speed, grip, tl_inner); // TL Outer
+    }
+
+}
+
+void create_square_loop_two_way(Map* map, Coordinates center, Meters side_length, int num_lanes, Meters lane_width, MetersPerSecond speed_limit, Meters turn_radius, int skip_mask, Meters side_extensions_length, const char* prefix) {
+    create_square_loop(map, center, side_length, num_lanes, lane_width, speed_limit, turn_radius, LOOP_BOTH, skip_mask, side_extensions_length, prefix);
+}
+
+void create_square_loop_ccw(Map* map, Coordinates center, Meters side_length, int num_lanes, Meters lane_width, MetersPerSecond speed_limit, Meters turn_radius, int skip_mask, const char* prefix) {
+    create_square_loop(map, center, side_length, num_lanes, lane_width, speed_limit, turn_radius, LOOP_CCW, skip_mask, 0, prefix);
+}
+
+void create_square_loop_cw(Map* map, Coordinates center, Meters side_length, int num_lanes, Meters lane_width, MetersPerSecond speed_limit, Meters turn_radius, int skip_mask, const char* prefix) {
+    create_square_loop(map, center, side_length, num_lanes, lane_width, speed_limit, turn_radius, LOOP_CW, skip_mask, 0, prefix);
+}
+
+// Helper struct for 2-way road pairs
+typedef struct {
+    Road* r1;
+    Road* r2;
+} RoadPair;
+
+void create_all_intersections_from_crossing_roads(Map* map, Meters intersection_turn_radius, bool one_lane_intersections_are_four_way_stops) {
+    LOG_TRACE("Starting to create all intersections from crossing 2-way roads...");
+    int max_intersections_to_process = MAX_NUM_INTERSECTIONS; // Safety limit
+    int count = 0;
+
+    while (count < max_intersections_to_process) {
+        bool processed_one = false;
+
+        // Re-scan for pairs every time because pointers/IDs/lengths change
+        RoadPair pairs[MAX_NUM_ROADS];
+        int num_pairs = 0;
+
+        for (int i = 0; i < map->num_roads; i++) {
+            Road* r = &map->roads[i];
+            if (r->type != STRAIGHT) continue;
+
+            Lane* l = road_get_leftmost_lane(r, map);
+            // Check for valid left adjacency
+            if (l && l->adjacents[0] != ID_NULL) {
+                 Lane* adj_l = map_get_lane(map, l->adjacents[0]);
+                 if (adj_l) {
+                     Road* adj_r = map_get_road_by_lane_id(map, adj_l->id);
+                     // Verify it's a valid 2-way pair (Opposite direction, Straight)
+                     // Ensure canonical order (ID) to avoid duplicates in pair list
+                     if (adj_r && adj_r->id > r->id && 
+                         adj_r->type == STRAIGHT && 
+                         direction_opposite(r->direction) == adj_r->direction) {
+                         
+                         if (num_pairs < MAX_NUM_ROADS) {
+                             pairs[num_pairs++] = (RoadPair){r, adj_r};
+                         }
+                     }
+                 }
+            }
+        }
+
+        // Check pairs
+        for (int i = 0; i < num_pairs && !processed_one; i++) {
+            for (int j = i + 1; j < num_pairs && !processed_one; j++) {
+                RoadPair p1 = pairs[i];
+                RoadPair p2 = pairs[j];
+
+                bool p1_vertical = (p1.r1->direction == DIRECTION_NORTH || p1.r1->direction == DIRECTION_SOUTH);
+                bool p2_vertical = (p2.r1->direction == DIRECTION_NORTH || p2.r1->direction == DIRECTION_SOUTH);
+
+                if (p1_vertical == p2_vertical) continue; 
+
+                RoadPair vertical = p1_vertical ? p1 : p2;
+                RoadPair horizontal = p1_vertical ? p2 : p1;
+                
+                double h_y_center = (horizontal.r1->center.y + horizontal.r2->center.y) / 2.0;
+                double h_width = horizontal.r1->width + horizontal.r2->width;
+                double h_len = horizontal.r1->length;
+                double h_x_center = horizontal.r1->center.x; 
+                double h_min_x = h_x_center - h_len / 2.0;
+                double h_max_x = h_x_center + h_len / 2.0;
+
+                double v_x_center = (vertical.r1->center.x + vertical.r2->center.x) / 2.0;
+                double v_width = vertical.r1->width + vertical.r2->width;
+                double v_len = vertical.r1->length;
+                double v_y_center = vertical.r1->center.y;
+                double v_min_y = v_y_center - v_len / 2.0;
+                double v_max_y = v_y_center + v_len / 2.0;
+
+                // Intersection Logic
+                double margin = 1.0; 
+                bool h_contains_v = (v_x_center - v_width/2.0 - margin > h_min_x) && 
+                                    (v_x_center + v_width/2.0 + margin < h_max_x);
+                bool v_contains_h = (h_y_center - h_width/2.0 - margin > v_min_y) && 
+                                    (h_y_center + h_width/2.0 + margin < v_max_y);
+                                    
+                if (h_contains_v && v_contains_h) {
+                    LOG_TRACE("Creating intersection %d between (%s|%s) and (%s|%s)", count,
+                        horizontal.r1->name, horizontal.r2->name, vertical.r1->name, vertical.r2->name);
+                        
+                    Road *eb = NULL, *wb = NULL, *nb = NULL, *sb = NULL;
+                    if (vertical.r1->direction == DIRECTION_NORTH) { nb = vertical.r1; sb = vertical.r2; }
+                    else { sb = vertical.r1; nb = vertical.r2; }
+                    
+                    if (horizontal.r1->direction == DIRECTION_EAST) { eb = horizontal.r1; wb = horizontal.r2; }
+                    else { wb = horizontal.r1; eb = horizontal.r2; }
+
+                    bool is_four_way_stop = false;
+                    if (one_lane_intersections_are_four_way_stops) {
+                        int total_lanes = nb->num_lanes + sb->num_lanes + eb->num_lanes + wb->num_lanes;
+                        if (total_lanes == 4) { // 1 lane each
+                            is_four_way_stop = true;
+                        }
+                    }
+                    
+                    intersection_create_from_crossing_roads_and_update_connections(
+                        map, eb, wb, nb, sb, is_four_way_stop, intersection_turn_radius, false, false, eb->speed_limit, 1.0
+                    );
+                    
+                    processed_one = true;
+                    count++;
+                }
+            }
+        }
+        
+        if (!processed_one) break;
+    }
+    LOG_TRACE("Finished creating intersections. Created %d intersections.", count);
+}
+
+void awesim_map_setup(Map* map, Meters city_width) {
+    map_init(map);
+
+    // Define constants
+    const int interstate_num_lanes = 3;
+    const int state_num_lanes = 2;
+    const Meters lane_width = from_feet(12);
+    const MetersPerSecond interstate_speed_limit = from_mph(65);
+    const MetersPerSecond interstate_turn_speed_limit = from_mph(60);
+    const MetersPerSecond state_speed_limit = from_mph(55);
+    const MetersPerSecond state_turn_speed_limit = from_mph(50);
+    const MetersPerSecond exit_ramp_speed_limit = from_mph(40);
+    const MetersPerSecond local_speed_limit = from_mph(35);
+    const MetersPerSecond local_turn_speed_limit = from_mph(30);
+    const Meters interstate_turn_radius = 10;
+    const Meters state_turn_radius = 5;
+    const Meters local_turn_radius = 3;
+    const Meters intersection_turn_radius = 6;
+    const Meters _LANE_LENGTH_EPSILON = LANE_LENGTH_EPSILON - 1e-6; // Slightly less than LANE_LENGTH_EPSILON to avoid floating point issues
+    LOG_DEBUG("Creating map with parameters: city_width=%.2f, interstate_num_lanes=%d, state_num_lanes=%d, lane_width=%.2f, interstate_speed_limit=%.2f, state_speed_limit=%.2f, interstate_turn_speed_limit=%.2f, state_turn_speed_limit=%.2f, exit_ramp_speed_limit=%.2f, local_speed_limit=%.2f, local_turn_speed_limit=%.2f, state_turn_radius=%.2f, local_turn_radius=%.2f",
+              city_width, interstate_num_lanes, state_num_lanes, lane_width,
+              interstate_speed_limit, state_speed_limit,
+              interstate_turn_speed_limit, state_turn_speed_limit,
+              exit_ramp_speed_limit, local_speed_limit,
+              local_turn_speed_limit, state_turn_radius, local_turn_radius);
+
+    
+    // Interstate Loop
+    create_square_loop_two_way(map, coordinates_create(0,0), city_width, interstate_num_lanes, lane_width, interstate_speed_limit, interstate_turn_radius, SKIP_TURN_NONE, 0, "I-Loop");    LOG_TRACE("Created interstate square loop at center (0,0) with side length %.2f", city_width);
+
+    // Central arterial state highways (North-South) and S2 (East-West)
+    double S1_x_offset = 0.5 * lane_width * state_num_lanes;
+    double S2_y_offset = S1_x_offset;
+
+    Road* _S1N = straight_road_create_from_center_dir_len(map, coordinates_create(S1_x_offset, 0), DIRECTION_NORTH, city_width + 2 * (interstate_num_lanes * lane_width + intersection_turn_radius + _LANE_LENGTH_EPSILON), state_num_lanes, lane_width, state_speed_limit, 1.0);
+    Road* _S1S = straight_road_make_opposite_and_update_adjacents(map, _S1N);
+    road_set_name(_S1N, "S1 North");
+    road_set_name(_S1S, "S1 South");
+
+    Road* _S2E = straight_road_create_from_center_dir_len(map, coordinates_create(0, -S2_y_offset), DIRECTION_EAST, city_width + 2 * (interstate_num_lanes * lane_width + intersection_turn_radius + _LANE_LENGTH_EPSILON), state_num_lanes, lane_width, state_speed_limit, 1.0);
+    Road* _S2W = straight_road_make_opposite_and_update_adjacents(map, _S2E);
+    road_set_name(_S2E, "S2 East");
+    road_set_name(_S2W, "S2 West");
+    // Nested loops
+    double inner_loop_side = city_width * 0.27;
+    double inner_loop_num_lanes = 1;
+    double middle_loop_side = city_width * 0.54;
+    double middle_loop_num_lanes = 2;
+    double outer_loop_side = city_width * 0.81;
+    double outer_loop_num_lanes = 1;
+
+    // Inner loop/grid (local roads)
+    create_square_loop_two_way(map, coordinates_create(0, 0), inner_loop_side, inner_loop_num_lanes, lane_width, local_speed_limit, local_turn_radius, SKIP_TURN_ALL, outer_loop_side - inner_loop_side + 2 * (inner_loop_num_lanes * lane_width + local_turn_radius + outer_loop_num_lanes * lane_width + intersection_turn_radius + _LANE_LENGTH_EPSILON), "Inner Loop");
+    // Middle loop/grid (state highways)
+    create_square_loop_two_way(map, coordinates_create(0, 0), middle_loop_side, middle_loop_num_lanes, lane_width, state_speed_limit, state_turn_radius, SKIP_TURN_ALL, city_width - middle_loop_side + 2 * (middle_loop_num_lanes * lane_width + state_turn_radius + interstate_num_lanes * lane_width + intersection_turn_radius + _LANE_LENGTH_EPSILON), "Middle Loop");
+    // Outer loop (local roads)
+    create_square_loop_two_way(map, coordinates_create(0, 0), outer_loop_side, outer_loop_num_lanes, lane_width, local_speed_limit, local_turn_radius, SKIP_TURN_NONE, 0, "Outer Loop");
+
+    create_all_intersections_from_crossing_roads(map, intersection_turn_radius, true);
+}
+
 
 static bool placement_would_cause_collision(Car* car, Lane* lane, Simulation* sim, Meters progress) {
     Meters progress_meters = progress * lane->length;
@@ -65,13 +408,18 @@ void awesim_setup(Simulation* sim, Meters city_width, int num_cars, Seconds dt, 
         int attempts = 0;
         int max_attempts = 1000;
         bool would_collide = true;
-        while (would_collide && attempts < max_attempts) {
+        bool lane_too_short = true;
+        while ((would_collide || lane_too_short) && attempts < max_attempts) {
             random_road = map_get_road(map, rand_int_range(0, map->num_roads - 1));
             random_lane = road_get_lane(random_road, map, rand_int_range(0, road_get_num_lanes(random_road) - 1));
             random_progress = rand_uniform(0.1, 0.9);
             attempts++;
             would_collide = placement_would_cause_collision(car, random_lane, sim, random_progress);
             if (would_collide) LOG_TRACE("Car id %d placement attempt %d on lane %d at position %.2f meters failed due to a potential collision. Retrying with a new lane.", car->id, attempts, random_lane->id, random_progress * random_lane->length);
+            lane_too_short = (car_get_length(car) + meters(2)) > (random_lane->length);
+            if (lane_too_short) {
+                LOG_TRACE("Car id %d placement attempt %d on lane %d at position %.2f meters failed because lane is too short (lane length = %.2f meters, car length = %.2f meters). Retrying with a new lane.", car->id, attempts, random_lane->id, random_progress * random_lane->length, random_lane->length, car_get_length(car));
+            }
         }
         if (would_collide) {
             LOG_ERROR("Failed to place car id %d after %d attempts. There may be too many cars and not enough space on the road. Not adding any more cars", car->id, attempts);
@@ -97,7 +445,7 @@ void awesim_setup(Simulation* sim, Meters city_width, int num_cars, Seconds dt, 
 }
 
 
-void awesim_map_setup(Map* map, Meters city_width) {
+void awesim_map_setup_old(Map* map, Meters city_width) {
     map_init(map);
 
     // Define constants

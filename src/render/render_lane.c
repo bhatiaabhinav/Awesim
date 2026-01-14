@@ -34,24 +34,51 @@ void render_lane_center_line(SDL_Renderer* renderer, const Lane* lane, Map* map,
         thickLineRGBA_ignore_if_outside_screen(renderer, start.x, start.y, end.x, end.y, thickness, color.r, color.g, color.b, color.a);
 
     } else if (lane->type == QUARTER_ARC_LANE) {
-        SDL_Point center = to_screen_coords(lane->center, width, height);
+        // Calculate offsets for smooth interpolation (fix for asymmetric intersections)
+        Vec2D theoretical_start = {
+            lane->center.x + lane->radius * cos(lane->start_angle),
+            lane->center.y + lane->radius * sin(lane->start_angle)
+        };
+        Vec2D theoretical_end = {
+            lane->center.x + lane->radius * cos(lane->end_angle),
+            lane->center.y + lane->radius * sin(lane->end_angle)
+        };
+        
+        Lane* incoming = lane_get_connection_incoming_straight(lane, map);
+        Lane* outgoing = lane_get_connection_straight(lane, map);
+        
+        Vec2D actual_start = incoming ? incoming->end_point : lane->start_point;
+        Vec2D actual_end = outgoing ? outgoing->start_point : lane->end_point;
+        
+        Vec2D offset_start = vec_sub(actual_start, theoretical_start);
+        Vec2D offset_end = vec_sub(actual_end, theoretical_end);
 
         int arc_num_points = dotted ? ARC_NUM_POINTS * 2 : ARC_NUM_POINTS;  // Double points for dotted lines since we skip every second point
 
         double step = (lane->end_angle - lane->start_angle) / arc_num_points;
         for (int i = 0; i < arc_num_points; i++) {
             if (dotted && i % 2 == 0) continue; // Skip every second point for dotted lines
+            
+            double p1_ratio = (double)i / arc_num_points;
+            double p2_ratio = (double)(i + 1) / arc_num_points;
+
             double theta1 = lane->start_angle + i * step;
             double theta2 = lane->start_angle + (i + 1) * step;
 
-            SDL_Point p1 = {
-                (int)(center.x + lane->radius * SCALE * cos(theta1)),
-                (int)(center.y - lane->radius * SCALE * sin(theta1))
+            Vec2D off1 = vec_add(vec_scale(offset_start, 1.0 - p1_ratio), vec_scale(offset_end, p1_ratio));
+            Vec2D off2 = vec_add(vec_scale(offset_start, 1.0 - p2_ratio), vec_scale(offset_end, p2_ratio));
+
+            Coordinates w1 = {
+                lane->center.x + lane->radius * cos(theta1) + off1.x,
+                lane->center.y + lane->radius * sin(theta1) + off1.y
             };
-            SDL_Point p2 = {
-                (int)(center.x + lane->radius * SCALE * cos(theta2)),
-                (int)(center.y - lane->radius * SCALE * sin(theta2))
+            Coordinates w2 = {
+                lane->center.x + lane->radius * cos(theta2) + off2.x,
+                lane->center.y + lane->radius * sin(theta2) + off2.y
             };
+
+            SDL_Point p1 = to_screen_coords(w1, width, height);
+            SDL_Point p2 = to_screen_coords(w2, width, height);
 
             thickLineRGBA_ignore_if_outside_screen(renderer, p1.x, p1.y, p2.x, p2.y, thickness, color.r, color.g, color.b, color.a);
         }
@@ -59,9 +86,16 @@ void render_lane_center_line(SDL_Renderer* renderer, const Lane* lane, Map* map,
 }
 
 // Renders a rectangular lane section with optional lane lines and arrows.
-void render_lane_linear(SDL_Renderer* renderer, const Lane* lane, Map* map, const bool paint_lines, const bool paint_arrows, const bool paint_id) {
+void render_lane_linear(SDL_Renderer* renderer, const Lane* lane, Map* map, bool paint_lines, bool paint_arrows, bool paint_id) {
     int width = WINDOW_SIZE_WIDTH;
     int height = WINDOW_SIZE_HEIGHT;
+
+    // if it's an extremely short lane, skip painting
+    if (lane->length < LANE_LENGTH_EPSILON) {
+        paint_lines = false;
+        paint_arrows = false;
+        paint_id = false;
+    }
 
     // Determine bounding box for rendering the lane.
     double x_min, x_max, y_min, y_max;
@@ -217,7 +251,7 @@ void render_lane_linear(SDL_Renderer* renderer, const Lane* lane, Map* map, cons
 
 
 // Renders a quarter-arc lane, optionally painting boundary lines and directional arrows.
-void render_lane_quarterarc(SDL_Renderer* renderer, const Lane* lane, Map* map, const bool paint_lines, const bool paint_arrows, const bool paint_id) {
+void render_lane_quarterarc(SDL_Renderer* renderer, const Lane* lane, Map* map,  bool paint_lines, bool paint_arrows, bool paint_id) {
     int width = WINDOW_SIZE_WIDTH;
     int height = WINDOW_SIZE_HEIGHT;
 
@@ -227,6 +261,25 @@ void render_lane_quarterarc(SDL_Renderer* renderer, const Lane* lane, Map* map, 
     double r_inner = lane->radius - lane->width / 2;
     double r_outer = lane->radius + lane->width / 2;
 
+    // Calculate offsets for smooth interpolation (fix for asymmetric intersections)
+    Vec2D theoretical_start = {
+        lane->center.x + lane->radius * cos(lane->start_angle),
+        lane->center.y + lane->radius * sin(lane->start_angle)
+    };
+    Vec2D theoretical_end = {
+        lane->center.x + lane->radius * cos(lane->end_angle),
+        lane->center.y + lane->radius * sin(lane->end_angle)
+    };
+    
+    Lane* incoming = lane_get_connection_incoming_straight(lane, map);
+    Lane* outgoing = lane_get_connection_straight(lane, map);
+    
+    Vec2D actual_start = incoming ? incoming->end_point : lane->start_point;
+    Vec2D actual_end = outgoing ? outgoing->start_point : lane->end_point;
+    
+    Vec2D offset_start = vec_sub(actual_start, theoretical_start);
+    Vec2D offset_end = vec_sub(actual_end, theoretical_end);
+
     // Prepare vertex arrays to define the polygon shape of the lane
     Sint16 vx[2 * (ARC_NUM_POINTS + 1)];
     Sint16 vy[2 * (ARC_NUM_POINTS + 1)];
@@ -235,10 +288,13 @@ void render_lane_quarterarc(SDL_Renderer* renderer, const Lane* lane, Map* map, 
 
     // Fill inner arc points (counter-clockwise)
     for (int i = 0; i <= ARC_NUM_POINTS; i++) {
+        double p = (double)i / ARC_NUM_POINTS;
         double angle = lane->start_angle + i * angle_step;
+        
+        Vec2D offset = vec_add(vec_scale(offset_start, 1.0 - p), vec_scale(offset_end, p));
         Coordinates pt = {
-            lane->center.x + r_inner * cos(angle),
-            lane->center.y + r_inner * sin(angle)
+            lane->center.x + r_inner * cos(angle) + offset.x,
+            lane->center.y + r_inner * sin(angle) + offset.y
         };
         SDL_Point screen_pt = to_screen_coords(pt, width, height);
         vx[idx] = screen_pt.x;
@@ -248,10 +304,13 @@ void render_lane_quarterarc(SDL_Renderer* renderer, const Lane* lane, Map* map, 
 
     // Fill outer arc points (clockwise)
     for (int i = ARC_NUM_POINTS; i >= 0; i--) {
+        double p = (double)i / ARC_NUM_POINTS;
         double angle = lane->start_angle + i * angle_step;
+
+        Vec2D offset = vec_add(vec_scale(offset_start, 1.0 - p), vec_scale(offset_end, p));
         Coordinates pt = {
-            lane->center.x + r_outer * cos(angle),
-            lane->center.y + r_outer * sin(angle)
+            lane->center.x + r_outer * cos(angle) + offset.x,
+            lane->center.y + r_outer * sin(angle) + offset.y
         };
         SDL_Point screen_pt = to_screen_coords(pt, width, height);
         vx[idx] = screen_pt.x;
@@ -307,19 +366,36 @@ void render_lane_quarterarc(SDL_Renderer* renderer, const Lane* lane, Map* map, 
         int arc_num_points = is_right_dotted ? ARC_NUM_POINTS * 2 : ARC_NUM_POINTS;  // Double points for dotted lines since we skip every second point
         angle_step = (lane->end_angle - lane->start_angle) / arc_num_points;
         for (int i = 0; i < arc_num_points; i++) {
+            double p1_ratio = (double)i / arc_num_points;
+            double p2_ratio = (double)(i + 1) / arc_num_points;
+            
             double theta1 = lane->start_angle + i * angle_step;
             double theta2 = lane->start_angle + (i + 1) * angle_step;
+            
+            Vec2D off1 = vec_add(vec_scale(offset_start, 1.0 - p1_ratio), vec_scale(offset_end, p1_ratio));
+            Vec2D off2 = vec_add(vec_scale(offset_start, 1.0 - p2_ratio), vec_scale(offset_end, p2_ratio));
 
             // Right boundary line
            if (is_right_dotted && i % 2 == 0) continue; // Skip every second point for dotted lines
             SDL_Point p1_right = {
-                (int)(center_screen.x + r_right * SCALE * cos(theta1)),
-                (int)(center_screen.y - r_right * SCALE * sin(theta1))
+                (int)(center_screen.x + r_right * SCALE * cos(theta1) + off1.x * SCALE),
+                (int)(center_screen.y - (r_right * sin(theta1) + off1.y) * SCALE) // Correct Y axis handled by transform? NO.
             };
-            SDL_Point p2_right = {
-                (int)(center_screen.x + r_right * SCALE * cos(theta2)),
-                (int)(center_screen.y - r_right * SCALE * sin(theta2))
+            
+            // Wait, to_screen_coords handles flipping Y.
+            // Let's use world coords first.
+            Coordinates w1 = {
+                lane->center.x + r_right * cos(theta1) + off1.x,
+                lane->center.y + r_right * sin(theta1) + off1.y
             };
+            Coordinates w2 = {
+                lane->center.x + r_right * cos(theta2) + off2.x,
+                lane->center.y + r_right * sin(theta2) + off2.y
+            };
+            
+            p1_right = to_screen_coords(w1, width, height);
+            SDL_Point p2_right = to_screen_coords(w2, width, height);
+            
             thickLineRGBA_ignore_if_outside_screen(renderer, p1_right.x, p1_right.y, p2_right.x, p2_right.y,
                         right_thickness, right_line_color.r, right_line_color.g, right_line_color.b, right_line_color.a);
         }
@@ -328,19 +404,30 @@ void render_lane_quarterarc(SDL_Renderer* renderer, const Lane* lane, Map* map, 
         arc_num_points = is_left_dotted ? ARC_NUM_POINTS * 2 : ARC_NUM_POINTS;
         angle_step = (lane->end_angle - lane->start_angle) / arc_num_points;
         for (int i = 0; i < arc_num_points; i++) {
+            double p1_ratio = (double)i / arc_num_points;
+            double p2_ratio = (double)(i + 1) / arc_num_points;
+
             double theta1 = lane->start_angle + i * angle_step;
             double theta2 = lane->start_angle + (i + 1) * angle_step;
+            
+            Vec2D off1 = vec_add(vec_scale(offset_start, 1.0 - p1_ratio), vec_scale(offset_end, p1_ratio));
+            Vec2D off2 = vec_add(vec_scale(offset_start, 1.0 - p2_ratio), vec_scale(offset_end, p2_ratio));
 
             // Left boundary line
             if (is_left_dotted && i % 2 == 0) continue; // Skip every second point for dotted lines
-            SDL_Point p1_left = {
-                (int)(center_screen.x + r_left * SCALE * cos(theta1)),
-                (int)(center_screen.y - r_left * SCALE * sin(theta1))
+            
+            Coordinates w1 = {
+                lane->center.x + r_left * cos(theta1) + off1.x,
+                lane->center.y + r_left * sin(theta1) + off1.y
             };
-            SDL_Point p2_left = {
-                (int)(center_screen.x + r_left * SCALE * cos(theta2)),
-                (int)(center_screen.y - r_left * SCALE * sin(theta2))
+            Coordinates w2 = {
+                lane->center.x + r_left * cos(theta2) + off2.x,
+                lane->center.y + r_left * sin(theta2) + off2.y
             };
+            
+            SDL_Point p1_left = to_screen_coords(w1, width, height);
+            SDL_Point p2_left = to_screen_coords(w2, width, height);
+
             thickLineRGBA_ignore_if_outside_screen(renderer, p1_left.x, p1_left.y, p2_left.x, p2_left.y,
                         left_thickness, left_line_color.r, left_line_color.g, left_line_color.b, left_line_color.a);
         }
@@ -409,7 +496,7 @@ void render_lane_quarterarc(SDL_Renderer* renderer, const Lane* lane, Map* map, 
 }
 
 
-void render_lane(SDL_Renderer* renderer, const Lane* lane, Map* map, const bool paint_lines, const bool paint_arrows, const bool paint_id) {
+void render_lane(SDL_Renderer* renderer, const Lane* lane, Map* map, bool paint_lines, bool paint_arrows, bool paint_id) {
     if (lane->type == LINEAR_LANE) {
         render_lane_linear(renderer, lane, map, paint_lines, paint_arrows, paint_id);
     } else if (lane->type == QUARTER_ARC_LANE) {

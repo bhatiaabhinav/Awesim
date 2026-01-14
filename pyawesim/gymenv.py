@@ -42,6 +42,10 @@ class AwesimEnv(gym.Env):
         self,
         use_das: bool = True,
         merge_assist: bool = True,
+        follow_assist: bool = True,
+        aeb_assist: bool = True,
+        stop_assist: bool = True,
+        deprecated_info_display: bool = False,
         cam_resolution: Tuple[int, int] = DEFAULT_CAM_RESOLUTION,
         anti_aliasing: bool = False,
         reward_shaping: bool = False,
@@ -56,6 +60,7 @@ class AwesimEnv(gym.Env):
         time_penalty_per_second: float = DEFAULT_TIME_PENALTY,
         goal_reward: float = DEFAULT_GOAL_REWARD,
         crash_penalty: float = DEFAULT_CRASH_PENALTY,
+        crash_ends_episode: bool = True,
         cost_gas_per_gallon: float = COST_GAS_PER_GALLON,
         cost_lost_wage_per_hour: float = COST_LOST_WAGE_PER_HOUR,
         may_lose_entire_day_wage: bool = MAY_LOSE_ENTIRE_DAY_WAGE,
@@ -103,6 +108,10 @@ class AwesimEnv(gym.Env):
         # Environment configuration
         self.use_das = use_das
         self.merge_assist = merge_assist
+        self.follow_assist = follow_assist
+        self.aeb_assist = aeb_assist
+        self.stop_assist = stop_assist
+        self.deprecated_info_display = deprecated_info_display
         self.cam_resolution = cam_resolution
         self.anti_aliasing = anti_aliasing
         self.reward_shaping = reward_shaping
@@ -115,6 +124,7 @@ class AwesimEnv(gym.Env):
         self.time_penalty_per_second = time_penalty_per_second
         self.goal_reward = goal_reward
         self.crash_penalty = crash_penalty
+        self.crash_ends_episode = crash_ends_episode
         self.cost_gas_per_gallon = cost_gas_per_gallon
         self.cost_lost_wage_per_hour = cost_lost_wage_per_hour
         self.may_lose_entire_day_wage = may_lose_entire_day_wage
@@ -134,7 +144,7 @@ class AwesimEnv(gym.Env):
         # Initialize simulation
         self.sim = A.sim_malloc()  # Allocate simulation instance
         A.awesim_setup(
-            self.sim, self.city_width, self.num_cars, 0.02, A.clock_reading(0, 8, 0, 0), A.WEATHER_SUNNY
+            self.sim, self.city_width, self.num_cars, 0.02, A.Monday_8_AM, A.WEATHER_SUNNY
         )  # Set up city with fixed time (8 AM) and sunny weather
         A.sim_set_agent_enabled(self.sim, True)  # Enable agent control
         if self.use_das:
@@ -162,9 +172,21 @@ class AwesimEnv(gym.Env):
             thw_low, thw_high = self.MIN_THW, self.MAX_THW  # in seconds
             turn_signal_min, turn_signal_max = -1.0, 1.0                                # -1 means left signal, +1 means right signal, 0 means no signal, anything in between means probabilistically choose left / right with probability proportional to magnitude of the value
             stop_prob_min, stop_prob_max = 0.0, 1.0  # 0 means no stop, 1 means stop at intersection. anything in between means probabilistically choose stop / no stop with probability proportional to magnitude of the value
+
+            lows, highs = [], []
+            lows.append(speed_target_low)
+            highs.append(speed_target_high)
+            if self.follow_assist:
+                lows.append(thw_low)
+                highs.append(thw_high)
+            lows.append(turn_signal_min)
+            highs.append(turn_signal_max)
+            if self.stop_assist:
+                lows.append(stop_prob_min)
+                highs.append(stop_prob_max)
             self.action_space = spaces.Box(
-                low=np.array([speed_target_low, thw_low, turn_signal_min, stop_prob_min], dtype=np.float32),
-                high=np.array([speed_target_high, thw_high, turn_signal_max, stop_prob_max], dtype=np.float32),
+                low=np.array(lows, dtype=np.float32),
+                high=np.array(highs, dtype=np.float32),
             )
         else:
             # action space: 2 components: acceleration [-1, 1] scaled to capabilities, turn / merge intent [-1, 1] with probability proportional to magnitude. There is not merge assist or follow assist.
@@ -180,6 +202,67 @@ class AwesimEnv(gym.Env):
         )
 
     def _get_info_for_info_display(self) -> list[Tuple[float, A.RGB]]:
+
+        if self.use_das:
+            A.situational_awareness_build(self.sim, self.agent.id)
+            das = A.sim_get_driving_assistant(self.sim, self.agent.id)
+            sit = A.sim_get_situational_awareness(self.sim, self.agent.id)
+
+            # car state
+            fuel = A.car_get_fuel_level(self.agent) / self.OBSERVATION_NORMALIZATION["fuel"]
+            speed = A.car_get_speed(self.agent) / self.OBSERVATION_NORMALIZATION["speed"]
+            accel = A.car_get_acceleration(self.agent) / self.OBSERVATION_NORMALIZATION["acceleration"]
+            ind_turn_left = A.car_get_indicator_turn(self.agent) == A.INDICATOR_LEFT
+            ind_merge_left = A.car_get_indicator_lane(self.agent) == A.INDICATOR_LEFT
+            ind_left = ind_turn_left or ind_merge_left
+            ind_turn_right = A.car_get_indicator_turn(self.agent) == A.INDICATOR_RIGHT
+            ind_merge_right = A.car_get_indicator_lane(self.agent) == A.INDICATOR_RIGHT
+            ind_right = ind_turn_right or ind_merge_right
+
+            # ADAS state
+            speed_target = das.speed_target / self.OBSERVATION_NORMALIZATION["speed"]
+            thw_target = das.thw / self.MAX_THW
+            should_stop_at_intersection = das.should_stop_at_intersection
+            aeb_in_progress = das.aeb_in_progress
+
+            # environment state
+            t = A.sim_get_time(self.sim) / self.OBSERVATION_NORMALIZATION["time"]
+            speed_limit = sit.lane.speed_limit / self.OBSERVATION_NORMALIZATION["speed"]
+
+            infos_and_colors = [
+                (fuel, A.RGB_WHITE),
+                (abs(speed), A.RGB_BLUE if speed >= 0 else A.RGB_YELLOW),
+                (abs(accel), A.RGB_GREEN if accel >= 0 else A.RGB_RED),
+
+                (float(ind_left), A.RGB_ORANGE),
+                (abs(speed_target), A.RGB_MAGENTA if speed_target >= 0 else A.RGB_YELLOW),
+                (float(ind_right), A.RGB_ORANGE),
+
+                (float(should_stop_at_intersection), A.RGB_RED),
+                (thw_target, A.RGB_CYAN),
+                (float(aeb_in_progress), A.RGB_RED),
+
+                (speed_limit, A.RGB_WHITE),
+                (0, A.RGB_BLACK),  # blank
+                (t, A.RGB_WHITE),
+            ]
+        else:
+            # car state
+            fuel = A.car_get_fuel_level(self.agent) / self.OBSERVATION_NORMALIZATION["fuel"]
+            speed = A.car_get_speed(self.agent) / self.OBSERVATION_NORMALIZATION["speed"]
+
+            # environment state
+            t = A.sim_get_time(self.sim) / self.OBSERVATION_NORMALIZATION["time"]
+
+            infos_and_colors = [
+                (fuel, A.RGB_RED if fuel < A.from_gallons(1) else A.RGB_GREEN),
+                (abs(speed), A.RGB_BLUE if speed >= 0 else A.RGB_YELLOW),
+                (t, A.RGB_WHITE),
+            ]
+
+        return infos_and_colors
+
+    def _get_info_for_info_display_deprecated(self) -> list[Tuple[float, A.RGB]]:
 
         if self.use_das:
             A.situational_awareness_build(self.sim, self.agent.id)
@@ -256,7 +339,7 @@ class AwesimEnv(gym.Env):
         A.minimap_render(self.minimap, self.sim)
 
         # info display render
-        infos_and_colors = self._get_info_for_info_display()
+        infos_and_colors = self._get_info_for_info_display() if not self.deprecated_info_display else self._get_info_for_info_display_deprecated()
         for i, (info, color) in enumerate(infos_and_colors):
             A.infos_display_set_info(self.infos_display, i, info)
             A.infos_display_set_info_color(self.infos_display, i, color)
@@ -383,6 +466,10 @@ class AwesimEnv(gym.Env):
             A.driving_assistant_reset_settings(self.das, self.agent)
             if not self.merge_assist:
                 A.driving_assistant_configure_merge_assistance(self.das, self.agent, self.sim, False)
+            if not self.follow_assist:
+                A.driving_assistant_configure_follow_assistance(self.das, self.agent, self.sim, False)
+            if not self.aeb_assist:
+                A.driving_assistant_configure_aeb_assistance(self.das, self.agent, self.sim, False)
 
         # Configure collision checker
         A.collisions_reset(self.collision_checker)
@@ -428,10 +515,20 @@ class AwesimEnv(gym.Env):
         sit = A.sim_get_situational_awareness(self.sim, self.agent.id)
 
         if self.use_das:
-            action_speed_target = action[0]
-            action_thw_target = action[1]
-            action_indicator_probability = action[2]
-            action_stop_at_intersection_probability = action[3]
+            a_id = 0
+            action_speed_target = action[a_id]
+            a_id += 1
+            if self.follow_assist:
+                action_thw_target = action[a_id]
+                a_id += 1
+            else:
+                action_thw_target = None
+            action_indicator_probability = action[a_id]
+            a_id += 1
+            if self.stop_assist:
+                action_stop_at_intersection_probability = action[a_id]
+            else:
+                action_stop_at_intersection_probability = None
         else:
             action_acceleration = action[0]
             action_indicator_probability = action[1]
@@ -441,11 +538,24 @@ class AwesimEnv(gym.Env):
             A.driving_assistant_configure_speed_target(self.das, self.agent, self.sim, A.mps(speed_target))
 
             # Follow mode time-headway adjustment
-            new_thw_target = float(action_thw_target)
-            A.driving_assistant_configure_thw(self.das, self.agent, self.sim, A.seconds(new_thw_target))
+            if self.follow_assist:
+                new_thw_target = float(action_thw_target)
+                A.driving_assistant_configure_thw(self.das, self.agent, self.sim, A.seconds(new_thw_target))
 
             # set stop at intersection
-            should_stop_at_intersection = abs(action_stop_at_intersection_probability) > 0.5 if self.deterministic_actions else self.np_random.random() < abs(action_stop_at_intersection_probability)
+            if self.stop_assist:
+                should_stop_at_intersection = abs(action_stop_at_intersection_probability) > 0.5 if self.deterministic_actions else self.np_random.random() < abs(action_stop_at_intersection_probability)
+            else:
+                should_stop_at_intersection = False
+
+            cur_stop_intent = A.driving_assistant_get_should_stop_at_intersection(self.das)
+            if (sit.is_an_intersection_upcoming or sit.is_approaching_dead_end) and sit.is_approaching_end_of_lane:
+                # if already decided to stop previously, don't allow changing that decision until slow enough (stop or rolling stop)
+                if bool(cur_stop_intent) and A.car_get_speed(self.agent) > A.from_mph(5):
+                    should_stop_at_intersection = True
+                    if self.verbose:
+                        print("Locked stop at intersection intent to True until slow enough")
+
             A.driving_assistant_configure_should_stop_at_intersection(self.das, self.agent, self.sim, bool(should_stop_at_intersection))
         else:
             # decide acceleration. If travel direction and acceleration have the same sign, scale it so max_acc or max_acc_reverse_gear, depending on direction. If they have opposite signs, scale it to max_dec in the direction of the acceleration action, since we want to brake.
@@ -527,7 +637,7 @@ class AwesimEnv(gym.Env):
         crashed_forward = crashed_backward = False
         crashed_on_intersection = False
         fuel_initial = A.car_get_fuel_level(self.agent)
-        while not (crashed or reached_goal or timeout or out_of_fuel) and elapsed_time < self.decision_interval - 1e-6:
+        while not ((self.crash_ends_episode and crashed) or reached_goal or timeout or out_of_fuel) and elapsed_time < self.decision_interval - 1e-6:
             delta_time = min(self.TERMINATION_CHECK_INTERVAL, self.decision_interval - elapsed_time)    # make sure you don't end up simulating more than decision_interval if it is not a multiple of TERMINATION_CHECK_INTERVAL
             t0 = A.sim_get_time(self.sim)
             A.simulate(self.sim, delta_time)  # Advance simulation
@@ -557,9 +667,9 @@ class AwesimEnv(gym.Env):
                     crashed_on_intersection = True
             if reached_goal:
                 reward += self.goal_reward
-        terminated = crashed or reached_goal or out_of_fuel or timeout
+        terminated = (self.crash_ends_episode and crashed) or reached_goal or out_of_fuel or timeout
 
-        if terminated and crashed:
+        if crashed:
             reward -= self.crash_penalty
 
         # shaped reward if goal lane is specified: reward for reducing manhat distance to goal
@@ -587,7 +697,7 @@ class AwesimEnv(gym.Env):
         if self.goal_lane is not None and not reached_goal and is_late:
             cost += self.cost_lost_wage_per_hour * self.decision_interval / 3600.0
 
-        if self.may_lose_entire_day_wage and self.goal_lane is not None and not reached_goal and (timeout or out_of_fuel or crashed):
+        if self.may_lose_entire_day_wage and self.goal_lane is not None and not reached_goal and (timeout or out_of_fuel or (self.crash_ends_episode and crashed)):
             how_late_already_hrs = (A.sim_get_time(self.sim) - self.appointment_time) / 3600.0
             how_late_already_hrs = max(how_late_already_hrs, 0)  # in case it is not time for appointment yet
             cost_lost_wage_already_considered = how_late_already_hrs * self.cost_lost_wage_per_hour

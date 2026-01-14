@@ -24,7 +24,7 @@ int main(int argc, char* argv[]) {
     Seconds seconds_to_simulate = argc >= 4 ? atoi(argv[3]) : 1e9; // total time (in sim) to simulate, after which the program will exit. Prefer to read from command line argument, else use default.
 
     Seconds dt = 0.02;                              // time resolution for integration.
-    ClockReading initial_clock_reading = clock_reading(0, 8, 0, 0); // start clock at 8:00 AM on Monday.
+    ClockReading initial_clock_reading = Monday_8_AM; // start clock at 8:00 AM on Monday.
     Weather weather = WEATHER_SUNNY;                // default weather condition.
     printf("Simulation parameters: City width = %.2f meters, Number of cars = %d, Time resolution dt = %.2f seconds, Initial clock reading = %02d:%02d:%02d, Weather = %s, Seconds to simulate = %.2f\n",
            city_width, num_cars, dt, initial_clock_reading.hours, initial_clock_reading.minutes, (int)initial_clock_reading.seconds, weather_strings[weather], seconds_to_simulate);

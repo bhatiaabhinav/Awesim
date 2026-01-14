@@ -1,12 +1,14 @@
 #include "map.h"
 #include "utils.h"
 #include "logging.h"
+#include "car.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <assert.h>
 #include <math.h>
+#include <string.h>
 
-const Seconds TRAFFIC_STATE_DURATIONS[NUM_TRAFFIC_CONTROL_STATES] = {
+const Seconds TRAFFIC_STATE_DURATIONS[NUM_TRAFFIC_CONTROL_CYCLIC_STATES] = {
     GREEN_DURATION,
     YELLOW_DURATION,
     MINOR_RED_EXTENSION,
@@ -136,19 +138,24 @@ Intersection* intersection_create_and_form_connections(
     LOG_TRACE("Creating intersection with roads names: "
               "%s (from), %s (to), %s (from), %s (to), "
               "%s (from), %s (to), %s (from), %s (to), "
-              "Parameters: is_four_way_stop=%d, left_lane_turns_left_only=%d, right_lane_turns_right_only=%d, speed_limit=%.2f, grip=%.2f",
+              "Parameters: is_four_way_stop=%d (may be disabled for T-junctions), left_lane_turns_left_only=%d, right_lane_turns_right_only=%d, speed_limit=%.2f, grip=%.2f",
               road_eastbound_from->name, road_eastbound_to->name,
               road_westbound_from->name, road_westbound_to->name,
               road_northbound_from->name, road_northbound_to->name,
               road_southbound_from->name, road_southbound_to->name,
               is_four_way_stop, left_lane_turns_left_only, right_lane_turns_right_only, speed_limit, grip);
     Road* roads_from[4] = {
-        road_northbound_from, road_eastbound_from,
-        road_southbound_from, road_westbound_from
+        [DIRECTION_EAST] = road_eastbound_from,
+        [DIRECTION_WEST] = road_westbound_from,
+        [DIRECTION_NORTH] = road_northbound_from,
+        [DIRECTION_SOUTH] = road_southbound_from,
     };
+
     Road* roads_to[4] = {
-        road_northbound_to, road_eastbound_to,
-        road_southbound_to, road_westbound_to
+        [DIRECTION_EAST] = road_eastbound_to,
+        [DIRECTION_WEST] = road_westbound_to,
+        [DIRECTION_NORTH] = road_northbound_to,
+        [DIRECTION_SOUTH] = road_southbound_to,
     };
 
     for (int dir_id = 0; dir_id < 4; dir_id++) {
@@ -180,12 +187,52 @@ Intersection* intersection_create_and_form_connections(
     intersection->grip = grip;
     intersection->lane_width = road_northbound_from->lane_width; // Assuming all roads have the same lane width
 
+    for (int dir_id = 0; dir_id < 4; dir_id++) {
+        if (roads_from[dir_id]->num_lanes > MAX_NUM_LANES_PER_ROAD) {
+            LOG_ERROR("Road %s has %d lanes, which exceeds the maximum of %d supported by intersections.", roads_from[dir_id]->name, roads_from[dir_id]->num_lanes, MAX_NUM_LANES_PER_ROAD);
+        }
+    }
+
+    // If any one road (and its adjacent opposite) is insignificantly short, then it's a T-junction
+    intersection->is_T_junction = false;
+    intersection->is_T_junction_north_south = false;
+    for (int dir_id = 0; dir_id < 4; dir_id++) {
+        if (road_get_length(roads_from[dir_id]) <= LANE_LENGTH_EPSILON) {
+            // assert that adjacent opposite road is also short
+            if (road_get_length(roads_to[direction_opposite(dir_id)]) > LANE_LENGTH_EPSILON) {
+                LOG_ERROR("T-junction detected but the parallel opposite direction road is not short enough. Roads are %s (from) and %s (to).",
+                          roads_from[dir_id]->name, roads_to[direction_opposite(dir_id)]->name);
+                return NULL;
+            }
+            LOG_TRACE("T-junction detected due to short road %s (from) and %s (to).",
+                      roads_from[dir_id]->name, roads_to[direction_opposite(dir_id)]->name);
+            intersection->is_T_junction = true;
+            intersection->is_T_junction_north_south = (dir_id == DIRECTION_EAST || dir_id == DIRECTION_WEST); // East-West road is short
+            if (is_four_way_stop) {
+                LOG_TRACE("Disabling four-way stop for T-junction.");
+                is_four_way_stop = false;
+            }
+            break;
+        }
+    }
+
     if (is_four_way_stop) {
+        // assert that all roads are one-lane
+        for (int dir_id = 0; dir_id < 4; dir_id++) {
+            if (roads_from[dir_id]->num_lanes != 1) {
+                LOG_ERROR("Four-way stop intersections must have exactly one lane in each direction. Road %s has %d lanes.",
+                          roads_from[dir_id]->name, roads_from[dir_id]->num_lanes);
+                return NULL;
+            }
+        }
         intersection->state = FOUR_WAY_STOP;
         intersection->countdown = 0;
     } else {
-        intersection->state = rand_int_range(0, NUM_TRAFFIC_CONTROL_STATES - 1);
+        intersection->state = rand_int_range(0, NUM_TRAFFIC_CONTROL_CYCLIC_STATES - 1);
         intersection->countdown = TRAFFIC_STATE_DURATIONS[intersection->state];
+    }
+    for (int i = 0; i < 4; i++) {
+        intersection->cars_at_stop_sign_fcfs_queue[i] = ID_NULL;
     }
     LOG_TRACE("Intersection initialized with ID %d, name '%s', state %d, countdown %.2f. Forming lane connections.",
               intersection->id, intersection->name, intersection->state, intersection->countdown);
@@ -198,37 +245,53 @@ Intersection* intersection_create_and_form_connections(
 
         // Right turn
         Lane* lane_from = road_get_rightmost_lane(road_from, map);
-        Road* road_to = roads_to[(dir_id + 1) % 4];
+        if (lane_get_length(lane_from) <= LANE_LENGTH_EPSILON) {
+            lane_from = NULL;
+        }
+        Road* road_to = roads_to[direction_perp_cw(dir_id)];
         Lane* lane_to = road_get_rightmost_lane(road_to, map);
-        LOG_TRACE("Creating right turn lane from %s (Road %s) to %s (Road %s)",
-                  lane_from->name, road_from->name, lane_to->name, road_to->name);
-        Lane* right_turn_lane = quarter_arc_lane_create_from_start_end(map, 
-            lane_from->end_point, lane_to->start_point, DIRECTION_CW,
-            lane_from->width, speed_limit, grip, DEGRADATIONS_ZERO);
-        lane_set_connection_right(lane_from, right_turn_lane);
-        lane_set_connection_straight(right_turn_lane, lane_to);
-        lane_set_connection_incoming_right(lane_to, right_turn_lane);
-        lane_set_connection_incoming_straight(right_turn_lane, lane_from);
-        lane_set_intersection(right_turn_lane, intersection);
-        intersection->lane_ids[lanes_count++] = right_turn_lane->id;
-        turn_radius = fmin(turn_radius, right_turn_lane->radius);
+        if (lane_get_length(lane_to) <= LANE_LENGTH_EPSILON) {
+            lane_to = NULL;
+        }
+        if (lane_from && lane_to) {
+            LOG_TRACE("Creating right turn lane from %s (Road %s) to %s (Road %s)",
+                    lane_from->name, road_from->name, lane_to->name, road_to->name);
+            Lane* right_turn_lane = quarter_arc_lane_create_from_start_end(map, 
+                lane_from->end_point, lane_to->start_point, DIRECTION_CW,
+                lane_from->width, speed_limit, grip, DEGRADATIONS_ZERO);
+            lane_set_connection_right(lane_from, right_turn_lane);
+            lane_set_connection_straight(right_turn_lane, lane_to);
+            lane_set_connection_incoming_right(lane_to, right_turn_lane);
+            lane_set_connection_incoming_straight(right_turn_lane, lane_from);
+            lane_set_intersection(right_turn_lane, intersection);
+            intersection->lane_ids[lanes_count++] = right_turn_lane->id;
+            turn_radius = fmin(turn_radius, right_turn_lane->radius);
+        }
 
         // Left turn
         lane_from = road_get_leftmost_lane(road_from, map);
-        road_to = roads_to[(dir_id + 3) % 4];
+        if (lane_get_length(lane_from) <= LANE_LENGTH_EPSILON) {
+            lane_from = NULL;
+        }
+        road_to = roads_to[direction_perp_ccw(dir_id)];
         lane_to = road_get_leftmost_lane(road_to, map);
-        LOG_TRACE("Creating left turn lane from %s (Road %s) to %s (Road %s)",
-                  lane_from->name, road_from->name, lane_to->name, road_to->name);
-        Lane* left_turn_lane = quarter_arc_lane_create_from_start_end(map, 
-            lane_from->end_point, lane_to->start_point, DIRECTION_CCW,
-            lane_from->width, speed_limit, grip, DEGRADATIONS_ZERO);
-        lane_set_connection_left(lane_from, left_turn_lane);
-        lane_set_connection_straight(left_turn_lane, lane_to);
-        lane_set_connection_incoming_left(lane_to, left_turn_lane);
-        lane_set_connection_incoming_straight(left_turn_lane, lane_from);
-        lane_set_intersection(left_turn_lane, intersection);
-        intersection->lane_ids[lanes_count++] = left_turn_lane->id;
-        turn_radius = fmin(turn_radius, left_turn_lane->radius);
+        if (lane_get_length(lane_to) <= LANE_LENGTH_EPSILON) {
+            lane_to = NULL;
+        }
+        if (lane_from && lane_to) {
+            LOG_TRACE("Creating left turn lane from %s (Road %s) to %s (Road %s)",
+                    lane_from->name, road_from->name, lane_to->name, road_to->name);
+            Lane* left_turn_lane = quarter_arc_lane_create_from_start_end(map, 
+                lane_from->end_point, lane_to->start_point, DIRECTION_CCW,
+                lane_from->width, speed_limit, grip, DEGRADATIONS_ZERO);
+            lane_set_connection_left(lane_from, left_turn_lane);
+            lane_set_connection_straight(left_turn_lane, lane_to);
+            lane_set_connection_incoming_left(lane_to, left_turn_lane);
+            lane_set_connection_incoming_straight(left_turn_lane, lane_from);
+            lane_set_intersection(left_turn_lane, intersection);
+            intersection->lane_ids[lanes_count++] = left_turn_lane->id;
+            turn_radius = fmin(turn_radius, left_turn_lane->radius);
+        }
 
         // Straight lanes
         road_to = roads_to[dir_id];
@@ -239,7 +302,13 @@ Intersection* intersection_create_and_form_connections(
             if (right_lane_turns_right_only && k == road_from->num_lanes - 1 && road_from->num_lanes > 1) continue;
 
             Lane* lane_from = road_get_lane(road_from, map, k);
+            if (lane_get_length(lane_from) <= LANE_LENGTH_EPSILON) {
+                continue;
+            }
             Lane* lane_to = road_get_lane(road_to, map, k);
+            if (lane_get_length(lane_to) <= LANE_LENGTH_EPSILON) {
+                continue;
+            }
             LOG_TRACE("Creating straight lane no. %d from %s (Road %s) to %s (Road %s)",
                 k, lane_from->name, road_from->name, lane_to->name, road_to->name);
             Lane* straight_lane = linear_lane_create_from_start_end(map, 
@@ -354,11 +423,108 @@ Intersection* intersection_create_from_crossing_roads_and_update_connections(
     );
 }
 
-void intersection_update(Intersection* controller, Seconds dt) {
-    if (controller->state == FOUR_WAY_STOP) return;
+void intersection_update(Intersection* controller, Simulation* sim, Seconds dt) {
+    if (controller->is_T_junction) {
+        // For T-junctions, orientation direction is always green and the other is always stop and go-yeild
+        if (controller->is_T_junction_north_south) {
+            controller->state = T_JUNC_NS;
+        } else {
+            controller->state = T_JUNC_EW;
+        }
+        return;
+    }
+    if (controller->state == FOUR_WAY_STOP) {
+        // track the first-come-first-serve queue here. A car has reached an intersection if it the distance from its leading edge to the end of the lane is less than STOP_LINE_BUFFER_METERS + meters(0.1).
+        Map* map = sim_get_map(sim);
+        
+        RoadId inbound_road_ids[4] = {
+            controller->road_eastbound_from_id,
+            controller->road_westbound_from_id,
+            controller->road_northbound_from_id,
+            controller->road_southbound_from_id
+        };
+
+        // 1. Clean up queue: remove cars that are no longer waiting at the stop sign of this intersection
+        for (int i = 0; i < 4; i++) {
+            CarId queued_car_id = controller->cars_at_stop_sign_fcfs_queue[i];
+            if (queued_car_id == ID_NULL) continue;
+            
+            Car* car = sim_get_car(sim, queued_car_id);
+            bool should_remove = true;
+            
+            if (car) {
+                // Check if car is still on one of the inbound lanes
+                for (int dir = 0; dir < 4; dir++) {
+                    Road* road = map_get_road(map, inbound_road_ids[dir]);
+                    if (!road) continue;
+
+                    for (int l = 0; l < road->num_lanes; l++) {
+                        if (car->lane_id == road->lane_ids[l]) {
+                            should_remove = false; // Still on an inbound lane
+                            break;
+                        }
+                    }
+                    if (!should_remove) break;
+                }
+            } else {
+                // Car disappeared (e.g. removed from sim)
+                should_remove = true;
+            }
+
+            if (should_remove) {
+                // Shift remaining queue
+                for (int j = i; j < 3; j++) {
+                    controller->cars_at_stop_sign_fcfs_queue[j] = controller->cars_at_stop_sign_fcfs_queue[j+1];
+                }
+                controller->cars_at_stop_sign_fcfs_queue[3] = ID_NULL;
+                i--; // re-check this slot as it's now filled by the next item
+            }
+        }
+
+        // 2. Add new arrivals to queue
+        for (int dir_id = 0; dir_id < 4; dir_id++) {
+            Road* road = map_get_road(map, inbound_road_ids[dir_id]);
+            if (!road) continue;
+
+            // For 4-way stop, we assume 1 lane per direction.
+            if (road->num_lanes > 0) {
+                LaneId lane_id = road->lane_ids[0];
+                Lane* lane = map_get_lane(map, lane_id);
+                if (lane && lane->num_cars > 0) {
+                    CarId car_id = lane->cars_ids[0]; // foremost car
+                    Car* car = sim_get_car(sim, car_id);
+                    if (car) {
+                        Meters distance = lane->length - car->lane_progress_meters - (car_get_length(car) / 2.0);
+                        if (distance < STOP_LINE_BUFFER_METERS + meters(0.1)) {
+                            // Car is at stop sign. Check if it's already in queue.
+                            bool already_queued = false;
+                            for (int k = 0; k < 4; k++) {
+                                if (controller->cars_at_stop_sign_fcfs_queue[k] == car_id) {
+                                    already_queued = true;
+                                    break;
+                                }
+                            }
+                            
+                            if (!already_queued) {
+                                // Add to the first empty slot
+                                // LOG_DEBUG("Adding car ID %d to four-way stop queue of intersection ID %d, which is on lane ID %d at distance %.2f meters", car_id, controller->id, lane_id, distance);
+                                for (int k = 0; k < 4; k++) {
+                                    if (controller->cars_at_stop_sign_fcfs_queue[k] == ID_NULL) {
+                                        controller->cars_at_stop_sign_fcfs_queue[k] = car_id;
+                                        break;
+                                }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return;
+    }
     controller->countdown -= dt;
     if (controller->countdown <= 0) {
-        controller->state = (controller->state + 1) % NUM_TRAFFIC_CONTROL_STATES;
+        controller->state = (controller->state + 1) % NUM_TRAFFIC_CONTROL_CYCLIC_STATES;
         controller->countdown = TRAFFIC_STATE_DURATIONS[controller->state];
     }
 }
@@ -412,4 +578,66 @@ Intersection* road_comes_from_intersection(const Road* road, Map* map) {
         }
     }
     return NULL;
+}
+
+
+Car* intersection_get_foremost_vehicle(const Intersection* self, Simulation* sim) {
+    Map* map = sim_get_map(sim);
+    Car* foremost_car = NULL;
+    double min_distance = 1e9; // Initialize with a large value
+
+    RoadId incoming_road_ids[] = {
+        self->road_eastbound_from_id,
+        self->road_westbound_from_id,
+        self->road_northbound_from_id,
+        self->road_southbound_from_id
+    };
+
+    for (int i = 0; i < 4; i++) {
+        RoadId road_id = incoming_road_ids[i];
+        if (road_id == ID_NULL) continue;
+
+        Road* road = map_get_road(map, road_id);
+        if (!road) continue;
+
+        for (int k = 0; k < road->num_lanes; k++) {
+            LaneId lane_id = road->lane_ids[k];
+            Lane* lane = map_get_lane(map, lane_id);
+            if (!lane || lane->num_cars == 0) continue;
+
+            // The cars are sorted by progress, so the first car (index 0) is the closest to the end of the lane.
+            CarId car_id = lane->cars_ids[0];
+            Car* car = sim_get_car(sim, car_id);
+            if (!car) continue;
+
+            // Distance to the end of the lane (which connects to the intersection)
+            // adjusted for half car length to account for the leading edge.
+            double distance = lane->length - car_get_lane_progress_meters(car) - (car_get_length(car) / 2.0);
+
+            if (distance < min_distance) {
+                min_distance = distance;
+                foremost_car = car;
+            }
+        }
+    }
+
+    return foremost_car;
+}
+
+
+// Checks where there is any car *on* the intersection (i.e., in any of its lanes)
+bool intersection_is_any_car_on_intersection(const Intersection* self, Simulation* sim) {
+    Map* map = sim_get_map(sim);
+
+    for (int i = 0; i < self->num_lanes; i++) {
+        LaneId lane_id = self->lane_ids[i];
+        Lane* lane = map_get_lane(map, lane_id);
+        if (!lane) continue;
+
+        if (lane->num_cars > 0) {
+            return true; // Found at least one car on this intersection lane
+        }
+    }
+
+    return false; // No cars found on any intersection lanes
 }

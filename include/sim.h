@@ -56,6 +56,9 @@ ClockReading clock_reading_add(const ClockReading clock1, const ClockReading clo
 // Adds seconds to a ClockReading
 ClockReading clock_reading_add_seconds(const ClockReading clock, const Seconds seconds);
 
+extern const ClockReading Monday_12_AM, Monday_1_AM, Monday_2_AM, Monday_3_AM, Monday_4_AM, Monday_5_AM, Monday_6_AM, Monday_7_AM, Monday_8_AM, Monday_9_AM, Monday_10_AM, Monday_11_AM;
+extern const ClockReading Monday_12_PM, Monday_1_PM, Monday_2_PM, Monday_3_PM, Monday_4_PM, Monday_5_PM, Monday_6_PM, Monday_7_PM, Monday_8_PM, Monday_9_PM, Monday_10_PM, Monday_11_PM;
+
 // Weather conditions enum
 typedef enum {
     WEATHER_SUNNY,

@@ -441,7 +441,8 @@ void path_planner_compute_shortest_path(PathPlanner* planner, const Lane* start_
         // no path
     } else {
         // error
-        LOG_ERROR("Path Planner Dijkstra error: %d", path_num_nodes);
+        LOG_ERROR("Path Planner Dijkstra error: %d. Start Lane ID: %d, Start Progress: %.2f, End Lane ID: %d, End Progress: %.2f.", 
+              path_num_nodes, start_lane->id, start_progress, end_lane->id, end_progress);
         exit(EXIT_FAILURE);
     }
 }
