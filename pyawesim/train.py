@@ -238,8 +238,8 @@ ENV_CONFIG = {
     "deprecated_info_display": False,  # use the old info display method if True
     "framestack": 3,
     "anti_aliasing": True,
-    "goal_lane": 84,
-    "city_width": 1500,                 # in meters
+    "goal_lane": "random",
+    "city_width": 1000,                 # in meters
     "num_cars": 256,                    # number of other cars in the environment
     "decision_interval": 1.0,             # in seconds, how often the agent can take an action (reconfigure the driving assist), or how often the acceleration is applied in non-DAS mode
     "sim_duration": 60 * 60,            # 60 minutes max duration after which the episode ends and wage for entire 8-hour workday is lost

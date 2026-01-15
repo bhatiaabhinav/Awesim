@@ -21,7 +21,7 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
     Meters car_position = lane_progress_m;          // alias for lane_progress_m
     Meters distance_to_stop_line = situation->distance_to_end_of_lane_from_leading_edge - STOP_LINE_BUFFER_METERS; // if we had to stop at the end of the lane, how far would we be from the stop line?
     MetersPerSecond speed_cruise = lane_get_speed_limit(lane) + self->preferences.average_speed_offset;  // incorporate preference into speed limit
-    speed_cruise = fmax(speed_cruise, from_mph(1)); // ensure at least 1 mph speed
+    speed_cruise = fmax(speed_cruise, CREEP_SPEED); // ensure at least 1 mph speed
 
     // the following parameters will determine the outputs
     Meters position_target;
@@ -151,7 +151,7 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
     } else {
         if (!situation->is_approaching_dead_end && (situation->is_approaching_end_of_lane || situation->braking_distance.preferred_smooth >= distance_to_stop_line)) {
             // start changing speed to match speed limit of the next lane
-            accel = car_compute_acceleration_cruise(self, fmax(lane_get_speed_limit(situation->lane_next_after_turn[turn_indicator]) + self->preferences.average_speed_offset, from_mph(1)), true);
+            accel = car_compute_acceleration_cruise(self, fmax(lane_get_speed_limit(situation->lane_next_after_turn[turn_indicator]) + self->preferences.average_speed_offset, CREEP_SPEED), true);
         } else {
             accel = car_compute_acceleration_cruise(self, speed_cruise, true);
         }
@@ -172,9 +172,9 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
         switch (light) {
         case TRAFFIC_LIGHT_STOP_FCFS:
             // Must first stop or be stopping. After that, we should check if it is our turn based on first-come-first-serve.
-            if (is_emergency_braking_possible && (situation->distance_to_end_of_lane_from_leading_edge > STOP_LINE_BUFFER_METERS - meters(0.1)) && car_get_speed(self) > from_mph(0.1)) { // can stop before lane end, but it still moving and not yet at the stop line (which it will really reach in infinite time (if comfy braking possible) due to asymptotic approach of PD control, so we use a small threshold)
+            if (is_emergency_braking_possible && (situation->distance_to_end_of_lane_from_leading_edge > STOP_LINE_BUFFER_METERS - meters(0.1)) && car_get_speed(self) > STOP_SPEED_THRESHOLD) { // can stop before lane end, but it still moving and not yet at the stop line (which it will really reach in infinite time (if comfy braking possible) due to asymptotic approach of PD control, so we use a small threshold)
                 should_brake_for_full_stop = true;
-            } else if (fabs(car_get_speed(self)) <= from_mph(0.1)) { // If stopped or barely moving
+            } else if (fabs(car_get_speed(self)) <= STOP_SPEED_THRESHOLD) { // If stopped or barely moving
                 bool all_clear = !intersection_is_any_car_on_intersection(situation->intersection, sim);
                 if (situation->is_my_turn_at_stop_sign_fcfs && all_clear) {
                     should_brake_for_full_stop = false; // Our turn
@@ -229,7 +229,7 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
             break;
         case TRAFFIC_LIGHT_RED_YIELD:
             if (is_emergency_braking_possible) {
-                bool not_stopped_yet = (situation->distance_to_end_of_lane_from_leading_edge > STOP_LINE_BUFFER_METERS - meters(0.1)) && car_get_speed(self) > from_mph(0.1);
+                bool not_stopped_yet = (situation->distance_to_end_of_lane_from_leading_edge > STOP_LINE_BUFFER_METERS - meters(0.1)) && car_get_speed(self) > STOP_SPEED_THRESHOLD;
                 if (not_stopped_yet) {
                     should_brake_for_full_stop = true;
                 } else {
@@ -289,7 +289,7 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
             // Brake smoothly to target stop by the end of the lane (i.e., can creep beyond stop line)
             position_target = car_position + fmax(situation->distance_to_end_of_lane_from_leading_edge, meters(0)); // the fmax is needed in case the leading edge is already beyond the lane end once the car moved but the car center is not. If that happened, and now suddenly yield is true due to new traffic, we want to stop right where we are and not reverse.
             speed_at_target = 0;
-            MetersPerSecond speed_cruise_for_yield = situation->distance_to_end_of_lane_from_leading_edge <= STOP_LINE_BUFFER_METERS ? fmin(from_mph(5.0), speed_cruise) : speed_cruise; // limit speed after crossing stop line to 5 mph (creep speed)
+            MetersPerSecond speed_cruise_for_yield = situation->distance_to_end_of_lane_from_leading_edge <= STOP_LINE_BUFFER_METERS ? fmin(CREEP_SPEED, speed_cruise) : speed_cruise; // limit speed after crossing stop line to 5 mph (creep speed)
             MetersPerSecondSquared accel_to_yield_at_lane_end = car_compute_acceleration_chase_target(self, position_target, speed_at_target, 0, speed_cruise_for_yield, true);
             accel = fmin(accel, accel_to_yield_at_lane_end); // take the minimum of the two accelerations
         }

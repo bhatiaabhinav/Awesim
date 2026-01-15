@@ -1,4 +1,4 @@
-from typing import Any, Optional, Tuple, Dict
+from typing import Any, Optional, Tuple, Dict, Union
 from collections import deque
 import numpy as np
 import gymnasium as gym
@@ -52,7 +52,7 @@ class AwesimEnv(gym.Env):
         reward_shaping_gamma: float = 0.99,
         framestack: int = 4,
         city_width: int = DEFAULT_CITY_WIDTH,
-        goal_lane: Optional[int] = None,
+        goal_lane: Optional[Union[int, str]] = "random",
         num_cars: int = DEFAULT_NUM_CARS,
         decision_interval: float = DEFAULT_DECISION_INTERVAL,
         sim_duration: float = DEFAULT_SIM_DURATION,
@@ -118,6 +118,7 @@ class AwesimEnv(gym.Env):
         self.reward_shaping_gamma = reward_shaping_gamma
         self.framestack = framestack
         self.goal_lane = goal_lane
+        self.goal_select_random = goal_lane == "random"
         self.city_width = city_width
         self.num_cars = num_cars
         self.decision_interval = decision_interval
@@ -160,6 +161,8 @@ class AwesimEnv(gym.Env):
         self.minimap = A.minimap_malloc(cam_resolution[0], cam_resolution[1], A.sim_get_map(self.sim))
         self.collision_checker = A.collisions_malloc()
         self.path_planner = A.path_planner_create(A.sim_get_map(self.sim), False)
+        if self.goal_select_random:
+            self.sample_random_goal()
         self.goal_lane_midpoint = A.map_get_lane(A.sim_get_map(self.sim), self.goal_lane).mid_point if self.goal_lane is not None else None
         self.prev_opt_distance_to_goal = None
 
@@ -201,6 +204,16 @@ class AwesimEnv(gym.Env):
             low=0, high=255, shape=(9, 3 * framestack, cam_resolution[1], cam_resolution[0]), dtype=np.uint8
         )
 
+    def sample_random_goal(self):
+        map = A.sim_get_map(self.sim)
+        while True:
+            random_road = A.map_get_road(map, A.rand_int_range(0, map.num_roads - 1))
+            random_lane = A.road_get_lane(random_road, map, A.rand_int_range(0, A.road_get_num_lanes(random_road) - 1))
+            if A.lane_get_length(random_lane) > 50:
+                break
+        self.goal_lane = random_lane.id
+        self.goal_lane_midpoint = A.map_get_lane(A.sim_get_map(self.sim), self.goal_lane).mid_point if self.goal_lane is not None else None
+
     def _get_info_for_info_display(self) -> list[Tuple[float, A.RGB]]:
 
         if self.use_das:
@@ -228,6 +241,7 @@ class AwesimEnv(gym.Env):
             # environment state
             t = A.sim_get_time(self.sim) / self.OBSERVATION_NORMALIZATION["time"]
             speed_limit = sit.lane.speed_limit / self.OBSERVATION_NORMALIZATION["speed"]
+            my_turn_fcfs = float(sit.is_my_turn_at_stop_sign_fcfs)
 
             infos_and_colors = [
                 (fuel, A.RGB_WHITE),
@@ -243,7 +257,7 @@ class AwesimEnv(gym.Env):
                 (float(aeb_in_progress), A.RGB_RED),
 
                 (speed_limit, A.RGB_WHITE),
-                (0, A.RGB_BLACK),  # blank
+                (my_turn_fcfs, A.RGB_GREEN),
                 (t, A.RGB_WHITE),
             ]
         else:
@@ -438,10 +452,13 @@ class AwesimEnv(gym.Env):
         super().reset(seed=seed, options=options)
         A.sim_disconnect_from_render_server(self.sim)
 
+        if self.goal_select_random:
+            self.sample_random_goal()
+
         # Reset until agent is not in goal lane (if goal is specified) or a dead-end lane or an the interstate highway (or its entry or exit ramps)
         first_reset_done = False
         num_cars = max(np.random.randint(self.num_cars // 4, self.num_cars + 1), 16)    # randomize number of cars a bit. At least 16 cars.
-        while not first_reset_done or (self.goal_lane is not None and A.car_get_lane_id(A.sim_get_car(self.sim, 0)) == self.goal_lane) or A.lane_get_num_connections(A.map_get_lane(A.sim_get_map(self.sim), A.car_get_lane_id(A.sim_get_car(self.sim, 0)))) == 0 or A.lane_get_num_connections_incoming(A.map_get_lane(A.sim_get_map(self.sim), A.car_get_lane_id(A.sim_get_car(self.sim, 0)))) == 0 or A.lane_get_road(A.map_get_lane(A.sim_get_map(self.sim), A.car_get_lane_id(A.sim_get_car(self.sim, 0))), A.sim_get_map(self.sim)).num_lanes >= 3:
+        while not first_reset_done or (self.goal_lane is not None and A.car_get_lane_id(A.sim_get_car(self.sim, 0)) == self.goal_lane) or A.lane_get_num_connections(A.map_get_lane(A.sim_get_map(self.sim), A.car_get_lane_id(A.sim_get_car(self.sim, 0)))) == 0 or A.lane_get_num_connections_incoming(A.map_get_lane(A.sim_get_map(self.sim), A.car_get_lane_id(A.sim_get_car(self.sim, 0)))) == 0:
             A.awesim_setup(
                 self.sim, self.city_width, num_cars, 0.02, A.clock_reading(0, 8, 0, 0), A.WEATHER_SUNNY
             )

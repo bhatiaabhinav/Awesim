@@ -184,9 +184,9 @@ bool car_has_something_to_yield_to_at_intersection(const Car* self, Simulation* 
         if (c) {
             Meters progress_m = car_get_lane_progress_meters(c);
             Meters lane_length = lane_get_length(lane);
-            Meters distance_to_end_m = lane_length - progress_m - car_get_length(c) / 2;
+            Meters distance_to_end_m = lane_length - progress_m;
             Meters speed = car_get_speed(c);
-            Seconds time_to_end_s = (speed > 0) ? fmax(distance_to_end_m, 0) / speed : INFINITY;
+            Seconds time_to_end_s = (speed > STOP_SPEED_THRESHOLD) ? distance_to_end_m / speed : INFINITY;
             if (time_to_end_s < 3.0) {
                 return true;    // have to yield if coming in fast or has reached the stop line even if slow
             }

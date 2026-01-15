@@ -18,6 +18,8 @@
 #define ID_NULL -1
 #define LANE_LENGTH_EPSILON 0.1
 #define STOP_LINE_BUFFER_METERS 1.524  // Stop line distance from end of lane in meters
+#define STOP_SPEED_THRESHOLD 0.044704  // 0.1 mph in m/s
+#define CREEP_SPEED 2.2352              // 5 mph in m/s
 
 // Typedef Definitions
 
