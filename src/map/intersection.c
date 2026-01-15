@@ -115,6 +115,13 @@ Road* intersection_get_road_southbound_to(const Intersection* self, Map* map) {
     return map_get_road(map, self->road_southbound_to_id);
 }
 
+CarId intersection_get_car_at_stop_sign_fcfs_queue(const Intersection* self, int index){
+    if(index < 0 || index > 3){
+        return ID_NULL;
+    }
+    return self->cars_at_stop_sign_fcfs_queue[index];
+}
+
 
 // Intersection Creaters
 

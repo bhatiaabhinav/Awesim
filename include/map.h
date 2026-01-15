@@ -344,6 +344,8 @@ Road* intersection_get_road_northbound_to(const Intersection* self, Map* map);
 Road* intersection_get_road_southbound_from(const Intersection* self, Map* map);
 Road* intersection_get_road_southbound_to(const Intersection* self, Map* map);
 
+CarId intersection_get_car_at_stop_sign_fcfs_queue(const Intersection* self, int index);
+
 // Fancier functions
 
 // Gets the foremost vehicle (the vehicle whose leading edge is closest to the intersection center) among all lanes of the intersection.
