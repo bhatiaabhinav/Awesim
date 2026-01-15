@@ -46,6 +46,8 @@ class AwesimEnv(gym.Env):
         aeb_assist: bool = True,
         stop_assist: bool = True,
         deprecated_info_display: bool = False,
+        deprecated_map: bool = False,
+        npc_rogue_factor: float = 0.0,
         cam_resolution: Tuple[int, int] = DEFAULT_CAM_RESOLUTION,
         anti_aliasing: bool = False,
         reward_shaping: bool = False,
@@ -112,6 +114,8 @@ class AwesimEnv(gym.Env):
         self.aeb_assist = aeb_assist
         self.stop_assist = stop_assist
         self.deprecated_info_display = deprecated_info_display
+        self.deprecated_map = deprecated_map
+        self.npc_rogue_factor = npc_rogue_factor
         self.cam_resolution = cam_resolution
         self.anti_aliasing = anti_aliasing
         self.reward_shaping = reward_shaping
@@ -145,7 +149,7 @@ class AwesimEnv(gym.Env):
         # Initialize simulation
         self.sim = A.sim_malloc()  # Allocate simulation instance
         A.awesim_setup(
-            self.sim, self.city_width, self.num_cars, 0.02, A.Monday_8_AM, A.WEATHER_SUNNY
+            self.sim, self.city_width, self.num_cars, 0.02, A.Monday_8_AM, A.WEATHER_SUNNY, self.deprecated_map
         )  # Set up city with fixed time (8 AM) and sunny weather
         A.sim_set_agent_enabled(self.sim, True)  # Enable agent control
         if self.use_das:
@@ -460,9 +464,9 @@ class AwesimEnv(gym.Env):
         num_cars = max(np.random.randint(self.num_cars // 4, self.num_cars + 1), 16)    # randomize number of cars a bit. At least 16 cars.
         while not first_reset_done or (self.goal_lane is not None and A.car_get_lane_id(A.sim_get_car(self.sim, 0)) == self.goal_lane) or A.lane_get_num_connections(A.map_get_lane(A.sim_get_map(self.sim), A.car_get_lane_id(A.sim_get_car(self.sim, 0)))) == 0 or A.lane_get_num_connections_incoming(A.map_get_lane(A.sim_get_map(self.sim), A.car_get_lane_id(A.sim_get_car(self.sim, 0)))) == 0:
             A.awesim_setup(
-                self.sim, self.city_width, num_cars, 0.02, A.clock_reading(0, 8, 0, 0), A.WEATHER_SUNNY
-            )
+                self.sim, self.city_width, num_cars, 0.02, A.clock_reading(0, 8, 0, 0), A.WEATHER_SUNNY, self.deprecated_map)
             first_reset_done = True
+        A.sim_set_npc_rogue_factor(self.sim, self.npc_rogue_factor)
         self.prev_opt_distance_to_goal = self._get_opt_dist_to_goal()
 
         # Configure simulation settings
@@ -618,11 +622,36 @@ class AwesimEnv(gym.Env):
             else:   # both make sense
                 new_merge_intent = indicator_direction
 
+        corrected_turn_intent = False
+        if (indicator_direction == new_turn_intent and new_turn_intent == A.INDICATOR_NONE) and A.lane_get_connection_straight_id(sit.lane) == A.ID_NULL:   # trying to going straight even though not possible
+            left_turn_possible = A.lane_get_connection_left_id(sit.lane) != A.ID_NULL
+            right_turn_possible = A.lane_get_connection_right_id(sit.lane) != A.ID_NULL
+            if left_turn_possible and not right_turn_possible:
+                # only left turn possible
+                new_turn_intent = A.INDICATOR_LEFT
+                corrected_turn_intent = True
+            elif not left_turn_possible and right_turn_possible:
+                # only right turn possible
+                new_turn_intent = A.INDICATOR_RIGHT
+                corrected_turn_intent = True
+            elif left_turn_possible and right_turn_possible:
+                # can go either way. Choose based on action probability
+                if action_indicator_probability < 0:
+                    new_turn_intent = A.INDICATOR_LEFT
+                else:
+                    new_turn_intent = A.INDICATOR_RIGHT
+                corrected_turn_intent = True
+            else:
+                # dead end
+                pass
+            indicator_direction = new_turn_intent
+
         if self.use_das:
-            if sit.is_an_intersection_upcoming and sit.is_approaching_end_of_lane:
+            if sit.is_an_intersection_upcoming and sit.is_approaching_end_of_lane and not corrected_turn_intent:
                 # prevent last-moment lane changes or turn intent changes near intersections
                 new_merge_intent = A.INDICATOR_NONE
                 new_turn_intent = A.car_get_indicator_turn(self.agent)
+                indicator_direction = new_turn_intent
                 if self.verbose:
                     print(f"Locked turn intent = {'left' if new_turn_intent == A.INDICATOR_LEFT else ('right' if new_turn_intent == A.INDICATOR_RIGHT else 'none')} near intersection")
             A.driving_assistant_configure_merge_intent(self.das, self.agent, self.sim, new_merge_intent)

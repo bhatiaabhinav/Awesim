@@ -109,6 +109,7 @@ void sim_init(Simulation* sim) {
     sim->weather = WEATHER_SUNNY;
     sim->is_agent_enabled = false; // Agent car is disabled by default
     sim->is_agent_driving_assistant_enabled = false; // Driving assistant is disabled by default
+    sim->npc_rogue_factor = 0.0; // NPC cars are completely law-abiding by default
     sim->is_synchronized = false; // Not synchronized by default
     sim->is_paused = false; // Simulation is not paused by default
     sim->simulation_speedup = 1.0; // Default to real-time speed
@@ -173,6 +174,10 @@ SituationalAwareness* sim_get_situational_awareness(Simulation* self, CarId id) 
 DrivingAssistant* sim_get_driving_assistant(Simulation* self, CarId id) {
     if (!self || id < 0 || id >= self->num_cars) return NULL;
     return &self->driving_assistants[id];
+}
+
+double sim_get_npc_rogue_factor(Simulation* self) {
+    return self ? self->npc_rogue_factor : 0.0;
 }
 
 Seconds sim_get_time(const Simulation* self) {
@@ -280,6 +285,19 @@ void sim_set_initial_clock_reading(Simulation* self, ClockReading clock) {
 
 void sim_set_weather(Simulation* self, Weather weather) {
     if (self) self->weather = weather;
+}
+
+void sim_set_npc_rogue_factor(Simulation* self, double rogue_factor) {
+    if (self) {
+        if (rogue_factor < 0.0 || rogue_factor > 1.0) {
+            LOG_ERROR("Invalid NPC rogue factor: %.2f. It must be between 0.0 and 1.0.", rogue_factor);
+            return;
+        }
+        self->npc_rogue_factor = rogue_factor;
+        LOG_INFO("Set NPC rogue factor to %.2f", rogue_factor);
+    } else {
+        LOG_ERROR("Attempted to set NPC rogue factor on a NULL Simulation pointer");
+    }
 }
 
 // --- Time & Condition Queries ---

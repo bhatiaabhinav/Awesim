@@ -3,6 +3,7 @@
 #include "math.h"
 #include "utils.h"
 #include "logging.h"
+#include "sim.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -273,9 +274,14 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
             }
         }
 
-        // // for debugging:
-        // should_brake_for_full_stop = false;
-        // should_brake_for_yield = false;
+        if (sim->npc_rogue_factor > 0.0) {
+            double rogue_roll = rand_0_to_1();
+            if (rogue_roll < sim_get_npc_rogue_factor(sim)) {
+                // ignore traffic light
+                should_brake_for_full_stop = false;
+                should_brake_for_yield = false;
+            }
+        }
     }
 
     if (should_brake_for_full_stop || should_brake_for_yield) {

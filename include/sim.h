@@ -84,6 +84,7 @@ typedef struct Simulation {
     Weather weather;
     bool is_agent_enabled; // Whether car 0 is an agent (true) or an NPC (false). False by default. When true, car 0 is the agent car and must be controlled using car_set_acceleration, car_set_indicator_turn, and car_set_indicator_lane functions outside the sim loop.
     bool is_agent_driving_assistant_enabled; // Whether the agent car has a driving assistant enabled, the simulator will automatically set the agent car's controls using the driving assistant within the sim loop. The driving assistant must be configured periodically outside the sim loop.
+    double npc_rogue_factor; // Rogue factor for NPC cars, between 0.0 (completely law-abiding) to 1.0 (maximum rogue). Default is 0.0
 
     bool is_synchronized; // Whether the simulation is synchronized with wall time. If true, the simulation will run in real-time, simulating `simulation_speedup` seconds of simulation time per second of wall time. If false, the simulation will run as fast as possible without synchronization.
     bool is_paused; // Whether the simulation is paused. If true, the simulation will not advance time until it is resumed.
@@ -126,6 +127,7 @@ Car* sim_get_car(Simulation* self, CarId id);
 SituationalAwareness* sim_get_situational_awareness(Simulation* self, CarId id);
 // Procedure* sim_get_ongoing_procedure(Simulation* self, CarId id);
 DrivingAssistant* sim_get_driving_assistant(Simulation* self, CarId id);
+double sim_get_npc_rogue_factor(Simulation* self);
 Seconds sim_get_time(const Simulation* self);
 Seconds sim_get_dt(const Simulation* self);
 Weather sim_get_weather(Simulation* self);
@@ -144,7 +146,7 @@ void sim_set_agent_enabled(Simulation* self, bool enabled);
 void sim_set_agent_driving_assistant_enabled(Simulation* self, bool enabled);
 void sim_set_synchronized(Simulation* self, bool is_synchronized, double simulation_speedup);
 void sim_set_should_quit_when_rendering_window_closed(Simulation* self, bool should_quit);
-
+void sim_set_npc_rogue_factor(Simulation* self, double rogue_factor);
 // --- Time Queries ---
 bool sim_is_weekend(Simulation* self);
 bool sim_is_morning(Simulation* self);

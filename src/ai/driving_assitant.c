@@ -211,8 +211,8 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
         if (car_get_speed(car) > 0 && das->should_stop_at_intersection && (sa->is_an_intersection_upcoming|| sa->is_approaching_dead_end)) {
             Meters distance_to_stop_line = sa->distance_to_end_of_lane_from_leading_edge - DRIVING_ASSISTANT_BUFFER_M;
             MetersPerSecondSquared accel_stop;
-            Meters position_target = car_get_lane_progress_meters(car) + distance_to_stop_line;
-            accel_stop = car_compute_acceleration_chase_target(car, position_target, 0, DRIVING_ASSISTANT_BUFFER_M - from_feet(1), das->speed_target, das->use_preferred_accel_profile);
+            Meters position_target = car_get_lane_progress_meters(car) + fmax(distance_to_stop_line, 0);
+            accel_stop = car_compute_acceleration_chase_target(car, position_target, 0, fmax(sa->distance_to_end_of_lane_from_leading_edge - position_target, meters(0)), das->speed_target, das->use_preferred_accel_profile);
             accel = fmin(accel, accel_stop);
         }
     }

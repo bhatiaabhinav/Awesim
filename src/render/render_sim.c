@@ -312,11 +312,18 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, bool draw_lanes, bool d
             infos_display_set_info_color(highlighted_car_infos_display, info_idx, (RGB){255, 0, 0});
             infos_display_set_info(highlighted_car_infos_display, info_idx++, (double)(highlighted_car->indicator_turn == INDICATOR_RIGHT));
             
-            // Merge
+            // Merge left
             // orange color
             infos_display_set_info_color(highlighted_car_infos_display, info_idx, (RGB){255, 165, 0});
             infos_display_set_info(highlighted_car_infos_display, info_idx++, (double)(highlighted_car->indicator_lane == INDICATOR_LEFT));
-            info_idx++;  // leave middle empty
+
+            // Stop sign FCFS
+            // green color
+            infos_display_set_info_color(highlighted_car_infos_display, info_idx, RGB_GREEN);
+            infos_display_set_info(highlighted_car_infos_display, info_idx++, (double)(situational_awareness_highlighted_car->is_my_turn_at_stop_sign_fcfs));
+
+            // Merge right
+            // orange color
             infos_display_set_info_color(highlighted_car_infos_display, info_idx, (RGB){255, 165, 0});
             infos_display_set_info(highlighted_car_infos_display, info_idx++, (double)(highlighted_car->indicator_lane == INDICATOR_RIGHT));
             

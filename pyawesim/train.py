@@ -236,6 +236,8 @@ ENV_CONFIG = {
     "stop_assist": True,               # use stop at intersection assistance in DAS mode using a stop action
     "cam_resolution": (128, 128),       # width, height
     "deprecated_info_display": False,  # use the old info display method if True
+    "deprecated_map": False,           # use the old small map if True
+    "npc_rogue_factor": 0.0,           # fraction of NPC cars that behave more aggressively
     "framestack": 3,
     "anti_aliasing": True,
     "goal_lane": "random",

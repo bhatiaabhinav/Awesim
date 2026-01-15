@@ -34,7 +34,7 @@ int main(int argc, char* argv[]) {
         LOG_ERROR("Failed to allocate memory for Simulation. Exiting.");
         return EXIT_FAILURE;
     }
-    awesim_setup(sim, city_width, num_cars, dt, initial_clock_reading, weather);
+    awesim_setup(sim, city_width, num_cars, dt, initial_clock_reading, weather, false);
     // Make a file to store map information
     FILE* map_file = fopen("map_info.txt", "w");
     if (map_file) {

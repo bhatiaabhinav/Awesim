@@ -367,14 +367,18 @@ static bool placement_would_cause_collision(Car* car, Lane* lane, Simulation* si
     return would_collide;
 }
 
-void awesim_setup(Simulation* sim, Meters city_width, int num_cars, Seconds dt, ClockReading initial_clock_reading, Weather weather) {
+void awesim_setup(Simulation* sim, Meters city_width, int num_cars, Seconds dt, ClockReading initial_clock_reading, Weather weather, bool use_deprecated_map) {
     sim_init(sim);
     sim_set_dt(sim, dt);
     sim_set_initial_clock_reading(sim, initial_clock_reading);
     sim_set_weather(sim, weather);
     Map* map = sim_get_map(sim);
     LOG_TRACE("Map allocated at %p, with memory size %llu bytes", (void*)map, sizeof(*map));
-    awesim_map_setup(map, city_width);
+    if (use_deprecated_map) {
+        awesim_map_setup_old(map, city_width);
+    } else {
+        awesim_map_setup(map, city_width);
+    }
     int num_intersection_lanes = 0;
     for (int i = 0; i < map->num_lanes; i++) {
         Lane* lane = map_get_lane(map, i);
