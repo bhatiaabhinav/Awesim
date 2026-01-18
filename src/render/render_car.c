@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <stdint.h>
 
+// #define CAR_DEBUG_RENDERING
+
 SDL_Texture* car_id_texture_cache[MAX_CARS_IN_SIMULATION][MAX_FONT_SIZE] = {{NULL}};
 SDL_Texture* car_speed_texture_cache[300][MAX_FONT_SIZE] = {{NULL}};
 NearbyVehiclesFlattened HIGHLIGHTED_NEARBY_VEHICLES;
@@ -355,4 +357,29 @@ void render_car(SDL_Renderer* renderer, const Car* car, Map* map, bool paint_id,
         int cache_id = 100 + speed_int; // to avoid conflict with car ID cache (assuming speed ranged from -100 to 200 mph)
         render_text(renderer, speed_str, text_x, text_y, 255, 255, 255, 255, font_size, ALIGN_CENTER, false, car_speed_texture_cache[cache_id]);
     }
+
+#ifdef CAR_DEBUG_RENDERING
+    // Draw Physics Vectors (Debug)
+    // Speed Vector (Cyan)
+    {
+        Vec2D start = car->center;
+        Vec2D end = vec_add(start, car->true_speed_vector); // Draw 1s velocity projection
+        
+        SDL_Point s = to_screen_coords(start, screen_width, screen_height);
+        SDL_Point e = to_screen_coords(end, screen_width, screen_height);
+        
+        thickLineRGBA_ignore_if_outside_screen(renderer, s.x, s.y, e.x, e.y, 2, 0, 255, 255, 255);
+    }
+
+    // Acceleration Vector (Magenta)
+    {
+        Vec2D start = car->center;
+        Vec2D end = vec_add(start, car->true_acceleration_vector); // Draw 1s acceleration projection
+        
+        SDL_Point s = to_screen_coords(start, screen_width, screen_height);
+        SDL_Point e = to_screen_coords(end, screen_width, screen_height);
+        
+        thickLineRGBA_ignore_if_outside_screen(renderer, s.x, s.y, e.x, e.y, 2, 255, 0, 255, 255);
+    }
+#endif
 }

@@ -18,6 +18,13 @@ void car_init(Car* car, Dimensions3D dimensions, CarCapabilities capabilities, L
     car->speed = 0.0;
     car->damage = 0.0;
     car->fuel_level = fuel_tank_capacity; // Start with a full tank
+    car->center = (Coordinates){0.0, 0.0};
+    car->orientation = 0.0;
+    car->true_speed_vector = (Vec2D){0.0, 0.0};
+    car->true_acceleration_vector = (Vec2D){0.0, 0.0};
+    for (int i = 0; i < 4; i++) {
+        car->corners[i] = (Coordinates){0.0, 0.0};
+    }
     car->acceleration = 0.0;
     car->indicator_turn = INDICATOR_NONE;
     car->indicator_lane = INDICATOR_NONE;
@@ -208,6 +215,12 @@ void car_update_geometry(Simulation* sim, Car* car) {
         Vec2D delta = vec_sub(end, start);
         car->center = vec_add(start, vec_scale(delta, car->lane_progress));
         car->orientation = angle_normalize(atan2(delta.y, delta.x));
+        
+        // Linear Lane Vectors
+        Vec2D tangent = { cos(car->orientation), sin(car->orientation) };
+        car->true_speed_vector = vec_scale(tangent, car->speed);
+        car->true_acceleration_vector = vec_scale(tangent, car->acceleration);
+        
     } else if (lane->type == QUARTER_ARC_LANE) {
         // Compute theoretical position on the ideal circular arc
         double theta = lane->start_angle + car->lane_progress * (lane->end_angle - lane->start_angle);
@@ -289,6 +302,67 @@ void car_update_geometry(Simulation* sim, Car* car) {
 
         double current_orient_offset = diff_start * (1.0 - p) + diff_end * p;
         car->orientation = angle_normalize(theoretical_orient + current_orient_offset);
+
+        // --- Update Speed and Acceleration Vectors ---
+        //
+        // Mathematical Derivation:
+        // ------------------------
+        // We model the car's motion including the geometric correction for asymmetric intersections.
+        // Let v be the car's speed along the lane parameter (ds/dt).
+        // Let R be the turn radius, L be the lane length.
+        //
+        // 1. Angular Velocity (Yaw Rate), omega (w):
+        //    The total orientation theta(t) = theta_theoretical(t) + theta_error(t).
+        //    Differentiating with respect to time:
+        //    w_total = d(theta)/dt = d(theta_theoretical)/dt + d(theta_error)/dt
+        //
+        //    a) Theoretical term: For a circular arc, w = v / R.
+        //       For CCW: w > 0. For CW: w < 0.
+        //       w_theo = (v / R) * direction_sign
+        //
+        //    b) Correction term: The error is interpolated linearly over distance s.
+        //       theta_error(s) = error_start + (error_end - error_start) * (s / L)
+        //       d(theta_error)/dt = d(theta_error)/ds * ds/dt
+        //                         = ((error_end - error_start) / L) * v
+        //
+        //    So, w_total = (v / R * sign) + (delta_error / L * v).
+        //
+        // 2. Speed Vector:
+        //    The geometric correction effectively stretches or compresses the path length.
+        //    The "effective speed" along the actual path is related to the angular velocity and radius.
+        //    v_effective ~= w_total * R * direction_sign
+        //     Substituting w_total:
+        //    v_effective = v * (1 + (delta_error * R / L) * direction_sign)
+        //
+        // 3. Acceleration Vector:
+        //    a_total = a_tangential + a_centripetal
+        //    a_tangential = a * unit_tangent
+        //    a_centripetal = v * w_total * unit_normal_left
+        //    (Note: This works for both CCW and CW because w_total flips sign appropriately).
+
+        // 1. Calculate Angular Velocity (Yaw Rate)
+        double turn_direction = (lane->direction == DIRECTION_CCW) ? 1.0 : -1.0;
+        double omega_theoretical = (car->speed / lane->radius) * turn_direction;
+        double omega_correction = (diff_end - diff_start) * (car->speed / lane->length);
+        double omega_total = omega_theoretical + omega_correction;
+
+        // 2. Speed Vector
+        // Tangential direction: (cos(theta), sin(theta))
+        Vec2D tangent = { cos(car->orientation), sin(car->orientation) };
+
+        // Effective speed accounts for path stretching/compression due to geometry correction.
+        double effective_speed_scalar = car->speed * (1.0 + (diff_end - diff_start) * (lane->radius / lane->length) * turn_direction);
+        car->true_speed_vector = vec_scale(tangent, effective_speed_scalar);
+        
+        // 3. Acceleration Vector
+        // Tangential Acceleration:
+        Vec2D acc_tangential = vec_scale(tangent, car->acceleration);
+        
+        // Centripetal Acceleration: a_c = v * omega_total (Directed towards center)
+        Vec2D normal_left = { -sin(car->orientation), cos(car->orientation) };
+        Vec2D acc_centripetal = vec_scale(normal_left, car->speed * omega_total);
+        
+        car->true_acceleration_vector = vec_add(acc_tangential, acc_centripetal);
     } else {
         LOG_ERROR("Cannot update geometry for car %d: unknown lane type.", car->id);
         return;

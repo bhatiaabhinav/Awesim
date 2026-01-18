@@ -90,6 +90,17 @@ struct Car {
     // geometry variables, set by the engine
     Coordinates center;
     Radians orientation;
+
+    // True 2D speed vector in the global coordinate system.
+    // Derived as the derivative of position. Tangent to the path.
+    // Note: On complex turns, the magnitude may slightly differ from 'speed' due to path stretching/compression from geometry correction.
+    Vec2D true_speed_vector;  
+
+    // True 2D acceleration vector in the global coordinate system.
+    // Includes tangential acceleration (along the direction of motion) and centripetal acceleration (towards the center of curvature).
+    // Note: On complex turns with geometry correction, this accounts for the modified path curvature.
+    Vec2D true_acceleration_vector;
+
     Coordinates corners[4];     // front-right, front-left, rear-left, rear-right. (i.e., all anticlockwise)
 
     // control variables:
