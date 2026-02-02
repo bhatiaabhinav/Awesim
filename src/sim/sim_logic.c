@@ -144,7 +144,6 @@ void sim_integrate(Simulation* self, Seconds time_period) {
                 LOG_TRACE("Car %d changed to left lane %d", car->id, lane->id);
             } else if (lane_change_requested == INDICATOR_RIGHT && adjacent_right) {
                 assert(adjacent_right->direction == lane->direction && "How did this happen? Map error!");
-                // TODO: ignore lane change if this is an NPC if a collision is possible with another vehicle
                 lane = adjacent_right;
                 lane_change_requested = INDICATOR_NONE; // Reset request after lane change
                 lane_changed = true;
@@ -238,7 +237,16 @@ void sim_integrate(Simulation* self, Seconds time_period) {
                         s -= lane->length;
                         lane = connection_straight;
                         LOG_TRACE("Car %d went straight into lane %d", car->id, lane->id);
+                    } else if (connection_right) {
+                        s -= lane->length;
+                        lane = connection_right;
+                        LOG_TRACE("Car %d had to turn right into lane %d as no straight connection was available.", car->id, lane->id);
+                    } else if (connection_left) {
+                        s -= lane->length;
+                        lane = connection_left;
+                        LOG_TRACE("Car %d had to turn left into lane %d as no straight or right connection was available.", car->id, lane->id);
                     } else {
+                        LOG_TRACE("Car %d has no available connections from lane %d. It has reached a dead end.", car->id, lane->id);
                         // dead end. Clamp to end of lane and stop the car. Movement ignored = s - lane->length.
                         net_forward_movement_meters -= (s - lane->length);
                         s = lane->length; // no connections, so clamp s to lane length.

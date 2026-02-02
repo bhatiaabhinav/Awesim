@@ -83,6 +83,7 @@ typedef struct Simulation {
     Weather weather;
     bool is_agent_enabled; // Whether car 0 is an agent (true) or an NPC (false). False by default. When true, car 0 is the agent car and must be controlled using car_set_acceleration, car_set_indicator_turn, and car_set_indicator_lane functions outside the sim loop.
     bool is_agent_driving_assistant_enabled; // Whether the agent car has a driving assistant enabled, the simulator will automatically set the agent car's controls using the driving assistant within the sim loop. The driving assistant must be configured periodically outside the sim loop.
+    LaneId agent_goal_lane_id; // Goal lane ID for the agent car, if any.
     double npc_rogue_factor; // Rogue factor for NPC cars, between 0.0 (completely law-abiding) to 1.0 (maximum rogue). Default is 0.0
 
     // Perception Noise Parameters

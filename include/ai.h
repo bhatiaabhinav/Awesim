@@ -448,16 +448,16 @@ MetersPerSecondSquared control_speed_compute_bounded_accel(ControlError error, M
 #define AEB_DISENGAGE_MAX_SPEED_MPS 0.0045              // AEB disengages when ego speed falls below 0.0045 m/s (≈ 0.01 mph)
 #define AEB_ENGAGE_BEST_CASE_BRAKING_GAP_M 0.3048       // AEB engages if best-case gap under maximum braking is less than 0.3048 m (≈ 1 ft)
 #define AEB_DISENGAGE_BEST_CASE_BRAKING_GAP_M 0.9144    // AEB disengages if best-case gap under maximum braking exceeds 0.9144 m (≈ 3 ft)
-#define DRIVING_ASSISTANT_CAR_DISTANCE_BUFFER_M AEB_DISENGAGE_BEST_CASE_BRAKING_GAP_M  // Minimum buffer distance to maintain from lead car in follow mode
 #define DRIVING_ASSISTANT_DEFAULT_TIME_HEADWAY 3.0                     // Default time headway to maintain from lead car in follow mode
+#define DRIVING_ASSISTANT_DEFAULT_CAR_DISTANCE_BUFFER 3.0                // Default minimum distance to maintain from lead car in follow mode (in meters)
 
 
 typedef enum SmartDASDrivingStyle {
-    SMART_DAS_DRIVING_STYLE_NO_RULES,               // speed max = 50% over speed limit, follow THW = 0.5s. Pass/merge thw = 0.5s. Runs through intersections without stopping or yielding.
-    SMART_DAS_DRIVING_STYLE_RECKLESS,        // speed max = 25%+ over speed limit, follow THW = 1.0s. Pass/merge thw = 1.0s. Yield thw = 1.0s (that too only if we can stop comfortably). Rolling stop at stop signs, proceed out of turn, and do not even stop at all if we are the closest to the intersection in terms of time to reach the intersection. Speedup at yellow lights irrespective of distance to intersection. Starts braking for red lights very late and with sudden max capable deceleration (and may overshoot if not enough traction due to slippery road or noise in anticipated braking distance). Does not stop once impossible to stop (in fact, speeds up). Does not stop fully before exercising free-right on red at intersections. This mode may lead to unsafe situations and very likely traffic violations.
-    SMART_DAS_DRIVING_STYLE_AGGRESSIVE,      // speed max = 10%+ over speed limit, follow THW = 2.0s. Pass/merge thw = 2s. Yield thw = 2 s (if can stop without exceed max deceleration of preferred acceleration profile). Rolling stop at stop signs, proceed when appropriate. Stops at yellow lights (if can stop comfortably), otherwise speed up. Starts braking for red lights suddenly, but max deceleration of preferred acceleration profile and the stopping trigger is accordingly earlier. Does not stop once impossible to stop. This mode may sometimes lead to unsafe situations and traffic violations.
-    SMART_DAS_DRIVING_STYLE_NORMAL,          // speed max = at speed limit, follow THW = 3.0s. Pass/merge thw = 3s. Yield thw = 3 s (if can stop at all). Full stop at stop signs, proceeds when it's our turn. Stops at yellow lights if can stop comfortably, otherwise ignore. Starts braking for red lights smoothly with up to max preferred deceleration and the stopping trigger is accordingly earlier. Does not stop once impossible to stop (and just coasts). This mode is generally safe and compliant with traffic rules.
-    SMART_DAS_DRIVING_STYLE_DEFENSIVE,       // speed max = 10% below speed limit, follow THW = 4.0s. Pass/merge thw = 4s. Yield thw = 4 s (if can stop at all). Does not exercise free-right at intersections. Does not creep while yielding. Otherwise same as NORMAL. This mode is very safe and compliant with traffic rules.
+    SMART_DAS_DRIVING_STYLE_NO_RULES,               // speed max = 50% over speed limit, follow THW = 0.5s + 0.5m. Pass/merge thw = 0.5s + 0.5m. Runs through intersections without stopping or yielding.
+    SMART_DAS_DRIVING_STYLE_RECKLESS,        // speed max = 25%+ over speed limit, follow THW = 1.0s + 1m. Pass/merge thw = 1.0s + 1m. Yield thw = 1.0s (that too only if we can stop comfortably). Rolling stop at stop signs, proceed out of turn, and do not even stop at all if we are the closest to the intersection in terms of time to reach the intersection. Speedup at yellow lights irrespective of distance to intersection. Starts braking for red lights very late and with sudden max capable deceleration (and may overshoot if not enough traction due to slippery road or noise in anticipated braking distance). Does not stop once impossible to stop (in fact, speeds up). Does not stop fully before exercising free-right on red at intersections. This mode may lead to unsafe situations and very likely traffic violations.
+    SMART_DAS_DRIVING_STYLE_AGGRESSIVE,      // speed max = 10%+ over speed limit, follow THW = 2.0s + 2m. Pass/merge thw = 2s + 2m. Yield thw = 2 s (if can stop without exceed max deceleration of preferred acceleration profile). Rolling stop at stop signs, proceed when appropriate. Stops at yellow lights (if can stop comfortably), otherwise speed up. Starts braking for red lights suddenly, but max deceleration of preferred acceleration profile and the stopping trigger is accordingly earlier. Does not stop once impossible to stop. This mode may sometimes lead to unsafe situations and traffic violations.
+    SMART_DAS_DRIVING_STYLE_NORMAL,          // speed max = at speed limit, follow THW = 3.0s + 3m. Pass/merge thw = 3s + 3m. Yield thw = 3 s (if can stop at all). Full stop at stop signs, proceeds when it's our turn. Stops at yellow lights if can stop comfortably, otherwise ignore. Starts braking for red lights smoothly with up to max preferred deceleration and the stopping trigger is accordingly earlier. Does not stop once impossible to stop (and just coasts). This mode is generally safe and compliant with traffic rules.
+    SMART_DAS_DRIVING_STYLE_DEFENSIVE,       // speed max = 10% below speed limit, follow THW = 4.0s + 4m. Pass/merge thw = 4s + 4m. Yield thw = 4 s (if can stop at all). Does not exercise free-right at intersections. Does not creep while yielding. Otherwise same as NORMAL. This mode is very safe and compliant with traffic rules.
     SMART_DAS_DRIVING_STYLES_COUNT          // Number of driving styles (sentinel)
 } SmartDASDrivingStyle;
 
@@ -472,6 +472,7 @@ typedef struct DrivingAssistant {
     CarIndicator turn_intent;            // For which lane to take when approaching intersections. Set to None automatically once the assistant issues turn command.
 
     Seconds thw;                        // Time headway distance to the next vehicle (if exists). Also, the time headway for determining merge safety when merge assistance is active.
+    Meters buffer;                       // Minimum distance to maintain from the lead vehicle (if any) in follow mode. 
     bool should_stop_at_intersection;          // Whether to stop at the next intersection. The car will try to brake as smoothly as possible to stop STOP_LINE_BUFFER_METERS meter before the intersection. If stop_at_intersection is invoked later than the smoothest braking distance, braking intensity will be automatically adjusted to stop STOP_LINE_BUFFER_METERS meter before the intersection. If it slightly overshoots over the buffer, it will back up. But if it is impossible to brake in time, the car will still brake hard even though it will overshoot the legal stop line. Once already overshot, this variable is ignored because there is no intersection ahead and the only way the speed still reduces is if the speed_target reduces. This variable also triggers stopping at dead ends.
 
     bool follow_assistance;         // when false, disables follow mode even if there is a lead vehicle, so that the car will always try to reach speed_target regardless of lead vehicle.
@@ -511,6 +512,7 @@ bool driving_assistant_get_should_stop_at_intersection(const DrivingAssistant* d
 CarIndicator driving_assistant_get_merge_intent(const DrivingAssistant* das);
 CarIndicator driving_assistant_get_turn_intent(const DrivingAssistant* das);
 Seconds driving_assistant_get_thw(const DrivingAssistant* das);
+Meters driving_assistant_get_buffer(const DrivingAssistant* das);
 bool driving_assistant_get_follow_assistance(const DrivingAssistant* das);
 bool driving_assistant_get_merge_assistance(const DrivingAssistant* das);
 bool driving_assistant_get_aeb_assistance(const DrivingAssistant* das);
@@ -529,6 +531,7 @@ void driving_assistant_configure_should_stop_at_intersection(DrivingAssistant* d
 void driving_assistant_configure_merge_intent(DrivingAssistant* das, const Car* car, const Simulation* sim, CarIndicator merge_intent);
 void driving_assistant_configure_turn_intent(DrivingAssistant* das, const Car* car, const Simulation* sim, CarIndicator turn_intent);
 void driving_assistant_configure_thw(DrivingAssistant* das, const Car* car, const Simulation* sim, Seconds thw);
+void driving_assistant_configure_buffer(DrivingAssistant* das, const Car* car, const Simulation* sim, Meters buffer);
 void driving_assistant_configure_follow_assistance(DrivingAssistant* das, const Car* car, const Simulation* sim, bool follow_assistance);
 void driving_assistant_configure_merge_assistance(DrivingAssistant* das, const Car* car, const Simulation* sim, bool merge_assistance);
 void driving_assistant_configure_aeb_assistance(DrivingAssistant* das, const Car* car, const Simulation* sim, bool aeb_assistance);

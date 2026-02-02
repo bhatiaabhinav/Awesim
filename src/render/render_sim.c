@@ -343,12 +343,11 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, bool draw_lanes, bool d
         if (highlighted_car && highlighted_car_minimap) {
             highlighted_car_minimap->marked_car_id = highlighted_car->id;
             
-            // Mark landmark: center of lane #84 in blue
-            Lane* lane84 = map_get_lane(map, 84);
-            if (lane84) {
-                highlighted_car_minimap->marked_landmarks[0] = lane84->center;
+            Lane* lane_goal = map_get_lane(map, sim->agent_goal_lane_id);
+            if (lane_goal) {
+                highlighted_car_minimap->marked_landmarks[0] = lane_goal->center;
                 highlighted_car_minimap->marked_landmark_colors[0] = (RGB){0, 0, 255};
-                path_planner_compute_shortest_path(highlighted_car_path_planner, map_get_lane(map, highlighted_car->lane_id), car_get_lane_progress_meters(highlighted_car), lane84, 0.5 * lane84->length);
+                path_planner_compute_shortest_path(highlighted_car_path_planner, map_get_lane(map, highlighted_car->lane_id), car_get_lane_progress_meters(highlighted_car), lane_goal, 0.5 * lane_goal->length);
                 highlighted_car_minimap->marked_path = highlighted_car_path_planner;
             }
             
@@ -382,58 +381,71 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, bool draw_lanes, bool d
     render_text(renderer, weather_strings[sim->weather], WINDOW_SIZE_WIDTH - 10, 20 + hud_font_size,
                 255, 255, 255, 255, hud_font_size, ALIGN_TOP_RIGHT, false, NULL);
 
-    if (sim->is_agent_enabled && sim->is_agent_driving_assistant_enabled) {
-        // Render driving assistant status on top left
-        Car* car0 = sim_get_car(sim, 0);    // 0 is always the agent car
-        situational_awareness_build(sim, 0); // rebuild situational awareness for car 0
-        SituationalAwareness* sit = sim_get_situational_awareness(sim, 0);
-        DrivingAssistant* das = car0 ? sim_get_driving_assistant(sim, car0->id) : NULL;
+    // Render driving assistant status on top left
+    Car* car0 = sim_get_car(sim, CAMERA_CENTERED_ON_CAR_ID);
+    if (car0) situational_awareness_build(sim, CAMERA_CENTERED_ON_CAR_ID);
+    SituationalAwareness* sit = car0 ? sim_get_situational_awareness(sim, CAMERA_CENTERED_ON_CAR_ID) : NULL;
+    DrivingAssistant* das = car0 ? sim_get_driving_assistant(sim, car0->id) : NULL;
 
-
-        // print "ADAS Targets:" header
-        if (das) {
-            Uint8 r = HIGHLIGHTED_CAR_COLOR.r, g = HIGHLIGHTED_CAR_COLOR.g, b = HIGHLIGHTED_CAR_COLOR.b;
-            render_text(renderer, "ADAS Targets:", 10, 80 + 5 * hud_font_size, r, g, b, 255,
-                        hud_font_size, ALIGN_TOP_LEFT, false, NULL);
+    
+    // If smart das in enabled, print "Style $style" in cyan color
+    if (das && das->smart_das) {
+        char smart_das_str[64];
+        const char* style_str = NULL;
+        switch (das->smart_das_driving_style) {
+            case SMART_DAS_DRIVING_STYLE_NO_RULES:
+                style_str = "Lawless"; break;
+            case SMART_DAS_DRIVING_STYLE_RECKLESS:
+                style_str = "Reckless"; break;
+            case SMART_DAS_DRIVING_STYLE_AGGRESSIVE:
+                style_str = "Aggressive"; break;
+            case SMART_DAS_DRIVING_STYLE_NORMAL:
+                style_str = "Normal"; break;
+            case SMART_DAS_DRIVING_STYLE_DEFENSIVE:
+                style_str = "Defensive"; break;
+            default:
+                style_str = "Unknown"; break;
         }
+        snprintf(smart_das_str, sizeof(smart_das_str), " Style: %s", style_str);
+        render_text(renderer, smart_das_str, 10, 80 + 5 * hud_font_size, 0, 255, 255, 255,
+                    hud_font_size, ALIGN_TOP_LEFT, false, NULL);
+    }
 
-        // print target speed in hot pink
-        if (das) {
-            char target_speed_stats[32];
-            Uint8 r = 255, g = 105, b = 180; // hot pink
-            snprintf(target_speed_stats, sizeof(target_speed_stats), " Speed:   %.1f mph", to_mph(das->speed_target));
-            render_text(renderer, target_speed_stats, 10, 90 + 6 * hud_font_size, r, g, b, 255,
-                        hud_font_size, ALIGN_TOP_LEFT, false, NULL);
-        }
+    // print target speed in hot pink
+    if (das) {
+        char target_speed_stats[32];
+        Uint8 r = 255, g = 105, b = 180; // hot pink
+        snprintf(target_speed_stats, sizeof(target_speed_stats), " Speed:   %.1f mph", to_mph(das->speed_target));
+        render_text(renderer, target_speed_stats, 10, 90 + 6 * hud_font_size, r, g, b, 255,
+                    hud_font_size, ALIGN_TOP_LEFT, false, NULL);
+    }
 
-        // If FOLLOW is enabled and there is car ahead and speed target is higher than the lead car's speed, print that in green light color, else set alpha to low value.
-        if (das) {
-            char follow_str[32];
-            snprintf(follow_str, sizeof(follow_str), " Follow:   %.1f s + %.1f ft", das->thw, to_feet(STOP_LINE_BUFFER_METERS));
-            Uint8 r = GREEN_LIGHT_COLOR.r, g = GREEN_LIGHT_COLOR.g, b = GREEN_LIGHT_COLOR.b;
-            Uint8 alpha = sit->nearby_vehicles.lead && das->speed_target > sit->nearby_vehicles.lead->speed ? 255 : 64;
-            render_text(renderer, follow_str, 10, 100 + 7 * hud_font_size, r, g, b, alpha,
-                        hud_font_size, ALIGN_TOP_LEFT, false, NULL);
-        }
+    // If FOLLOW is enabled and there is car ahead and speed target is higher than the lead car's speed, print that in green light color, else set alpha to low value.
+    if (das) {
+        char follow_str[32];
+        snprintf(follow_str, sizeof(follow_str), " Follow:   %.1f s + %.1f m", das->thw, das->buffer);
+        Uint8 r = GREEN_LIGHT_COLOR.r, g = GREEN_LIGHT_COLOR.g, b = GREEN_LIGHT_COLOR.b;
+        Uint8 alpha = sit->nearby_vehicles.lead && das->speed_target > sit->nearby_vehicles.lead->speed ? 255 : 64;
+        render_text(renderer, follow_str, 10, 100 + 7 * hud_font_size, r, g, b, alpha,
+                    hud_font_size, ALIGN_TOP_LEFT, false, NULL);
+    }
 
-        // If STOP is enabled, print that in red light color, else set alpha to low value.
-        if (das) {
-            char stop_str[32];
-            snprintf(stop_str, sizeof(stop_str), " Stop");
-            Uint8 r = RED_LIGHT_COLOR.r, g = RED_LIGHT_COLOR.g, b = RED_LIGHT_COLOR.b;
-            Uint8 alpha = (das->should_stop_at_intersection && (sit->is_an_intersection_upcoming || sit->is_approaching_dead_end)) ? 255 : 64;
-            render_text(renderer, stop_str, 10, 110 + 8 * hud_font_size, r, g, b, alpha,
-                        hud_font_size, ALIGN_TOP_LEFT, false, NULL);
-        }
+    // If STOP is enabled (and smart das not enabled), print that in light blue color, else set alpha to low value. If smart das is enabled, insted of STOP, write "APPROACH" when approaching intersection engaged.
+    if (das) {
+        char stop_str[32];
+        snprintf(stop_str, sizeof(stop_str), das->smart_das ? " Approach" : " Stop");
+        Uint8 r = 173, g = 216, b = 230; // light blue
+        Uint8 alpha = (!das->smart_das && das->should_stop_at_intersection && (sit->is_an_intersection_upcoming || sit->is_approaching_dead_end)) || (das->smart_das && das->smart_das_intersection_approach_engaged) ? 255 : 64;
+        render_text(renderer, stop_str, 10, 110 + 8 * hud_font_size, r, g, b, alpha,
+                    hud_font_size, ALIGN_TOP_LEFT, false, NULL);
+    }
 
-        // If AEB is engaged, print that in bright red text, else set alpha to low value.
-        if (das) {
-            char aeb_str[8];
-            snprintf(aeb_str, sizeof(aeb_str), " AEB");
-            Uint8 alpha = das->aeb_in_progress ? 255 : 64;
-            render_text(renderer, aeb_str, 10, 120 + 9 * hud_font_size, 255, 0, 0, alpha,
-                        hud_font_size, ALIGN_TOP_LEFT, false, NULL);
-        }
-
+    // If AEB is engaged, print that in bright red text, else set alpha to low value.
+    if (das) {
+        char aeb_str[8];
+        snprintf(aeb_str, sizeof(aeb_str), " AEB");
+        Uint8 alpha = das->aeb_in_progress ? 255 : 64;
+        render_text(renderer, aeb_str, 10, 120 + 9 * hud_font_size, 255, 0, 0, alpha,
+                    hud_font_size, ALIGN_TOP_LEFT, false, NULL);
     }
 }

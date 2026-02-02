@@ -109,6 +109,7 @@ void sim_init(Simulation* sim) {
     sim->weather = WEATHER_SUNNY;
     sim->is_agent_enabled = false; // Agent car is disabled by default
     sim->is_agent_driving_assistant_enabled = false; // Driving assistant is disabled by default
+    sim->agent_goal_lane_id = ID_NULL;
     sim->npc_rogue_factor = 0.0; // NPC cars are completely law-abiding by default
 
     // Initialize perception noise parameters with realistic defaults

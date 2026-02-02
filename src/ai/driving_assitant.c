@@ -18,9 +18,10 @@ bool driving_assistant_reset_settings(DrivingAssistant* das, Car* car) {
     das->merge_intent = INDICATOR_NONE;
     das->turn_intent = INDICATOR_NONE;
     das->thw = DRIVING_ASSISTANT_DEFAULT_TIME_HEADWAY;      // Default time headway
+    das->buffer = DRIVING_ASSISTANT_DEFAULT_CAR_DISTANCE_BUFFER; // Default distance buffer
     das->follow_assistance = true;  // Default to true
     das->merge_assistance = true;   // Default to true
-    das->aeb_assistance = true;     // Default to false
+    das->aeb_assistance = false;     // Default to false
     das->smart_das = true;          // Default to true
     das->smart_das_driving_style = SMART_DAS_DRIVING_STYLE_NORMAL; // Default driving style
     das->aeb_in_progress = false;    // Reset AEB state
@@ -471,6 +472,14 @@ void driving_assistant_smart_update_das_variables(DrivingAssistant* das, Car* ca
             [SMART_DAS_DRIVING_STYLE_DEFENSIVE] = 4.0
         };
 
+        Meters buffers[] = {
+            [SMART_DAS_DRIVING_STYLE_NO_RULES] = 0.5,
+            [SMART_DAS_DRIVING_STYLE_RECKLESS] = 1.0,
+            [SMART_DAS_DRIVING_STYLE_AGGRESSIVE] = 2.0,
+            [SMART_DAS_DRIVING_STYLE_NORMAL] = 3.0,
+            [SMART_DAS_DRIVING_STYLE_DEFENSIVE] = 4.0
+        };
+
         MetersPerSecond lane_speed_limit = lane_get_speed_limit(sa->lane);
 
         if (sa->road) {
@@ -511,6 +520,7 @@ void driving_assistant_smart_update_das_variables(DrivingAssistant* das, Car* ca
 
         // set the THW and speed target based on driving style
         das->thw = thws[das->smart_das_driving_style];
+        das->buffer = buffers[das->smart_das_driving_style];
         das->speed_target = speed_limits[das->smart_das_driving_style];
         das->speed_target = fmin(das->speed_target, car->capabilities.top_speed); // cap speed target to car's max speed
         das->use_linear_speed_control = das->smart_das_driving_style <= SMART_DAS_DRIVING_STYLE_RECKLESS; // reckless uses linear speed control instead of exponential error decay control as it likes more abrupt changes
@@ -526,6 +536,21 @@ void driving_assistant_smart_update_das_variables(DrivingAssistant* das, Car* ca
             CarIndicator old_turn_intent = car_get_indicator_turn(car);
             if (sa->is_turn_possible[old_turn_intent]) {
                 das->turn_intent = old_turn_intent; // freeze turn intent to current turn indicator if valid
+            } else {
+                // it may not be possible to do current turn intent
+                if (!sa->is_turn_possible[das->turn_intent]) {
+                    // if current turn intent is also not possible, just go straight
+                    if (sa->is_turn_possible[INDICATOR_NONE]) {
+                        das->turn_intent = INDICATOR_NONE;
+                    } else if (sa->is_turn_possible[INDICATOR_RIGHT]) {
+                        das->turn_intent = INDICATOR_RIGHT;
+                    } else if (sa->is_turn_possible[INDICATOR_LEFT]) {
+                        das->turn_intent = INDICATOR_LEFT;
+                    } else {
+                        LOG_ERROR("Smart DAS: No valid turn intents possible at intersection for car ID %d", car->id);
+                        exit(EXIT_FAILURE);
+                    }
+                }
             }
         }
     }
@@ -564,10 +589,7 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
 
     // ------------- Follow lead vehicle ------------------------
     if (das->follow_assistance) {
-        Meters buffer = DRIVING_ASSISTANT_CAR_DISTANCE_BUFFER_M;
-        if (das->smart_das && das->smart_das_driving_style == SMART_DAS_DRIVING_STYLE_DEFENSIVE) {
-            buffer *= 2;
-        }
+        Meters buffer = das->buffer;
         MetersPerSecondSquared accel_cruise = car_compute_acceleration_adaptive_cruise(car, sim, sa, fmax(das->speed_target, 0), das->thw, buffer, das->use_preferred_accel_profile); // follow next car or adjust speed. Doesn't work for negative speed target.
         double step_size = 0.99 * dt; // smoothing step size
         accel_cruise = step_size * accel_cruise + (1 - step_size) * accel_prev; // smooth it a bit. As a bonus, it simulates driver reaction time delay.
@@ -672,10 +694,7 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
         lane_indicator = das->merge_intent;
         // if merge assistance is active, issue request only when it is safe, else issue right away
         if (das->merge_assistance && lane_indicator != INDICATOR_NONE) {
-            Meters buffer = DRIVING_ASSISTANT_CAR_DISTANCE_BUFFER_M;
-            if (das->smart_das && das->smart_das_driving_style == SMART_DAS_DRIVING_STYLE_DEFENSIVE) {
-                buffer *= 2;
-            }
+            Meters buffer = das->buffer;
             if (car_is_lane_change_dangerous(car, sim, sa, lane_indicator, das->thw, buffer, sim_get_dt(sim))) {
                 LOG_TRACE("Waiting for safe merge for car %d with indicator %d", car->id, lane_indicator);
                 request_lane_change = false;        // Keep indicating but don't execute
@@ -774,6 +793,7 @@ bool driving_assistant_get_should_stop_at_intersection(const DrivingAssistant* d
 CarIndicator driving_assistant_get_merge_intent(const DrivingAssistant* das) { return das->merge_intent; }
 CarIndicator driving_assistant_get_turn_intent(const DrivingAssistant* das) { return das->turn_intent; }
 Seconds driving_assistant_get_thw(const DrivingAssistant* das) { return das->thw; }
+Meters driving_assistant_get_buffer(const DrivingAssistant* das) { return das->buffer; }
 bool driving_assistant_get_follow_assistance(const DrivingAssistant* das) { return das->follow_assistance; }
 bool driving_assistant_get_merge_assistance(const DrivingAssistant* das) { return das->merge_assistance; }
 bool driving_assistant_get_aeb_assistance(const DrivingAssistant* das) { return das->aeb_assistance; }
@@ -841,6 +861,18 @@ void driving_assistant_configure_thw(DrivingAssistant* das, const Car* car, cons
         thw = 0;
     }
     das->thw = thw;
+    das->last_configured_at = sim_get_time(sim);
+}
+
+void driving_assistant_configure_buffer(DrivingAssistant* das, const Car* car, const Simulation* sim, Meters buffer) {
+    if (!validate_input(car, das, sim)) {
+        return;
+    }
+    if (buffer < 0) {
+        LOG_WARN("Buffer cannot be negative for car %d. Setting it to 0.", car->id);
+        buffer = 0;
+    }
+    das->buffer = buffer;
     das->last_configured_at = sim_get_time(sim);
 }
 
