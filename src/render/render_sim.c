@@ -221,7 +221,7 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, bool draw_lanes, bool d
         HIGHLIGHTED_CAR_AEB_ENGAGED = false;
         if (highlighted_car) {
             SituationalAwareness *situation = situational_awareness_highlighted_car;
-            nearby_vehicles_flatten(&situation->nearby_vehicles, &HIGHLIGHTED_NEARBY_VEHICLES, true);
+            nearby_vehicles_flatten(&situation->nearby_vehicles, &HIGHLIGHTED_NEARBY_VEHICLES);
             if (sim->is_agent_driving_assistant_enabled) {
                 DrivingAssistant* das = sim_get_driving_assistant(sim, highlighted_car->id);
                 if (das) {
@@ -409,9 +409,9 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, bool draw_lanes, bool d
         // If FOLLOW is enabled and there is car ahead and speed target is higher than the lead car's speed, print that in green light color, else set alpha to low value.
         if (das) {
             char follow_str[32];
-            snprintf(follow_str, sizeof(follow_str), " Follow:   %.1f s + %.1f ft", das->thw, to_feet(DRIVING_ASSISTANT_BUFFER_M));
+            snprintf(follow_str, sizeof(follow_str), " Follow:   %.1f s + %.1f ft", das->thw, to_feet(STOP_LINE_BUFFER_METERS));
             Uint8 r = GREEN_LIGHT_COLOR.r, g = GREEN_LIGHT_COLOR.g, b = GREEN_LIGHT_COLOR.b;
-            Uint8 alpha = sit->lead_vehicle && das->speed_target > sit->lead_vehicle->speed ? 255 : 64;
+            Uint8 alpha = sit->nearby_vehicles.lead && das->speed_target > sit->nearby_vehicles.lead->speed ? 255 : 64;
             render_text(renderer, follow_str, 10, 100 + 7 * hud_font_size, r, g, b, alpha,
                         hud_font_size, ALIGN_TOP_LEFT, false, NULL);
         }

@@ -201,6 +201,12 @@ void car_reset_all_control_variables(Car* self);
 // should be called by the sim engine to update the car's geometry based on its lane, lane progress, and dimensions.
 void car_update_geometry(Simulation* sim, Car* car);
 
+Coordinates coords_compute_relative_to_car(const Car* self, Coordinates global_coords);
+Vec2D vec2d_rotate_to_car_frame(const Car* self, Vec2D global_vec);
+
+// utility to    perceive another car with noise based on 'sim' parameters. Returns true if 'other' is perceived, false otherwise. Pass NULL for any output parameter if not needed.
+bool car_noisy_perceive_other(const Car* self, const Car* other, Simulation* sim, double* progress_out, Meters* progress_meters_out, MetersPerSecond* speed_out, MetersPerSecondSquared* acceleration_out, Meters* rel_distance_out, Radians* rel_orientation_out, Coordinates* rel_position_out, Vec2D* rel_speed_vector_out, Vec2D* rel_acceleration_vector_out, bool consider_blind_spot, double dropout_probability_multiplier);
+
 // utility to check collision between two cars.
 bool car_is_colliding(const Car* car1, const Car* car2);
 

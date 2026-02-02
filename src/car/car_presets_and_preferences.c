@@ -88,7 +88,7 @@ const Dimensions3D CAR_SIZE_COMPACT_SUV   = {1.829, 4.877, 1.650};   // Compact 
 const Dimensions3D CAR_SIZE_LARGE_SUV     = {1.981, 5.334, 1.800};   // Large SUV (e.g., Chevrolet Traverse, 6.5 ft wide, 17.5 ft long)
 const Dimensions3D CAR_SIZE_FULLSIZE      = {1.829, 5.486, 1.500};   // Full-size car (e.g., Dodge Charger, 6.0 ft wide, 18 ft long)
 const Dimensions3D CAR_SIZE_PICKUP        = {2.134, 5.608, 1.900};   // Full-size pickup (e.g., Ford F-150, 7.0 ft wide, 18.4 ft long)
-const Dimensions3D CAR_SIZE_BUS           = {2.438, 12.000, 3.200};  // Full-size bus (e.g., 40 ft transit bus, 8.0 ft wide, 40 ft long)
+const Dimensions3D CAR_SIZE_BUS           = {2.438, 9.000, 3.200};  // Mid-size bus (8.0 ft wide, 30 ft long)
 
 Dimensions3D car_dimensions_get_random_preset(void) {
     const Dimensions3D dims[] = { // TODO: once you find a way to make the roads longer, consider allowing BUS sized cars.
@@ -99,7 +99,7 @@ Dimensions3D car_dimensions_get_random_preset(void) {
         CAR_SIZE_COMPACT_SUV,
         CAR_SIZE_LARGE_SUV,
         CAR_SIZE_PICKUP,
-        // CAR_SIZE_BUS,
+        CAR_SIZE_BUS,
     };
     size_t count = sizeof(dims) / sizeof(dims[0]);
     return dims[rand_int(count)];
@@ -133,6 +133,9 @@ void car_dimensions_and_acc_profile_get_random_realistic_preset(Dimensions3D *di
         // Trucks
         {CAR_SIZE_PICKUP, CAR_ACC_PROFILE_TRUCK},
         {CAR_SIZE_PICKUP, CAR_ACC_PROFILE_HEAVY_TRUCK},     // Heavy duty pickup
+
+        // Buses
+        {CAR_SIZE_BUS, CAR_ACC_PROFILE_HEAVY_TRUCK},
     };
     size_t count = sizeof(realistic_presets) / sizeof(realistic_presets[0]);
     int idx = rand_int(count);

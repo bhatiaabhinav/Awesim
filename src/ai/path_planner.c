@@ -319,17 +319,33 @@ static double get_cost(double distance, double speed_limit, bool consider_speed_
 }
 
 
-static NavAction infer_action(Map* map, MapNode u, MapNode v) {
+static NavAction infer_action(Map* map, MapNode u, MapNode v, bool* trivial_out) {
+    *trivial_out = true;
     if (u.lane_id == v.lane_id) return NAV_STRAIGHT;
 
     Lane* lane_u = map_get_lane(map, u.lane_id);
     if (!lane_u) return NAV_NONE;
 
+    Lane* lane_v = map_get_lane(map, v.lane_id);
+    if (!lane_v) return NAV_NONE;
+
+    // Simple lane continuation:
+    if (lane_get_num_connections(lane_u) == 1 && lane_u->connections[INDICATOR_NONE] == v.lane_id && lane_get_num_connections_incoming(lane_v) == 1) {
+        return NAV_STRAIGHT;
+    }
+
+    // If we are already *on* an intersection and turning into a road, consider it continuing straight
+    if (lane_u->is_at_intersection && lane_get_num_connections(lane_u) == 1) {
+        return NAV_STRAIGHT;
+    }
+
+    *trivial_out = false;   // all below are non-trivial and useful for navigation
+
     // Connections
     for (int k = 0; k < 3; ++k) {
         if (lane_u->connections[k] == v.lane_id) {
             if (k == 0) return NAV_TURN_LEFT;
-            if (k == 1) return NAV_STRAIGHT;
+            if (k == 1) return NAV_KEEP_STRAIGHT ;
             if (k == 2) return NAV_TURN_RIGHT;
         }
     }
@@ -350,6 +366,7 @@ static NavAction infer_action(Map* map, MapNode u, MapNode v) {
         return NAV_EXIT_RIGHT;
     }
 
+    *trivial_out = true;
     return NAV_NONE;
 }
 
@@ -365,17 +382,20 @@ void path_planner_compute_shortest_path(PathPlanner* planner, const Lane* start_
     planner->path_exists = false;
     planner->optimal_cost = DBL_MAX;
     planner->num_solution_actions = 0;
+    planner->num_solution_actions_non_trivial = 0;
 
     // if we are on the same lane and start_progress <= end_progress, trivial path
     if (start_lane->id == end_lane->id && start_progress <= end_progress) {
         planner->path_exists = true;
         planner->optimal_cost = get_cost(end_progress - start_progress, start_lane->speed_limit, planner->consider_speed_limits);
         planner->num_solution_actions = 1;
+        planner->num_solution_actions_non_trivial = 1;
         planner->solution_nodes[0].lane_id = start_lane->id;
         planner->solution_nodes[0].progress = start_progress;
         planner->solution_nodes[1].lane_id = end_lane->id;
         planner->solution_nodes[1].progress = end_progress;
         planner->solution_actions[0] = NAV_STRAIGHT;
+        planner->solution_actions_non_trivial[0] = NAV_STRAIGHT;
         return;
     }
 
@@ -425,18 +445,24 @@ void path_planner_compute_shortest_path(PathPlanner* planner, const Lane* start_
         planner->solution_nodes[0].progress = start_progress;
         planner->solution_actions[0] = NAV_STRAIGHT; // from start to first node
         // Intermediate
+        planner->num_solution_actions_non_trivial = 0;
         for (int i = 0; i < path_num_nodes; ++i) {
             int node_idx = planner->solution_intermediate_node_ids[i];
             planner->solution_nodes[i + 1] = planner->map_nodes[node_idx];
             
             if (i > 0) {
-                planner->solution_actions[i] = infer_action(planner->map, planner->solution_nodes[i], planner->solution_nodes[i+1]);
+                bool trivial = false;
+                planner->solution_actions[i] = infer_action(planner->map, planner->solution_nodes[i], planner->solution_nodes[i+1], &trivial);
+                if (!trivial) {
+                    planner->solution_actions_non_trivial[planner->num_solution_actions_non_trivial++] = planner->solution_actions[i];
+                }
             }
         }
         // End
         planner->solution_nodes[path_num_nodes + 1].lane_id = end_lane->id;
         planner->solution_nodes[path_num_nodes + 1].progress = end_progress;
         planner->solution_actions[path_num_nodes] = NAV_STRAIGHT;
+        planner->solution_actions_non_trivial[planner->num_solution_actions_non_trivial++] = NAV_STRAIGHT;
     } else if (path_num_nodes == 0) {
         // no path
     } else {
@@ -444,5 +470,24 @@ void path_planner_compute_shortest_path(PathPlanner* planner, const Lane* start_
         LOG_ERROR("Path Planner Dijkstra error: %d. Start Lane ID: %d, Start Progress: %.2f, End Lane ID: %d, End Progress: %.2f.", 
               path_num_nodes, start_lane->id, start_progress, end_lane->id, end_progress);
         exit(EXIT_FAILURE);
+    }
+}
+
+
+
+NavAction path_planner_get_solution_action(const PathPlanner* planner, bool ignore_trivial, int action_index) {
+    if (!planner || !planner->path_exists || planner->num_solution_actions == 0) {
+        return NAV_NONE;
+    }
+    if (ignore_trivial) {
+        if (action_index < 0 || action_index >= planner->num_solution_actions_non_trivial) {
+            return NAV_NONE;
+        }
+        return planner->solution_actions_non_trivial[action_index];
+    } else {
+        if (action_index < 0 || action_index >= planner->num_solution_actions) {
+            return NAV_NONE;
+        }
+        return planner->solution_actions[action_index];
     }
 }

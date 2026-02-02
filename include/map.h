@@ -17,8 +17,8 @@
 #define MINOR_RED_EXTENSION 2
 #define ID_NULL -1
 #define LANE_LENGTH_EPSILON 0.1
-#define STOP_LINE_BUFFER_METERS 1.524  // Stop line distance from end of lane in meters
-#define STOP_SPEED_THRESHOLD 0.044704  // 0.1 mph in m/s
+#define STOP_LINE_BUFFER_METERS 1.524   // Stop line distance from end of lane in meters
+#define STOP_SPEED_THRESHOLD 1e-3       // 1 mm/s considered as stopped
 #define CREEP_SPEED 2.2352              // 5 mph in m/s
 
 // Typedef Definitions
@@ -295,7 +295,7 @@ typedef struct Intersection {
     LaneId lane_ids[MAX_NUM_LANES_PER_INTERSECTION]; // Lanes at the intersection
     int num_lanes; // Number of lanes at the intersection
     Meters lane_width; // Width of the lanes at the intersection
-    MetersPerSecond speed_limit; // Speed limit at the intersection
+    MetersPerSecond speed_limit; // Speed limit at the intersection for right turns. For straight and left turns, the speed limit of the outgoing road applies.
     double grip; // Grip factor at the intersection
     Coordinates center; // Center point of the intersection
     Dimensions dimensions;

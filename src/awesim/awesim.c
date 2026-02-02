@@ -272,7 +272,7 @@ void create_all_intersections_from_crossing_roads(Map* map, Meters intersection_
                     }
                     
                     intersection_create_from_crossing_roads_and_update_connections(
-                        map, eb, wb, nb, sb, is_four_way_stop, intersection_turn_radius, false, false, eb->speed_limit, 1.0
+                        map, eb, wb, nb, sb, is_four_way_stop, intersection_turn_radius, false, false, from_mph(15.0), 1.0
                     );
                     
                     processed_one = true;
@@ -292,7 +292,7 @@ void awesim_map_setup(Map* map, Meters city_width) {
     // Define constants
     const int interstate_num_lanes = 3;
     const int state_num_lanes = 2;
-    const Meters lane_width = from_feet(12);
+    const Meters lane_width = from_feet(14);
     const MetersPerSecond interstate_speed_limit = from_mph(65);
     const MetersPerSecond interstate_turn_speed_limit = from_mph(60);
     const MetersPerSecond state_speed_limit = from_mph(55);
@@ -330,11 +330,11 @@ void awesim_map_setup(Map* map, Meters city_width) {
     road_set_name(_S2E, "S2 East");
     road_set_name(_S2W, "S2 West");
     // Nested loops
-    double inner_loop_side = city_width * 0.27;
+    double inner_loop_side = city_width * 0.25;
     double inner_loop_num_lanes = 1;
-    double middle_loop_side = city_width * 0.54;
+    double middle_loop_side = city_width * 0.50;
     double middle_loop_num_lanes = 2;
-    double outer_loop_side = city_width * 0.81;
+    double outer_loop_side = city_width * 0.75;
     double outer_loop_num_lanes = 1;
 
     // Inner loop/grid (local roads)
@@ -413,7 +413,8 @@ void awesim_setup(Simulation* sim, Meters city_width, int num_cars, Seconds dt, 
         int max_attempts = 1000;
         bool would_collide = true;
         bool lane_too_short = true;
-        while ((would_collide || lane_too_short) && attempts < max_attempts) {
+        bool lane_invalid_misc = false;
+        while ((would_collide || lane_too_short || lane_invalid_misc) && attempts < max_attempts) {
             random_road = map_get_road(map, rand_int_range(0, map->num_roads - 1));
             random_lane = road_get_lane(random_road, map, rand_int_range(0, road_get_num_lanes(random_road) - 1));
             random_progress = rand_uniform(0.1, 0.9);
@@ -423,6 +424,10 @@ void awesim_setup(Simulation* sim, Meters city_width, int num_cars, Seconds dt, 
             lane_too_short = (car_get_length(car) + meters(2)) > (random_lane->length);
             if (lane_too_short) {
                 LOG_TRACE("Car id %d placement attempt %d on lane %d at position %.2f meters failed because lane is too short (lane length = %.2f meters, car length = %.2f meters). Retrying with a new lane.", car->id, attempts, random_lane->id, random_progress * random_lane->length, random_lane->length, car_get_length(car));
+            }
+            lane_invalid_misc = i == 0 && (road_get_num_lanes(random_road) > 1 || random_road->type == TURN); // Agent car must be on a single-lane road and not on a turn
+            if (lane_invalid_misc) {
+                LOG_TRACE("Car id %d placement attempt %d on lane %d at position %.2f meters failed because agent car must be on a single-lane road (road has %d lanes). Retrying with a new lane.", car->id, attempts, random_lane->id, random_progress * random_lane->length, road_get_num_lanes(random_road));
             }
         }
         if (would_collide) {

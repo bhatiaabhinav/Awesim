@@ -6,12 +6,12 @@
 
 int main(int argc, char** argv) {
     Meters city_width = meters(1000.0);             // width of the city in meters
-    int num_cars = 16;                               // number of cars to simulate
+    int num_cars = 256;                               // number of cars to simulate
     const Seconds dt = 0.02;                        // time resolution for integration.
     Simulation* sim = (Simulation*)malloc(sizeof(Simulation));
     LOG_DEBUG("Allocated memory for simulation, size %.2f kilobytes.", sizeof(*sim) / 1024.0);
-    awesim_setup(sim, city_width, num_cars, dt, clock_reading(0, 8, 0, 0), WEATHER_SUNNY);
-    const int benchmark_n_transitions = 10000000;
+    awesim_setup(sim, city_width, num_cars, dt, clock_reading(0, 8, 0, 0), WEATHER_SUNNY, false);
+    const int benchmark_n_transitions = 100000;
 
     double t0 = get_sys_time_seconds();
     sim_integrate(sim, dt * benchmark_n_transitions);

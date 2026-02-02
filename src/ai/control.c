@@ -311,28 +311,30 @@ MetersPerSecondSquared car_compute_acceleration_stop_max_brake(const Car* car, b
     return speed >= 0 ? -profile.max_deceleration : profile.max_deceleration;
 }
 
-MetersPerSecondSquared car_compute_acceleration_adaptive_cruise(const Car* car, const SituationalAwareness* situation, MetersPerSecond speed_target, MetersPerSecond lead_car_distance_in_seconds_target, Meters min_distance,  bool use_preferred_accel_profile) {
+MetersPerSecondSquared car_compute_acceleration_adaptive_cruise(const Car* car, Simulation* sim, const SituationalAwareness* situation, MetersPerSecond speed_target, MetersPerSecond lead_car_distance_in_seconds_target, Meters min_distance, bool use_preferred_accel_profile) {
     if (speed_target < 0) {
         LOG_ERROR("Error: Car %d speed_target must be non-negative. Received: %f", car_get_id(car), speed_target);
         exit(EXIT_FAILURE);
     }
-    const Car* lead_car = situation->lead_vehicle;
+    const Car* lead_car = situation->nearby_vehicles.lead;
     // First, check if there is a lead car
     if (!lead_car) {
         // No lead car, just cruise at the target speed
         return car_compute_acceleration_adjust_speed(car, speed_target, use_preferred_accel_profile);
     } else {
         // There is a lead car, compute the acceleration to maintain a safe following distance
-        MetersPerSecond car_speed = car_get_speed(car);
-        Meters car_position = car_get_lane_progress_meters(car);
+        MetersPerSecond car_speed = situation->speed;
+        Meters car_position = situation->lane_progress_m;
 
         Meters target_distance_from_next_car = fmax(car_speed, 0) * lead_car_distance_in_seconds_target + min_distance;
-        Meters car_lengths_offset = (car_get_length(car) + car_get_length(situation->lead_vehicle)) / 2;
+        Meters car_lengths_offset = (car_get_length(car) + car_get_length(situation->nearby_vehicles.lead)) / 2;
         target_distance_from_next_car += car_lengths_offset;
-        Meters position_target = car_position + situation->distance_to_lead_vehicle - target_distance_from_next_car;
+        Meters distance_to_lead_vehicle;
+        MetersPerSecond speed_lead_vehicle;
+        perceive_lead_vehicle(car, sim, situation, &distance_to_lead_vehicle, &speed_lead_vehicle, NULL);
+        Meters position_target = car_position + distance_to_lead_vehicle - target_distance_from_next_car;
         Meters position_target_overshoot_buffer = target_distance_from_next_car - car_lengths_offset - from_feet(1.0); // let's call being within 1.0 feet of the next car as a crash.
-        MetersPerSecond speed_at_target = car_get_speed(situation->lead_vehicle);
-        return car_compute_acceleration_chase_target(car, position_target, speed_at_target, position_target_overshoot_buffer, speed_target, use_preferred_accel_profile);
+        return car_compute_acceleration_chase_target(car, position_target, speed_lead_vehicle, position_target_overshoot_buffer, speed_target, use_preferred_accel_profile);
     }
 }
 

@@ -35,7 +35,9 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
     awesim_setup(sim, city_width, num_cars, dt, initial_clock_reading, weather, false);
+    sim_set_npc_rogue_factor(sim, 0.05); // Set NPC rogue factor between 0.0 (law-abiding) to 1.0 (maximum rogue)
     // Make a file to store map information
+    sim_get_driving_assistant(sim, 0)->smart_das_driving_style = SMART_DAS_DRIVING_STYLE_NORMAL;
     FILE* map_file = fopen("map_info.txt", "w");
     if (map_file) {
         map_print(sim_get_map(sim), map_file); // Print the map information to the file
@@ -53,6 +55,7 @@ int main(int argc, char* argv[]) {
         LOG_INFO("Running in rendered mode with server at %s:%d", SERVER_IP, SERVER_PORT);
     } else {
         LOG_WARN("Failed to connect to render server, running in headless mode");
+        sim_set_synchronized(sim, false, 1.0);
     }
 
     simulate(sim, seconds_to_simulate); // Run the simulation for the specified duration

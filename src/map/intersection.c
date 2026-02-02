@@ -290,7 +290,7 @@ Intersection* intersection_create_and_form_connections(
                     lane_from->name, road_from->name, lane_to->name, road_to->name);
             Lane* left_turn_lane = quarter_arc_lane_create_from_start_end(map, 
                 lane_from->end_point, lane_to->start_point, DIRECTION_CCW,
-                lane_from->width, speed_limit, grip, DEGRADATIONS_ZERO);
+                lane_from->width, lane_to->speed_limit, grip, DEGRADATIONS_ZERO);
             lane_set_connection_left(lane_from, left_turn_lane);
             lane_set_connection_straight(left_turn_lane, lane_to);
             lane_set_connection_incoming_left(lane_to, left_turn_lane);
@@ -320,7 +320,7 @@ Intersection* intersection_create_and_form_connections(
                 k, lane_from->name, road_from->name, lane_to->name, road_to->name);
             Lane* straight_lane = linear_lane_create_from_start_end(map, 
                 lane_from->end_point, lane_to->start_point,
-                lane_from->width, speed_limit, grip, DEGRADATIONS_ZERO);
+                lane_from->width, lane_to->speed_limit, grip, DEGRADATIONS_ZERO);
 
             lane_set_connection_straight(lane_from, straight_lane);
             lane_set_connection_straight(straight_lane, lane_to);

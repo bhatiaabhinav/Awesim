@@ -6,8 +6,7 @@
 #include "map.h"
 #include "ai.h"
 
-#define MAX_CARS_IN_SIMULATION 1024 // Maximum number of cars in the simulation
-#define MAX_NUM_HAZARDS_EACH_TYPE 1024 // Maximum number of hazards of each type
+#define MAX_CARS_IN_SIMULATION 512 // Maximum number of cars in the simulation
 
 // Time-of-day phase start hours
 #define MORNING_START 6
@@ -77,7 +76,7 @@ typedef struct Simulation {
     Car cars[MAX_CARS_IN_SIMULATION];  // Car list; car[0] = agent
     SituationalAwareness situational_awarenesses[MAX_CARS_IN_SIMULATION]; // Situational awareness for each car
     // Procedure ongoing_procedures[MAX_CARS_IN_SIMULATION]; // Ongoing procedures for each car
-    DrivingAssistant driving_assistants[1]; // Driving assistants for each car (just 1 for now, the agent car)
+    DrivingAssistant driving_assistants[MAX_CARS_IN_SIMULATION]; // Driving assistants for each car
     int num_cars;   // Number of cars in simulation
     Seconds time;   // Time simulated so far
     Seconds dt;     // Simulation engine's time resolution for integration (in seconds)
@@ -85,6 +84,12 @@ typedef struct Simulation {
     bool is_agent_enabled; // Whether car 0 is an agent (true) or an NPC (false). False by default. When true, car 0 is the agent car and must be controlled using car_set_acceleration, car_set_indicator_turn, and car_set_indicator_lane functions outside the sim loop.
     bool is_agent_driving_assistant_enabled; // Whether the agent car has a driving assistant enabled, the simulator will automatically set the agent car's controls using the driving assistant within the sim loop. The driving assistant must be configured periodically outside the sim loop.
     double npc_rogue_factor; // Rogue factor for NPC cars, between 0.0 (completely law-abiding) to 1.0 (maximum rogue). Default is 0.0
+
+    // Perception Noise Parameters
+    double perception_noise_distance_std_dev_percent; // Standard deviation of distance perception noise as a percentage of distance
+    double perception_noise_speed_std_dev; // Standard deviation of speed perception noise in m/s
+    double perception_noise_dropout_probability; // Probability of failing to perceive a vehicle
+    double perception_noise_blind_spot_dropout_base_probability; // Base probability factor for blind spot dropout
 
     bool is_synchronized; // Whether the simulation is synchronized with wall time. If true, the simulation will run in real-time, simulating `simulation_speedup` seconds of simulation time per second of wall time. If false, the simulation will run as fast as possible without synchronization.
     bool is_paused; // Whether the simulation is paused. If true, the simulation will not advance time until it is resumed.

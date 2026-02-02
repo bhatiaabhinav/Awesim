@@ -248,9 +248,9 @@ void render_car(SDL_Renderer* renderer, const Car* car, Map* map, bool paint_id,
     // Draw taillights
     bool is_braking = false;
     bool is_reversing = false;
-    if (car->speed > 0 && car->acceleration < -0.01) {   // a little bit of tolerance since brake lights don't turn on with just a touch of brake
+    if (car->speed > 0 && car->acceleration < -0.1) {   // a little bit of tolerance since brake lights don't turn on with just a touch of brake and small deceleration happens normally even without braking
         is_braking = true; // Braking
-    } else if (car->speed < -0 && car->acceleration > 0.01) {
+    } else if (car->speed < -0 && car->acceleration > 0.1) {
         is_braking = true; // Reversing with brake
     } else if (car->speed < -0.001) {
         is_reversing = true; // reversing. Will render taillights in colors used for reversing in real cars, which is white-yellowish.

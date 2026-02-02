@@ -39,6 +39,10 @@ double vec_distance(Vec2D v1, Vec2D v2) {
     return vec_magnitude(vec_sub(v1, v2));
 }
 
+double vec_distance_manhat(Vec2D v1, Vec2D v2) {
+    return fabs(v1.x - v2.x) + fabs(v1.y - v2.y);
+}
+
 Vec2D vec_normalize(Vec2D v) {
     double mag = vec_magnitude(v);
     if (mag == 0.0)

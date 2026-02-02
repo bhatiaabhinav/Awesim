@@ -30,14 +30,17 @@ uint32_t lcg_get_state();
 // Returns a random double in the range [0.0, 1.0).
 double rand_0_to_1(void);
 
+// Returns a random number from a Gaussian distribution with the given mean and standard deviation.
+double rand_gaussian(double mean, double std_dev);
+
 // Returns a random double in the range [min, max).
 double rand_uniform(double min, double max);
 
 // Returns a random integer in the inclusive range [min, max].
-int rand_int_range(int min, int max);
+int rand_int_range(int min_inclusive, int max_inclusive);
 
 // Returns a random integer in the range [0, max). Assumes max > 0.
-int rand_int(int max);
+int rand_int(int max_exclusive);
 
 // Returns the value clamped between min and max.
 double fclamp(double value, double min, double max);
@@ -86,6 +89,9 @@ double vec_magnitude(Vec2D v);
 
 // Returns the distance between two vectors (points).
 double vec_distance(Vec2D v1, Vec2D v2);
+
+// Returns the manhat distance between two vectors (points).
+double vec_distance_manhat(Vec2D v1, Vec2D v2);
 
 // Returns the unit (normalized) vector.
 Vec2D vec_normalize(Vec2D v);

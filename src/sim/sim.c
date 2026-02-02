@@ -110,6 +110,13 @@ void sim_init(Simulation* sim) {
     sim->is_agent_enabled = false; // Agent car is disabled by default
     sim->is_agent_driving_assistant_enabled = false; // Driving assistant is disabled by default
     sim->npc_rogue_factor = 0.0; // NPC cars are completely law-abiding by default
+
+    // Initialize perception noise parameters with realistic defaults
+    sim->perception_noise_distance_std_dev_percent = 0.05; // 5% distance error
+    sim->perception_noise_speed_std_dev = from_mph(0.5); // 0.5 mph speed error
+    sim->perception_noise_dropout_probability = 0.01; // 1% dropout probability
+    sim->perception_noise_blind_spot_dropout_base_probability = 0.1; // 5% blind spot dropout probabilityelative positions. The base is the multiplier)
+
     sim->is_synchronized = false; // Not synchronized by default
     sim->is_paused = false; // Simulation is not paused by default
     sim->simulation_speedup = 1.0; // Default to real-time speed
@@ -118,14 +125,9 @@ void sim_init(Simulation* sim) {
     sim->is_connected_to_render_server = false; // Not connected to render server by default
     for (int i = 0; i < MAX_CARS_IN_SIMULATION; i++) {
         sim->situational_awarenesses[i].is_valid = false; // Initialize situational awareness for each car
-        // sim->ongoing_procedures[i].type = PROCEDURE_NONE;
-        // sim->ongoing_procedures[i].status = PROCEDURE_STATUS_NONE; // Initialize procedure status
-        // for (int j = 0; j < MAX_PROCEDURE_STATE_VARS; j++) {
-        //     sim->ongoing_procedures[i].state[j] = 0.0; // Initialize procedure state variables
-        // }
-        // driving_assistant_reset_settings(&sim->driving_assistants[i], &sim->cars[i]); // Reset driving assistant settings for each car
+        driving_assistant_reset_settings(&sim->driving_assistants[i], &sim->cars[i]); // Reset driving assistant settings for each car
     }
-    driving_assistant_reset_settings(&sim->driving_assistants[0], &sim->cars[0]);
+    sim_set_npc_rogue_factor(sim, 0.0); // Initialize NPC rogue factor and driving styles
 }
 
 Car* sim_get_new_car(Simulation* self) {
@@ -295,6 +297,29 @@ void sim_set_npc_rogue_factor(Simulation* self, double rogue_factor) {
         }
         self->npc_rogue_factor = rogue_factor;
         LOG_INFO("Set NPC rogue factor to %.2f", rogue_factor);
+
+        int reckless_limit = (int)(self->num_cars * self->npc_rogue_factor);
+        int aggressive_limit = reckless_limit + (int)(self->num_cars * 2.0 * self->npc_rogue_factor);
+        if (aggressive_limit > self->num_cars) aggressive_limit = self->num_cars;
+        
+        int remaining_after_agg = self->num_cars - aggressive_limit;
+        int normal_limit = aggressive_limit + (int)(remaining_after_agg * 0.75);
+
+        for (int i = 0; i < self->num_cars; i++) {
+            if (i < reckless_limit) {
+                LOG_TRACE("Car %d: Assigned driving style RECKLESS\n", i);
+                self->driving_assistants[i].smart_das_driving_style = SMART_DAS_DRIVING_STYLE_RECKLESS;
+            } else if (i < aggressive_limit) {
+                LOG_TRACE("Car %d: Assigned driving style AGGRESSIVE\n", i);
+                self->driving_assistants[i].smart_das_driving_style = SMART_DAS_DRIVING_STYLE_AGGRESSIVE;
+            } else if (i < normal_limit) {
+                LOG_TRACE("Car %d: Assigned driving style NORMAL\n", i);
+                self->driving_assistants[i].smart_das_driving_style = SMART_DAS_DRIVING_STYLE_NORMAL;
+            } else {
+                LOG_TRACE("Car %d: Assigned driving style DEFENSIVE\n", i);
+                self->driving_assistants[i].smart_das_driving_style = SMART_DAS_DRIVING_STYLE_DEFENSIVE;
+            }
+        }
     } else {
         LOG_ERROR("Attempted to set NPC rogue factor on a NULL Simulation pointer");
     }

@@ -7,6 +7,20 @@
 #include <stdint.h>
 #include <string.h>
 
+static const char* nav_action_strings[] = {
+    [NAV_STRAIGHT] = "Continue",
+    [NAV_TURN_LEFT] = "Turn Left",
+    [NAV_KEEP_STRAIGHT] = "Keep Straight",
+    [NAV_TURN_RIGHT] = "Turn Right",
+    [NAV_LANE_CHANGE_LEFT] = "Lane Change Left",
+    [NAV_LANE_CHANGE_RIGHT] = "Lane Change Right",
+    [NAV_MERGE_LEFT] = "Merge Left",
+    [NAV_MERGE_RIGHT] = "Merge Right",
+    [NAV_EXIT_LEFT] = "Exit Left",
+    [NAV_EXIT_RIGHT] = "Exit Right",
+    [NAV_NONE] = "None"
+};
+
 // Render at top right corner of the screen
 void render_minimap(SDL_Renderer* renderer, const MiniMap* minimap) {
     if (!minimap || !minimap->data) return;
@@ -63,28 +77,10 @@ void render_minimap(SDL_Renderer* renderer, const MiniMap* minimap) {
     if (minimap->marked_path && minimap->marked_path->path_exists) {
         PathPlanner* planner = minimap->marked_path;
         
-        // Find first non-straight action, within next 5 actions
-        NavAction next_action = NAV_STRAIGHT;
-        for (int i = 0; i < planner->num_solution_actions && i < 5; ++i) {
-            if (planner->solution_actions[i] != NAV_STRAIGHT) {
-                next_action = planner->solution_actions[i];
-                break;
-            }
-        }
+        // Find first non-trivial action
+        NavAction next_action = path_planner_get_solution_action(planner, true, 0);
         
-        const char* action_str = "Straight";
-        switch (next_action) {
-            case NAV_STRAIGHT: action_str = "Straight"; break;
-            case NAV_TURN_LEFT: action_str = "Turn Left"; break;
-            case NAV_TURN_RIGHT: action_str = "Turn Right"; break;
-            case NAV_LANE_CHANGE_LEFT: action_str = "Lane Change Left"; break;
-            case NAV_LANE_CHANGE_RIGHT: action_str = "Lane Change Right"; break;
-            case NAV_MERGE_LEFT: action_str = "Merge Left"; break;
-            case NAV_MERGE_RIGHT: action_str = "Merge Right"; break;
-            case NAV_EXIT_LEFT: action_str = "Exit Left"; break;
-            case NAV_EXIT_RIGHT: action_str = "Exit Right"; break;
-            default: action_str = "Unknown"; break;
-        }
+        const char* action_str = nav_action_strings[next_action];
         
         char info_text[128];
         if (planner->consider_speed_limits) {

@@ -1,6 +1,7 @@
 #include "sim.h"
 #include "logging.h"
 #include "ai.h"
+#include "bad.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -28,7 +29,33 @@ static void car_handle_movement_or_lane_change(Simulation* sim, Car* car, Lane* 
     car_set_lane(car, new_lane);
 }
 
+// #define DEBUG_COLLISIONS
+
+#ifdef DEBUG_COLLISIONS
+static Collisions* collisions_checker = NULL;
+static Collisions* prev_collisions_checker = NULL;
+static int num_collisions = 0;
+static double collisions_per_minute = 0.0;
+#endif
+
 void sim_integrate(Simulation* self, Seconds time_period) {
+    #ifdef DEBUG_COLLISIONS
+    if (!collisions_checker) {
+        collisions_checker = malloc(sizeof(Collisions));
+        if (!collisions_checker) {
+            LOG_ERROR("Failed to allocate memory for collisions checker");
+            exit(EXIT_FAILURE);
+        }
+    }
+    if (!prev_collisions_checker) {
+        prev_collisions_checker = malloc(sizeof(Collisions));
+        if (!prev_collisions_checker) {
+            LOG_ERROR("Failed to allocate memory for prev collisions checker");
+            exit(EXIT_FAILURE);
+        }
+        collisions_reset(prev_collisions_checker);
+    }
+    #endif
     Seconds t0 = self->time;
     Seconds dt = self->dt;
     Map* map = sim_get_map(self);
@@ -79,6 +106,9 @@ void sim_integrate(Simulation* self, Seconds time_period) {
             CarIndicator lane_change_requested = car_get_request_indicated_lane(car) ? lane_change_intent : INDICATOR_NONE;
             CarIndicator turn_requested = car_get_request_indicated_turn(car) ? turn_intent : INDICATOR_NONE;
             MetersPerSecondSquared a = car_get_acceleration(car);
+            // multiply acceleration by grip of the lane
+            a *= lane->grip;
+            car_set_acceleration(car, a);
             MetersPerSecond v = car_get_speed(car);
             bool lane_changed = false;
             bool turned = false;
@@ -107,9 +137,6 @@ void sim_integrate(Simulation* self, Seconds time_period) {
             Lane* adjacent_left = lane_get_adjacent_left(lane, map);
             Lane* adjacent_right = lane_get_adjacent_right(lane, map);
             if(lane_change_requested == INDICATOR_LEFT && adjacent_left && adjacent_left->direction == lane->direction) {
-                // TODO: ignore lane change if this is an NPC if a collision is possible with another vehicle
-                // TODO: Allow non-NPC to do unsafe lane change (and receive a penalty for that).
-                // TODO: Maybe it is ok to allow to NPCs to do unsafe lane changes as well? So that they can pass the leading vehicle?
                 lane = adjacent_left;
                 lane_change_requested = INDICATOR_NONE; // Reset request after lane change
                 lane_changed = true;
@@ -140,7 +167,6 @@ void sim_integrate(Simulation* self, Seconds time_period) {
                 a = (car->capabilities.top_speed - _v) / dt;
                 v = car->capabilities.top_speed;
                 dv = v - _v;
-                LOG_TRACE("Handling top speed constraint for car %d: adjusted a = %.2f, adjusted v = %.2f", car->id, a, v);
                 car_set_acceleration(car, a);
             }
             // handle case where a car is applying brakes and should not reverse speed sign in the same frame
@@ -226,7 +252,6 @@ void sim_integrate(Simulation* self, Seconds time_period) {
             // ------------ handle exit ---------------------
             // --------------------------------------------
             bool exit_intent = lane_change_requested == INDICATOR_RIGHT;
-            // exit_intent = true; // ! for debugging
             bool exit_available = lane_is_exit_lane_available(lane, progress);
             if (exit_intent && exit_available) {
                 s = (progress - lane->exit_lane_start) * lane->length;
@@ -269,11 +294,60 @@ void sim_integrate(Simulation* self, Seconds time_period) {
             sa->is_valid = false; // Reset situational awareness validity for the next iteration
         }
 
-        if (self->is_agent_enabled && self->is_agent_driving_assistant_enabled) {
-            LOG_TRACE("Agent car %d has a driving assistant enabled. Running post-simulation step for the driving assistant.", self->cars[0].id);
-            DrivingAssistant* das = sim_get_driving_assistant(self, 0);
-            driving_assistant_post_sim_step(das, sim_get_car(self, 0), self);
+        LOG_TRACE("Running post-simulation step for driving assistants of all cars");
+        for (int car_id = 0; car_id < self->num_cars; car_id++) {
+            Car* car = sim_get_car(self, car_id);
+            DrivingAssistant* das = sim_get_driving_assistant(self, car_id);
+            if (das) {
+                driving_assistant_post_sim_step(das, car, self);
+            }
         }
+
+        #ifdef DEBUG_COLLISIONS
+        Collisions* temp = prev_collisions_checker;
+        prev_collisions_checker = collisions_checker;
+        collisions_checker = temp;
+
+        collisions_reset(collisions_checker);
+        // collisions_detect_for_car(collisions_checker, self, 0);
+        collisions_detect_all(collisions_checker, self);
+
+        int new_collisions_this_step = 0;
+        if (collisions_checker->total_collisions > 0) {
+            for (int i = 0; i < self->num_cars; i++) {
+                int count = collisions_get_count_for_car(collisions_checker, i);
+                for (int k = 0; k < count; k++) {
+                    CarId other_id = collisions_get_colliding_car(collisions_checker, i, k);
+                    if (i < other_id) {
+                        if (!collisions_are_colliding(prev_collisions_checker, i, other_id)) {
+                            new_collisions_this_step++;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (new_collisions_this_step > 0) {
+            num_collisions += new_collisions_this_step;
+            double current_sim_time = self->time + dt;
+            if (current_sim_time > 1e-6) {
+                collisions_per_minute = (num_collisions / current_sim_time) * 60.0;
+            } else {
+                collisions_per_minute = 0.0;
+            }
+            LOG_INFO("New collisions detected at time %.2f seconds! Total collisions so far: %d, Collisions per minute: %.4f. Per car per minute: %.6f", current_sim_time, num_collisions, collisions_per_minute, collisions_per_minute / self->num_cars);
+            // for (int car_idx = 0; car_idx < self->num_cars; car_idx++) {
+            //     int num_collisions = collisions_checker->num_collisions_per_car[car_idx];
+            //     if (num_collisions > 0) {
+            //         Car* car = sim_get_car(self, car_idx);
+            //         for (int c = 0; c < num_collisions; c++) {
+            //             CarId other_car_id = collisions_checker->colliding_cars[car_idx][c];
+            //             LOG_INFO(" - Car %d collided with Car %d", car->id, other_car_id);
+            //         }
+            //     }
+            // }
+        }
+        #endif
 
         self->time += dt;
     }

@@ -927,7 +927,7 @@ static void render_scene_internal(RGBCamera* camera, Simulation* sim, void** exc
         // Back
         RGB taillight_color;
         {
-            bool is_braking = (car->speed > 0 && car->acceleration < -0.01) || (car->speed < 0 && car->acceleration > 0.01);
+            bool is_braking = (car->speed > 0 && car->acceleration < -0.1) || (car->speed < 0 && car->acceleration > 0.1);
             taillight_color = is_braking ? CAR_BRAKE_RGB : CAR_TAILLIGHT_RGB;
             colors[4] = CAR_BODY_RGB;
         }

@@ -1,9 +1,10 @@
 #include "ai.h"
 #include "logging.h"
+#include "sim.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
-#include <math.h>
+
 
 CarIndicator turn_sample_possible(const SituationalAwareness* situation) {
     if (situation->is_approaching_dead_end) {
@@ -59,36 +60,70 @@ Meters calculate_hypothetical_position_on_lane_change(const Car* car, const Lane
     return my_hypothetical_target_progress_m;
 }
 
-bool car_is_lane_change_dangerous(Car* car, Simulation* sim, const SituationalAwareness* situation, CarIndicator lane_change_indicator, Seconds time_headway_threshold, Meters buffer) {
+static Seconds compute_time_headway(Meters distance, MetersPerSecond speed) {
+    if (speed <= STOP_SPEED_THRESHOLD) {
+        return INFINITY; // effectively infinite time headway if not moving
+    }
+    return distance / speed;
+}
+
+bool perceive_lead_vehicle(const Car* self, Simulation* sim, const SituationalAwareness* situation, Meters *out_distance, MetersPerSecond* out_speed, MetersPerSecondSquared* out_acceleration) {
+    return car_noisy_perceive_other(self, situation->nearby_vehicles.lead, sim, NULL, NULL, out_speed, out_acceleration, out_distance, NULL, NULL, NULL, NULL, false, 0.0);
+}
+
+bool car_is_lane_change_dangerous(Car* car, Simulation* sim, const SituationalAwareness* situation, CarIndicator lane_change_indicator, Seconds time_headway_threshold, Meters buffer, double dropout_probability_multiplier) {
     const Lane* lane = situation->lane;
     const Lane* lane_target = situation->lane_target_for_indicator[lane_change_indicator];
     if (lane_target == lane) return false;      // no lane change
     if (lane_target == NULL) return true;       // Will fly off the road!
 
-    NearbyVehicle car_ahead = situation->nearby_vehicles.ahead[lane_change_indicator];
-    NearbyVehicle car_behind = situation->nearby_vehicles.behind[lane_change_indicator];
-    NearbyVehicle car_colliding = situation->nearby_vehicles.colliding[lane_change_indicator];
+    const Car* car_ahead = situation->nearby_vehicles.ahead[lane_change_indicator];
+    const Car* car_behind = situation->nearby_vehicles.behind[lane_change_indicator];
+    const Car* car_colliding = situation->nearby_vehicles.colliding[lane_change_indicator];
 
-    if (car_colliding.car) {
-        return true; // there is a car in the target lane that is colliding with us
+    if (car_colliding) {
+        bool noticed = car_noisy_perceive_other(car, car_colliding, sim, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, true, dropout_probability_multiplier);   // may go unnoticed if in blind spot
+        if (noticed) {
+            return true; // there is a car in the target lane that is colliding with us
+        }
     }
-    if (car_ahead.car && (car_ahead.time_headway < time_headway_threshold || car_ahead.distance < buffer)) {
-        // We will be too close to the car ahead
-        return true;
+    if (car_ahead) {
+        Meters hypothetical_position = calculate_hypothetical_position_on_lane_change(car, lane, lane_target, sim_get_map(sim));
+        Meters other_car_position;
+        MetersPerSecond other_car_speed;
+        bool noticed = car_noisy_perceive_other(car, car_ahead, sim, NULL, &other_car_position, &other_car_speed, NULL, NULL, NULL, NULL, NULL, NULL, false, dropout_probability_multiplier);
+        if (noticed) {
+            Meters distance_to_other_car = other_car_position - hypothetical_position - car_get_length(car_ahead) / 2 - car_get_length(car) / 2;
+            Seconds thw = compute_time_headway(fmax(distance_to_other_car, 0.0), situation->speed);
+            if (thw < time_headway_threshold || distance_to_other_car < buffer) {
+                return true;
+            }
+        }
     }
-    if (car_behind.car && (car_behind.time_headway < time_headway_threshold || car_behind.distance < buffer)) {
-        // We will be too close to the car behind
-        return true;
+    if (car_behind) {
+        Meters hypothetical_position = calculate_hypothetical_position_on_lane_change(car, lane, lane_target, sim_get_map(sim));
+        Meters other_car_position;
+        MetersPerSecond other_car_speed;
+        bool noticed = car_noisy_perceive_other(car, car_behind, sim, NULL, &other_car_position, &other_car_speed, NULL, NULL, NULL, NULL, NULL, NULL, true, dropout_probability_multiplier);
+        if (noticed) {
+            Meters distance_to_other_car = hypothetical_position - other_car_position - car_get_length(car_behind) / 2 - car_get_length(car) / 2;
+            Seconds thw = compute_time_headway(fmax(distance_to_other_car, 0.0), fmax(other_car_speed, 0.0));
+            // The car behind will be too close to us
+            if (thw < time_headway_threshold || distance_to_other_car < buffer) {
+                return true;
+            }
+        }
     }
-    if (car->lane_progress_meters - car_get_length(car) / 2 < meters(15.0)) {
+    if (situation->lane_progress_m - car_get_length(car) / 2 < meters(30.0)) {
         // We just entered the lane, do not change lanes immediately.
         return true;
     }
+
     return false;
 }
 
 
-bool car_has_something_to_yield_to_at_intersection(const Car* self, Simulation* sim, const SituationalAwareness* situation, CarIndicator turn_indicator) {
+bool car_has_something_to_yield_to_at_intersection(const Car* self, Simulation* sim, const SituationalAwareness* situation, CarIndicator turn_indicator, Seconds yield_time_headway_threshold, double dropout_probability_multiplier) {
     Map* map = sim_get_map(sim);
 
     const Intersection* intersection = situation->intersection;
@@ -172,121 +207,89 @@ bool car_has_something_to_yield_to_at_intersection(const Car* self, Simulation* 
     for (int i = 0; i < num_intersection_lanes_to_worry_about; i++) {
         Lane* lane = intersection_lanes_to_worry_about[i];
         if (lane && lane_get_num_cars(lane) > 0) {
-            return true;    // have to yield
+            // Check if we perceive any car in the lane
+            bool perceived_any = false;
+            for (int j = 0; j < lane_get_num_cars(lane); j++) {
+                // Determine if we see this car
+                double net_dropout_probability = sim->perception_noise_dropout_probability * dropout_probability_multiplier;
+                bool dropped = net_dropout_probability > 1e-9 && rand_0_to_1() < net_dropout_probability;
+                if (!dropped) {    
+                    perceived_any = true;
+                    break;
+                }
+            }
+            if (perceived_any) {
+                return true;    // have to yield
+            }
         }
     }
 
-    // Go through the leading cars on incoming lanes and if any of them are less than 3 seconds away from their lane end, then we have to yield.
+    // Go through the leading cars on incoming lanes and if any of them are less than yield_time_headway_threshold seconds away from their lane end, then we have to yield.
     for (int i = 0; i < num_incoming_lanes_to_worry_about; i++) {
         Lane* lane = incoming_lanes_to_worry_about[i];
         if (!lane || lane_get_num_cars(lane) == 0) continue;
         Car* c = lane_get_car(lane, sim, 0); // get the leading car
-        if (c) {
-            Meters progress_m = car_get_lane_progress_meters(c);
-            Meters lane_length = lane_get_length(lane);
-            Meters distance_to_end_m = lane_length - progress_m;
-            Meters speed = car_get_speed(c);
-            Seconds time_to_end_s = (speed > STOP_SPEED_THRESHOLD) ? distance_to_end_m / speed : INFINITY;
-            if (time_to_end_s < 3.0) {
-                return true;    // have to yield if coming in fast or has reached the stop line even if slow
-            }
+        Meters car_progress_m;
+        MetersPerSecond car_speed;
+        bool noticed = car_noisy_perceive_other(self, c, sim, NULL, &car_progress_m, &car_speed, NULL, NULL, NULL, NULL, NULL, NULL, false, dropout_probability_multiplier);
+        if (!noticed) {
+            continue;   // did not perceive this car
+        }
+
+        // deadlock avoidance: If we are turning left, we don't need to yield to opposing left turners as our paths don't cross (usually)
+        if (!intersection->is_T_junction && turn_indicator == INDICATOR_LEFT && c->indicator_turn == INDICATOR_LEFT && lane->direction == direction_opposite(my_dir)) {
+            continue;
+        }
+        Meters lane_length = lane_get_length(lane);
+        Meters distance_to_stop_line = lane_length - car_progress_m - car_get_length(c) / 2 - STOP_LINE_BUFFER_METERS;
+
+        if (distance_to_stop_line < meters(1)) {
+            return true;    // have to yield if already too close to the end, irrespective of speed
+        }
+
+        Seconds time_to_end_s = compute_time_headway(distance_to_stop_line, fmax(car_speed, 0.0));
+        if (time_to_end_s < yield_time_headway_threshold) {
+            return true;    // have to yield if coming in fast or has reached the stop line even if slow
         }
     }
     return false;
 }
 
-void nearby_vehicles_flatten(NearbyVehicles* nearby_vehicles, NearbyVehiclesFlattened* flattened, bool include_outgoing_and_incoming_lanes) {
+void nearby_vehicles_flatten(NearbyVehicles* nearby_vehicles, NearbyVehiclesFlattened* flattened) {
     int count = 0;
+
+    // Add lead vehicle
+    const Car* c = nearby_vehicles->lead;
+    CarId id = c ? c->id : ID_NULL;
+    flattened->car_ids[count++] = id;
+
+    // Add following vehicle
+    c = nearby_vehicles->following;
+    id = c ? c->id : ID_NULL;
+    flattened->car_ids[count++] = id;
 
     // Add vehicles from the front lane
     for (int i = 0; i < 3; i++) {
-        NearbyVehicle v = nearby_vehicles->ahead[i];
-        const Car* c = v.car;
-        CarId id = c ? c->id : ID_NULL;
-        flattened->car_ids[count] = id;
-        flattened->distances[count] = v.distance;
-        flattened->time_to_collisions[count] = v.time_to_collision;
-        flattened->time_headways[count] = v.time_headway;
-        count++;
+        c = nearby_vehicles->ahead[i];
+        id = c ? c->id : ID_NULL;
+        flattened->car_ids[count++] = id;
     }
 
     // Add vehicles from the colliding lane
     for (int i = 0; i < 3; i++) {
-        NearbyVehicle v = nearby_vehicles->colliding[i];
-        const Car* c = v.car;
-        CarId id = c ? c->id : ID_NULL;
-        flattened->car_ids[count] = id;
-        flattened->distances[count] = v.distance;
-        flattened->time_to_collisions[count] = v.time_to_collision;
-        flattened->time_headways[count] = v.time_headway;
-        count++;
+        c = nearby_vehicles->colliding[i];
+        id = c ? c->id : ID_NULL;
+        flattened->car_ids[count++] = id;
     }
 
     // Add vehicles from the rear lane
     for (int i = 0; i < 3; i++) {
-        NearbyVehicle v = nearby_vehicles->behind[i];
-        const Car* c = v.car;
-        CarId id = c ? c->id : ID_NULL;
-        flattened->car_ids[count] = id;
-        flattened->distances[count] = v.distance;
-        flattened->time_to_collisions[count] = v.time_to_collision;
-        flattened->time_headways[count] = v.time_headway;
-        count++;
-    }
-
-    // Add vehicles that may turn into same lane when we turn into something at an intersection
-    for (CarIndicator our_turn = 0; our_turn < 3; our_turn++) {
-        for (CarIndicator their_turn = 0; their_turn < 3; their_turn++) {
-            int offset = (our_turn * 3 + their_turn) * 3;
-            for (int i = 0; i < 3; i++) {
-                NearbyVehicle v = nearby_vehicles->turning_into_same_lane[offset + i];
-                const Car* c = v.car;
-                CarId id = c ? c->id : ID_NULL;
-                flattened->car_ids[count] = id;
-                flattened->distances[count] = v.distance;
-                flattened->time_to_collisions[count] = v.time_to_collision;
-                flattened->time_headways[count] = v.time_headway;
-                count++;
-            }
-        }
-    }
-
-    if (include_outgoing_and_incoming_lanes) {
-
-        // Add vehicles from the outgoing lane
-        for (int i = 0; i < 3; i++) {
-            NearbyVehicle v = nearby_vehicles->after_next_turn[i];
-            const Car* c = v.car;
-            CarId id = c ? c->id : ID_NULL;
-            flattened->car_ids[count] = id;
-            flattened->distances[count] = v.distance;
-            flattened->time_to_collisions[count] = v.time_to_collision;
-            flattened->time_headways[count] = v.time_headway;
-            count++;
-        }
-
-        // Add vehicles from the incoming lanes
-        for (int i = 0; i < 3; i++) {
-            NearbyVehicle v = nearby_vehicles->incoming_from_previous_turn[i];
-            const Car* c = v.car;
-            CarId id = c ? c->id : ID_NULL;
-            flattened->car_ids[count] = id;
-            flattened->distances[count] = v.distance;
-            flattened->time_to_collisions[count] = v.time_to_collision;
-            flattened->time_headways[count] = v.time_headway;
-            count++;
-        }
+        c = nearby_vehicles->behind[i];
+        id = c ? c->id : ID_NULL;
+        flattened->car_ids[count++] = id;
     }
     
     flattened->count = count;
-
-    // Fill the rest with ID_NULL if we have less than 42 cars
-    for (; count < 42; count++) {
-        flattened->car_ids[count] = ID_NULL;
-        flattened->distances[count] = INFINITY;
-        flattened->time_to_collisions[count] = INFINITY;
-        flattened->time_headways[count] = INFINITY;
-    }
 }
 
 CarId nearby_vehicles_flattened_get_car_id(const NearbyVehiclesFlattened* flattened, int index) {
@@ -294,27 +297,6 @@ CarId nearby_vehicles_flattened_get_car_id(const NearbyVehiclesFlattened* flatte
         return ID_NULL; // Invalid index
     }
     return flattened->car_ids[index];
-}
-
-Meters nearby_vehicles_flattened_get_distance(const NearbyVehiclesFlattened* flattened, int index) {
-    if (index < 0 || index >= flattened->count) {
-        return INFINITY; // Invalid index
-    }
-    return flattened->distances[index];
-}
-
-Seconds nearby_vehicles_flattened_get_time_to_collision(const NearbyVehiclesFlattened* flattened, int index) {
-    if (index < 0 || index >= flattened->count) {
-        return INFINITY; // Invalid index
-    }
-    return flattened->time_to_collisions[index];
-}
-
-Seconds nearby_vehicles_flattened_get_time_headway(const NearbyVehiclesFlattened* flattened, int index) {
-    if (index < 0 || index >= flattened->count) {
-        return INFINITY; // Invalid index
-    }
-    return flattened->time_headways[index];
 }
 
 int nearby_vehicles_flattened_get_count(const NearbyVehiclesFlattened* flattened) {
