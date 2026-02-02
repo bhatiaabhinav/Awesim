@@ -77,9 +77,10 @@ def gaussian_entropy(logstd: Tensor) -> Tensor:
 def normalize_and_update_stats(mean: Tensor, var: Tensor, count: Tensor, x: Tensor, update_stats: bool):
     """Normalize input tensor x using running mean/var stats, optionally updating the stats in-place."""
     if update_stats:
-        batch_mean = x.mean(dim=0)
-        batch_var = x.var(dim=0, unbiased=False)
-        batch_count = x.shape[0]
+        norm_dims = tuple(range(x.dim() - 1))  # normalize over all but last dim
+        batch_mean = x.mean(dim=norm_dims)
+        batch_var = x.var(dim=norm_dims, unbiased=False)
+        batch_count = int(np.prod(x.shape[:-1]))
         delta = batch_mean - mean
         tot_count = count + batch_count
         new_mean = mean + delta * batch_count / tot_count
@@ -127,8 +128,8 @@ class ActorBase(nn.Module, abc.ABC):
         self.deterministic = deterministic
         self.norm_obs = norm_obs
         self.forward_batch_size = forward_batch_size
-        self.obs_mean = nn.Parameter(torch.zeros(observation_space.shape, dtype=torch.float32, device=device), requires_grad=False)
-        self.obs_var = nn.Parameter(torch.ones(observation_space.shape, dtype=torch.float32, device=device), requires_grad=False)
+        self.obs_mean = nn.Parameter(torch.zeros(observation_space.shape[-1], dtype=torch.float32, device=device), requires_grad=False)
+        self.obs_var = nn.Parameter(torch.ones(observation_space.shape[-1], dtype=torch.float32, device=device), requires_grad=False)
         self.obs_count = nn.Parameter(torch.tensor(0., dtype=torch.float32, device=device), requires_grad=False)
 
     def update_obs_stats(self, x: Tensor) -> None:
@@ -467,8 +468,8 @@ class Critic(nn.Module):
         self.model = model
         self.norm_obs = norm_obs
         self.forward_batch_size = forward_batch_size
-        self.obs_mean = nn.Parameter(torch.zeros(observation_space.shape, dtype=torch.float32, device=device), requires_grad=False)
-        self.obs_var = nn.Parameter(torch.ones(observation_space.shape, dtype=torch.float32, device=device), requires_grad=False)
+        self.obs_mean = nn.Parameter(torch.zeros(observation_space.shape[-1], dtype=torch.float32, device=device), requires_grad=False)
+        self.obs_var = nn.Parameter(torch.ones(observation_space.shape[-1], dtype=torch.float32, device=device), requires_grad=False)
         self.obs_count = nn.Parameter(torch.tensor(0., dtype=torch.float32, device=device), requires_grad=False)
 
     def update_obs_stats(self, x: Tensor) -> None:
