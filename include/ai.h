@@ -217,9 +217,10 @@ struct SituationalAwareness {
     double lane_progress;                   // Progress in the lane (0.0 to 1.0)
     Meters lane_progress_m;                 // Progress along the lane in meters
     MetersPerSecond speed;                  // Perceived speed
-    bool stopped;                           // Is the car stopped (speed < 1e-6 m/s)?
-    bool reversing;                         // Is the car reversing (speed < -1e-6 m/s)?
-    bool going_forward;                     // Is the car going forward (speed > 1e-6 m/s)?
+    bool stopped;                           // Is the car stopped (|speed| < STOP_SPEED_THRESHOLD m/s)?
+    bool reversing;                         // Is the car reversing (speed < -STOP_SPEED_THRESHOLD m/s)?
+    bool going_forward;                     // Is the car going forward (speed > STOP_SPEED_THRESHOLD m/s)?
+    bool almost_stopped;                    // Is the car almost stopped (|speed| < ALMOST_STOP_SPEED_THRESHOLD m/s)?
 
     // Intent and Feasibility
     bool is_turn_possible[3];               // does this lane have a left, straight, right connection?  
@@ -450,12 +451,15 @@ MetersPerSecondSquared control_speed_compute_bounded_accel(ControlError error, M
 #define AEB_DISENGAGE_BEST_CASE_BRAKING_GAP_M 0.9144    // AEB disengages if best-case gap under maximum braking exceeds 0.9144 m (≈ 3 ft)
 #define DRIVING_ASSISTANT_DEFAULT_TIME_HEADWAY 3.0                     // Default time headway to maintain from lead car in follow mode
 #define DRIVING_ASSISTANT_DEFAULT_CAR_DISTANCE_BUFFER 3.0                // Default minimum distance to maintain from lead car in follow mode (in meters)
+#define HUMAN_TIME_TO_PRESS_FULL_PEDAL 0.20          // Time to go from 0 to full brake/gas pedal in seconds once the foot is on the pedal. Going from setting p0 to p1 takes time = |p1 - p0| * HUMAN_TIME_TO_PRESS_FULL_PEDAL
+#define HUMAN_TIME_TO_RELEASE_FULL_PEDAL 0.15        // Time to go from full brake/gas pedal to 0 in seconds once the foot is off the pedal. Going from setting p0 to p1 takes time = |p1 - p0| * HUMAN_TIME_TO_RELEASE_FULL_PEDAL
+#define HUMAN_AVERAGE_DELAY_SWITCHING_PEDALS 0.30      // Time to switch foot from brake to gas or vice versa, in seconds. During this time, neither pedal is pressed.
 
 
 typedef enum SmartDASDrivingStyle {
     SMART_DAS_DRIVING_STYLE_NO_RULES,               // speed max = 50% over speed limit, follow THW = 0.5s + 0.5m. Pass/merge thw = 0.5s + 0.5m. Runs through intersections without stopping or yielding.
-    SMART_DAS_DRIVING_STYLE_RECKLESS,        // speed max = 25%+ over speed limit, follow THW = 1.0s + 1m. Pass/merge thw = 1.0s + 1m. Yield thw = 1.0s (that too only if we can stop comfortably). Rolling stop at stop signs, proceed out of turn, and do not even stop at all if we are the closest to the intersection in terms of time to reach the intersection. Speedup at yellow lights irrespective of distance to intersection. Starts braking for red lights very late and with sudden max capable deceleration (and may overshoot if not enough traction due to slippery road or noise in anticipated braking distance). Does not stop once impossible to stop (in fact, speeds up). Does not stop fully before exercising free-right on red at intersections. This mode may lead to unsafe situations and very likely traffic violations.
-    SMART_DAS_DRIVING_STYLE_AGGRESSIVE,      // speed max = 10%+ over speed limit, follow THW = 2.0s + 2m. Pass/merge thw = 2s + 2m. Yield thw = 2 s (if can stop without exceed max deceleration of preferred acceleration profile). Rolling stop at stop signs, proceed when appropriate. Stops at yellow lights (if can stop comfortably), otherwise speed up. Starts braking for red lights suddenly, but max deceleration of preferred acceleration profile and the stopping trigger is accordingly earlier. Does not stop once impossible to stop. This mode may sometimes lead to unsafe situations and traffic violations.
+    SMART_DAS_DRIVING_STYLE_RECKLESS,        // speed max = 25%+ over speed limit, follow THW = 1.0s + 1m. Pass/merge thw = 1.0s + 1m. Yield thw = 1.0s (that too only if we can stop comfortably). Rolling stop at stop signs, and do not even stop at all if we are the closest to the intersection in terms of time to reach the intersection. Speedup at yellow lights irrespective of distance to intersection. Starts braking for red lights very late and with sudden max capable deceleration (and may overshoot if not enough traction due to slippery road or noise in anticipated braking distance). Does not stop once impossible to stop (in fact, speeds up). May not stop before exercising free-right on red at intersections, treats it as simple yield situation. This mode may lead to unsafe situations and very likely traffic violations.
+    SMART_DAS_DRIVING_STYLE_AGGRESSIVE,      // speed max = 10%+ over speed limit, follow THW = 2.0s + 2m. Pass/merge thw = 2s + 2m. Yield thw = 2 s (if can stop without exceed max deceleration of preferred acceleration profile). Rolling stop at stop signs, proceed when appropriate. Stops at yellow lights (if can stop comfortably), otherwise speed up. Starts braking for red lights suddenly, but max deceleration of preferred acceleration profile and the stopping trigger is accordingly earlier. Does not stop once impossible to stop. Rolling stop before free-right on red. This mode may sometimes lead to unsafe situations and traffic violations.
     SMART_DAS_DRIVING_STYLE_NORMAL,          // speed max = at speed limit, follow THW = 3.0s + 3m. Pass/merge thw = 3s + 3m. Yield thw = 3 s (if can stop at all). Full stop at stop signs, proceeds when it's our turn. Stops at yellow lights if can stop comfortably, otherwise ignore. Starts braking for red lights smoothly with up to max preferred deceleration and the stopping trigger is accordingly earlier. Does not stop once impossible to stop (and just coasts). This mode is generally safe and compliant with traffic rules.
     SMART_DAS_DRIVING_STYLE_DEFENSIVE,       // speed max = 10% below speed limit, follow THW = 4.0s + 4m. Pass/merge thw = 4s + 4m. Yield thw = 4 s (if can stop at all). Does not exercise free-right at intersections. Does not creep while yielding. Otherwise same as NORMAL. This mode is very safe and compliant with traffic rules.
     SMART_DAS_DRIVING_STYLES_COUNT          // Number of driving styles (sentinel)
@@ -599,6 +603,18 @@ int dg_dijkstra_path(const DirectedGraph* g,
                      int* node_array_out,
                      int node_array_len_out,
                      double* cost_out);
+
+typedef double (*DG_Heuristic)(int node, int end, void* user_data);
+
+/* A* shortest path from start to end. */
+int dg_astar_path(const DirectedGraph* g,
+                  int start,
+                  int end,
+                  DG_Heuristic h_func,
+                  void* h_data,
+                  int* node_array_out,
+                  int node_array_len_out,
+                  double* cost_out);
 
 
 

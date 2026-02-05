@@ -21,7 +21,7 @@ typedef enum {
     SKIP_TURN_ALL = 0xF
 } SkipTurnMask;
 
-void create_square_loop(Map* map, Coordinates center, Meters side_length, int num_lanes, Meters lane_width, MetersPerSecond speed_limit, Meters turn_radius, LoopDirection direction, int skip_turns_mask, Meters side_extentions_length, const char* prefix) {
+void create_square_loop(Map* map, Coordinates center, Meters side_length, int num_lanes, Meters lane_width, MetersPerSecond speed_limit, MetersPerSecondSquared turn_speed_limit, Meters turn_radius, LoopDirection direction, int skip_turns_mask, Meters side_extentions_length, const char* prefix) {
     char name_buffer[128];
     Meters half_side = side_length / 2.0;
     double grip = 1.0;
@@ -132,7 +132,7 @@ void create_square_loop(Map* map, Coordinates center, Meters side_length, int nu
     }
 
     // --- Turn Connectors (Corners) ---
-    MetersPerSecond turn_speed = speed_limit * 0.8;
+    MetersPerSecond turn_speed = turn_speed_limit;
     
     Road *tl_inner = NULL, *tr_inner = NULL, *br_inner = NULL, *bl_inner = NULL;
 
@@ -163,16 +163,16 @@ void create_square_loop(Map* map, Coordinates center, Meters side_length, int nu
 
 }
 
-void create_square_loop_two_way(Map* map, Coordinates center, Meters side_length, int num_lanes, Meters lane_width, MetersPerSecond speed_limit, Meters turn_radius, int skip_mask, Meters side_extensions_length, const char* prefix) {
-    create_square_loop(map, center, side_length, num_lanes, lane_width, speed_limit, turn_radius, LOOP_BOTH, skip_mask, side_extensions_length, prefix);
+void create_square_loop_two_way(Map* map, Coordinates center, Meters side_length, int num_lanes, Meters lane_width, MetersPerSecond speed_limit, MetersPerSecondSquared turn_speed_limit, Meters turn_radius, int skip_mask, Meters side_extensions_length, const char* prefix) {
+    create_square_loop(map, center, side_length, num_lanes, lane_width, speed_limit, turn_speed_limit, turn_radius, LOOP_BOTH, skip_mask, side_extensions_length, prefix);
 }
 
-void create_square_loop_ccw(Map* map, Coordinates center, Meters side_length, int num_lanes, Meters lane_width, MetersPerSecond speed_limit, Meters turn_radius, int skip_mask, const char* prefix) {
-    create_square_loop(map, center, side_length, num_lanes, lane_width, speed_limit, turn_radius, LOOP_CCW, skip_mask, 0, prefix);
+void create_square_loop_ccw(Map* map, Coordinates center, Meters side_length, int num_lanes, Meters lane_width, MetersPerSecond speed_limit, MetersPerSecondSquared turn_speed_limit, Meters turn_radius, int skip_mask, const char* prefix) {
+    create_square_loop(map, center, side_length, num_lanes, lane_width, speed_limit, turn_speed_limit, turn_radius, LOOP_CCW, skip_mask, 0, prefix);
 }
 
-void create_square_loop_cw(Map* map, Coordinates center, Meters side_length, int num_lanes, Meters lane_width, MetersPerSecond speed_limit, Meters turn_radius, int skip_mask, const char* prefix) {
-    create_square_loop(map, center, side_length, num_lanes, lane_width, speed_limit, turn_radius, LOOP_CW, skip_mask, 0, prefix);
+void create_square_loop_cw(Map* map, Coordinates center, Meters side_length, int num_lanes, Meters lane_width, MetersPerSecond speed_limit, MetersPerSecondSquared turn_speed_limit, Meters turn_radius, int skip_mask, const char* prefix) {
+    create_square_loop(map, center, side_length, num_lanes, lane_width, speed_limit, turn_speed_limit, turn_radius, LOOP_CW, skip_mask, 0, prefix);
 }
 
 // Helper struct for 2-way road pairs
@@ -314,7 +314,7 @@ void awesim_map_setup(Map* map, Meters city_width) {
 
     
     // Interstate Loop
-    create_square_loop_two_way(map, coordinates_create(0,0), city_width, interstate_num_lanes, lane_width, interstate_speed_limit, interstate_turn_radius, SKIP_TURN_NONE, 0, "I-Loop");    LOG_TRACE("Created interstate square loop at center (0,0) with side length %.2f", city_width);
+    create_square_loop_two_way(map, coordinates_create(0,0), city_width, interstate_num_lanes, lane_width, interstate_speed_limit, interstate_turn_speed_limit, interstate_turn_radius, SKIP_TURN_NONE, 0, "I-Loop");    LOG_TRACE("Created interstate square loop at center (0,0) with side length %.2f", city_width);
 
     // Central arterial state highways (North-South) and S2 (East-West)
     double S1_x_offset = 0.5 * lane_width * state_num_lanes;
@@ -338,12 +338,11 @@ void awesim_map_setup(Map* map, Meters city_width) {
     double outer_loop_num_lanes = 1;
 
     // Inner loop/grid (local roads)
-    create_square_loop_two_way(map, coordinates_create(0, 0), inner_loop_side, inner_loop_num_lanes, lane_width, local_speed_limit, local_turn_radius, SKIP_TURN_ALL, outer_loop_side - inner_loop_side + 2 * (inner_loop_num_lanes * lane_width + local_turn_radius + outer_loop_num_lanes * lane_width + intersection_turn_radius + _LANE_LENGTH_EPSILON), "Inner Loop");
+    create_square_loop_two_way(map, coordinates_create(0, 0), inner_loop_side, inner_loop_num_lanes, lane_width, local_speed_limit, local_turn_speed_limit, local_turn_radius, SKIP_TURN_ALL, outer_loop_side - inner_loop_side + 2 * (inner_loop_num_lanes * lane_width + local_turn_radius + outer_loop_num_lanes * lane_width + intersection_turn_radius + _LANE_LENGTH_EPSILON), "Inner Loop");
     // Middle loop/grid (state highways)
-    create_square_loop_two_way(map, coordinates_create(0, 0), middle_loop_side, middle_loop_num_lanes, lane_width, state_speed_limit, state_turn_radius, SKIP_TURN_ALL, city_width - middle_loop_side + 2 * (middle_loop_num_lanes * lane_width + state_turn_radius + interstate_num_lanes * lane_width + intersection_turn_radius + _LANE_LENGTH_EPSILON), "Middle Loop");
+    create_square_loop_two_way(map, coordinates_create(0, 0), middle_loop_side, middle_loop_num_lanes, lane_width, state_speed_limit, state_turn_speed_limit, state_turn_radius, SKIP_TURN_ALL, city_width - middle_loop_side + 2 * (middle_loop_num_lanes * lane_width + state_turn_radius + interstate_num_lanes * lane_width + intersection_turn_radius + _LANE_LENGTH_EPSILON), "Middle Loop");
     // Outer loop (local roads)
-    create_square_loop_two_way(map, coordinates_create(0, 0), outer_loop_side, outer_loop_num_lanes, lane_width, local_speed_limit, local_turn_radius, SKIP_TURN_NONE, 0, "Outer Loop");
-
+    create_square_loop_two_way(map, coordinates_create(0, 0), outer_loop_side, outer_loop_num_lanes, lane_width, local_speed_limit, local_turn_speed_limit, local_turn_radius, SKIP_TURN_NONE, 0, "Outer Loop");
     create_all_intersections_from_crossing_roads(map, intersection_turn_radius, true);
 }
 

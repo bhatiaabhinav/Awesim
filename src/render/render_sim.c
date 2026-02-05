@@ -260,7 +260,7 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, bool draw_lanes, bool d
         Car* highlighted_car = sim_get_car(sim, HIGHLIGHTED_CARS[0]);
         if (highlighted_car_camera == NULL) {
             // Create a camera with 128x128 resolution, 90 degree fov, 500 meter max depth
-            highlighted_car_camera = rgbcam_malloc((Coordinates){0,0}, 1.0, 0.0, 256, 256, from_degrees(90), meters(500.0));
+            highlighted_car_camera = rgbcam_malloc((Coordinates){0,0}, 1.0, 0.0, 128, 128, from_degrees(90), meters(500.0));
             rgbcam_set_aa_level(highlighted_car_camera, 2);  // 2x anti-aliasing
         }
         if (highlighted_car && highlighted_car_camera) {
@@ -336,7 +336,7 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, bool draw_lanes, bool d
     if (draw_minimap && highlighted_car) {
         Car* highlighted_car = sim_get_car(sim, HIGHLIGHTED_CARS[0]);
         if (highlighted_car_minimap == NULL) {
-            highlighted_car_minimap = minimap_malloc(128, 128, map);
+            highlighted_car_minimap = minimap_malloc(256, 256, map);
             highlighted_car_path_planner = path_planner_create(sim_get_map(sim), false);
         }
         

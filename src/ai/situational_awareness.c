@@ -185,6 +185,7 @@ void situational_awareness_build(Simulation* sim, CarId car_id) {
     situation->stopped = (fabs(car_speed) < STOP_SPEED_THRESHOLD);
     situation->reversing = (car_speed < -STOP_SPEED_THRESHOLD);
     situation->going_forward = (car_speed > STOP_SPEED_THRESHOLD);
+    situation->almost_stopped = (fabs(car_speed) < ALMOST_STOP_SPEED_THRESHOLD);
     situation->speed = car_speed;
     Meters lane_length = lane_get_length(lane);
     Direction lane_dir = lane->direction;

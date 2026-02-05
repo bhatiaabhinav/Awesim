@@ -99,6 +99,7 @@ void sim_free(Simulation* self) {
     }
 }
 
+// #define NO_PERCEPTION_NOISE
 
 void sim_init(Simulation* sim) {
     map_init(&sim->map);
@@ -116,7 +117,14 @@ void sim_init(Simulation* sim) {
     sim->perception_noise_distance_std_dev_percent = 0.05; // 5% distance error
     sim->perception_noise_speed_std_dev = from_mph(0.5); // 0.5 mph speed error
     sim->perception_noise_dropout_probability = 0.01; // 1% dropout probability
-    sim->perception_noise_blind_spot_dropout_base_probability = 0.1; // 5% blind spot dropout probabilityelative positions. The base is the multiplier)
+    sim->perception_noise_blind_spot_dropout_base_probability = 0.1; // 5% blind spot dropout probabilityelative 
+    
+    #ifdef NO_PERCEPTION_NOISE
+    sim->perception_noise_distance_std_dev_percent = 0.0; // 5% distance error
+    sim->perception_noise_speed_std_dev = from_mph(0.0); // 0.5 mph speed error
+    sim->perception_noise_dropout_probability = 0.0; // 1% dropout probability
+    sim->perception_noise_blind_spot_dropout_base_probability = 0.0; // 5% blind spot dropout probabilityelative positions. The base is the multiplier)
+    #endif
 
     sim->is_synchronized = false; // Not synchronized by default
     sim->is_paused = false; // Simulation is not paused by default

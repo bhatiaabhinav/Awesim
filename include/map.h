@@ -17,9 +17,10 @@
 #define MINOR_RED_EXTENSION 2
 #define ID_NULL -1
 #define LANE_LENGTH_EPSILON 0.1
-#define STOP_LINE_BUFFER_METERS 1.524   // Stop line distance from end of lane in meters
-#define STOP_SPEED_THRESHOLD 1e-3       // 1 mm/s considered as stopped
-#define CREEP_SPEED 2.2352              // 5 mph in m/s
+#define STOP_LINE_BUFFER_METERS 1.524       // Stop line distance from end of lane in meters
+#define STOP_SPEED_THRESHOLD 1e-3           // 1 mm/s considered as stopped
+#define ALMOST_STOP_SPEED_THRESHOLD 0.044704 // 0.1 mph in m/s considered as almost stopped
+#define CREEP_SPEED 2.2352                // 5 mph in m/s
 
 // Typedef Definitions
 

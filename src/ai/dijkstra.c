@@ -90,7 +90,8 @@ int dg_add_edge(DirectedGraph* g, int from, int to) {
 
 typedef struct {
     int node;
-    double dist;
+    double f_cost; // Priority (f = g + h)
+    double g_cost; // Actual cost (g)
 } DG_HeapItem;
 
 
@@ -129,7 +130,7 @@ static void dg_heap_swap(DG_HeapItem* x, DG_HeapItem* y) {
     *y = t;
 }
 
-static int dg_heap_push(DG_MinHeap* h, int node, double dist) {
+static int dg_heap_push(DG_MinHeap* h, int node, double f_cost, double g_cost) {
     int i, p;
 
     if (!h) return 0;
@@ -144,11 +145,12 @@ static int dg_heap_push(DG_MinHeap* h, int node, double dist) {
 
     i = h->size++;
     h->a[i].node = node;
-    h->a[i].dist = dist;
+    h->a[i].f_cost = f_cost;
+    h->a[i].g_cost = g_cost;
 
     while (i > 0) {
         p = (i - 1) / 2;
-        if (h->a[p].dist <= h->a[i].dist) break;
+        if (h->a[p].f_cost <= h->a[i].f_cost) break;
         dg_heap_swap(&h->a[p], &h->a[i]);
         i = p;
     }
@@ -172,8 +174,8 @@ static DG_HeapItem dg_heap_pop(DG_MinHeap* h) {
         int r = 2 * i + 2;
         int m = i;
 
-        if (l < h->size && h->a[l].dist < h->a[m].dist) m = l;
-        if (r < h->size && h->a[r].dist < h->a[m].dist) m = r;
+        if (l < h->size && h->a[l].f_cost < h->a[m].f_cost) m = l;
+        if (r < h->size && h->a[r].f_cost < h->a[m].f_cost) m = r;
         if (m == i) break;
 
         dg_heap_swap(&h->a[i], &h->a[m]);
@@ -182,16 +184,18 @@ static DG_HeapItem dg_heap_pop(DG_MinHeap* h) {
     return top;
 }
 
-/* ---------- Dijkstra Path ---------- */
+/* ---------- AI / Dijkstra Path ---------- */
 
-int dg_dijkstra_path(const DirectedGraph* g,
+int dg_astar_path(const DirectedGraph* g,
                      int start,
                      int end,
+                     DG_Heuristic h_func,
+                     void* h_data,
                      int* node_array_out,
                      int node_array_len_out,
                      double* cost_out)
 {
-    double* dist;
+    double* dist; // Stores g_cost
     int* prev;
     unsigned char* visited;
     DG_MinHeap* pq;
@@ -229,7 +233,10 @@ int dg_dijkstra_path(const DirectedGraph* g,
         free(visited);
         return -1;
     }
-    if (!dg_heap_push(pq, start, 0.0)) {
+    
+    // Initial push with f = h(start, end)
+    double start_h = (h_func) ? h_func(start, end, h_data) : 0.0;
+    if (!dg_heap_push(pq, start, start_h, 0.0)) {
         dg_heap_free(pq);
         free(dist);
         free(prev);
@@ -241,11 +248,11 @@ int dg_dijkstra_path(const DirectedGraph* g,
         DG_HeapItem it = dg_heap_pop(pq);
         int u = it.node;
 
-        /* stale entry? (avoid == on doubles; allow tiny drift) */
+        /* stale entry? Check against g_cost in dist array */
         {
             double du = dist[u];
             double tol = EPS * (1.0 + fabs(du));
-            if (fabs(it.dist - du) > tol) continue;
+            if (it.g_cost > du + tol) continue;
         }
 
         if (visited[u]) continue;
@@ -263,11 +270,15 @@ int dg_dijkstra_path(const DirectedGraph* g,
                 if (dist[u] >= INF) continue;
 
                 {
-                    double nd = dist[u] + w;
-                    if (nd < dist[v]) {
-                        dist[v] = nd;
+                    double new_g = dist[u] + w;
+                    if (new_g < dist[v]) {
+                        dist[v] = new_g;
                         prev[v] = u;
-                        if (!dg_heap_push(pq, v, nd)) {
+                        
+                        double h_val = (h_func) ? h_func(v, end, h_data) : 0.0;
+                        double new_f = new_g + h_val;
+
+                        if (!dg_heap_push(pq, v, new_f, new_g)) {
                             dg_heap_free(pq);
                             free(dist);
                             free(prev);
@@ -335,4 +346,15 @@ int dg_dijkstra_path(const DirectedGraph* g,
         return path_len;
     }
 }
+
+int dg_dijkstra_path(const DirectedGraph* g,
+                     int start,
+                     int end,
+                     int* node_array_out,
+                     int node_array_len_out,
+                     double* cost_out) {
+    // Dijkstra is just A* with heuristic = 0
+    return dg_astar_path(g, start, end, NULL, NULL, node_array_out, node_array_len_out, cost_out);
+}
+
 

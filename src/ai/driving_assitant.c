@@ -176,6 +176,7 @@ static bool driving_assistant_smart_das_should_engage_intersection_approach(Driv
     }
     if (situation->is_an_intersection_upcoming) {
         Meters distance_to_stop_line = situation->distance_to_end_of_lane_from_leading_edge - STOP_LINE_BUFFER_METERS;
+        distance_to_stop_line += situation->speed * 1; // account for reaction delay of up to 1 second
         // check if we need to engage now. Are we within the appropriate distance to start slowing down for stopping at intersection? braking distance situation->braking_distance.preferred_smooth, situation->braking_distance.preferred, situation->braking_distance.capable depending on SmartDASDrivingStyle.
         Meters braking_distances[SMART_DAS_DRIVING_STYLES_COUNT] = {
             [SMART_DAS_DRIVING_STYLE_RECKLESS] = situation->braking_distance.capable,
@@ -250,9 +251,6 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
                 should_speed_up_to_make_light = false;
                 break;
             case TRAFFIC_LIGHT_GREEN_YIELD:
-            if (car->id == 131) {
-                // printf("Car %d: At intersection with GREEN-YIELD light. Distance to stop line: %.2f meters\n", car->id, distance_to_stop_line);
-            }
                 should_brake_for_full_stop = false;
                 should_brake_for_rolling_stop = false;
                 should_brake_for_yield = is_ok_with_yieldings[das->smart_das_driving_style] && car_has_something_to_yield_to_at_intersection(car, sim, situation, das->turn_intent, yield_thw, sim_get_dt(sim));
@@ -282,7 +280,10 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
                 // e.g., free right. first stop at stop line, then yield once you are beyond it
                 bool yield_mode = distance_to_stop_line <= meters(0.1); // within 10 cm of stop line
                 if (das->smart_das_driving_style == SMART_DAS_DRIVING_STYLE_DEFENSIVE) {
-                    yield_mode = false; // defensive does not exercise red-yield and considers it as simple red
+                    yield_mode = false; // defensive treats red-yield as red
+                }
+                if (das->smart_das_driving_style == SMART_DAS_DRIVING_STYLE_RECKLESS) {
+                    yield_mode = true; // reckless treats red-yield as yield
                 }
                 if (yield_mode) {
                     should_brake_for_full_stop = false;
@@ -292,9 +293,9 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
                     should_brake_for_full_stop = true;
                     should_brake_for_rolling_stop = false; 
                     should_brake_for_yield = false;
-                    if (das->smart_das_driving_style == SMART_DAS_DRIVING_STYLE_RECKLESS) {
+                    if (das->smart_das_driving_style <= SMART_DAS_DRIVING_STYLE_AGGRESSIVE) {
                         should_brake_for_full_stop = false;
-                        should_brake_for_rolling_stop = true; // reckless does a rolling stop on red-yield
+                        should_brake_for_rolling_stop = true; // rolling stop for aggressive
                     }
                 }
                 should_speed_up_to_make_light = false;
@@ -311,17 +312,11 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
                         // even those doing rolling stops should come to full stop when it's not clear
                         should_brake_for_full_stop = true;
                     } else {
-                        if (das->smart_das_driving_style == SMART_DAS_DRIVING_STYLE_RECKLESS) {
-                            // reckless did rolling stop at stop line, now, may stop fully if not clear and go if clear even if not their turn
+                        if (situation->is_my_turn_at_stop_sign_fcfs) {
                             should_brake_for_full_stop = false;
                         } else {
-                            if (situation->is_my_turn_at_stop_sign_fcfs) {
-                                should_brake_for_full_stop = false;
-                            } else {
-                                // even those doing rolling stops should come to full stop when it's not their turn or not clear
-                                should_brake_for_full_stop = true;
-                                
-                            }
+                            // even those doing rolling stops should now come to full stop when it's not their turn or not clear
+                            should_brake_for_full_stop = true;
                         }
                     }
                 } else {
@@ -367,7 +362,7 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
                 break;
             }
             default:
-                should_brake_for_full_stop = true;  // default to safe option for unknown lights
+                should_brake_for_full_stop = true;  // default to safe option for unknown/not-yet-implemented lights
                 should_brake_for_rolling_stop = false;
                 should_brake_for_yield = false;
                 should_speed_up_to_make_light = false;
@@ -432,25 +427,13 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
                 // accel_to_stop = 0.5 * accel_to_stop + 0.5 * car_get_acceleration(car); // smooth it a bit
                 bool stop_right_away = (situation->distance_to_end_of_lane_from_leading_edge < 0.2 && situation->going_forward) || (accel_to_stop < 0 && (situation->stopped || situation->reversing));
                 if (stop_right_away) {
-                    accel_to_stop = car_compute_acceleration_stop_max_brake(car, das->use_preferred_accel_profile);
+                    accel_to_stop = -situation->speed / sim_get_dt(sim); // just enough to stop right away
+                    accel_to_stop = fclamp(accel_to_stop, -car->capabilities.accel_profile.max_deceleration, car->capabilities.accel_profile.max_acceleration);
                 }
                 accel = accel_to_stop; // take the minimum of the two accelerations
             } else if (should_speed_up_to_make_light) {
                 // compute acceleration to speed up to make the light
                 das->speed_target = das->speed_target + from_mph(10);  // speed up by 10 mph to try to make the light
-            } else {
-                // we are approaching, but no need to stop or yield. Best to start adjusting speed to the speed limit of the intersection-lane you are going into if you are approaching end of lane.
-                if (situation->is_approaching_end_of_lane) {
-                    MetersPerSecond next_lane_speed_limit = lane_get_speed_limit(situation->lane_next_after_turn[das->turn_intent]);
-                    MetersPerSecond next_lane_speed_targets[SMART_DAS_DRIVING_STYLES_COUNT] = {
-                        [SMART_DAS_DRIVING_STYLE_NO_RULES] = 1.5 * next_lane_speed_limit,
-                        [SMART_DAS_DRIVING_STYLE_RECKLESS] = 1.25 * next_lane_speed_limit,
-                        [SMART_DAS_DRIVING_STYLE_AGGRESSIVE] = 1.1 * next_lane_speed_limit,
-                        [SMART_DAS_DRIVING_STYLE_NORMAL] = next_lane_speed_limit,
-                        [SMART_DAS_DRIVING_STYLE_DEFENSIVE] = 0.9 * next_lane_speed_limit
-                    };
-                    das->speed_target = next_lane_speed_targets[das->smart_das_driving_style];
-                }
             }
         }
     } else {
@@ -458,6 +441,49 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
     }
 
     return accel;
+}
+
+static MetersPerSecond determine_preferred_speed_limit(Map* map, const Lane* lane, SmartDASDrivingStyle style) {
+    MetersPerSecond lane_speed_limit = lane_get_speed_limit(lane);
+    Road* road = lane_is_at_intersection(lane) ? NULL : map_get_road(map, lane->road_id);
+
+    if (road) {
+        int num_lanes = road_get_num_lanes(road);
+        // on two or three lane roads, increase speed limit of passing lane by 5 mph
+        if ((num_lanes == 2 || num_lanes == 3) && lane == road_get_leftmost_lane(road, map)) {
+            lane_speed_limit += from_mph(5);
+        }
+        // on three lanes road, decrease speed limit of rightmost lane by 5 mph
+        if (num_lanes == 3 && lane == road_get_rightmost_lane(road, map)) {
+            lane_speed_limit -= from_mph(5);
+        }
+
+        // on 4 lane roads, increase speed limit of leftmost by 10 mph, 2nd from left by 5 mph, and decrease of rightmost lane by 5.
+        if (num_lanes == 4) {
+            if (lane == road_get_leftmost_lane(road, map)) {
+                lane_speed_limit += from_mph(10);
+            } else if (road_find_index_of_lane(road, lane->id) == 2) {
+                lane_speed_limit += from_mph(5);
+            } else if (lane == road_get_rightmost_lane(road, map)) {
+                lane_speed_limit -= from_mph(5);
+            }
+        }
+
+        // for more than 4 lanes, no adjustments for now. raise warning
+        if (num_lanes > 4) {
+            LOG_WARN("Smart DAS: No speed limit adjustments for roads with more than 4 lanes. Road ID: %d, Num Lanes: %d", road->id, num_lanes);
+        }
+    }
+
+    MetersPerSecond speed_limits[] = {
+        [SMART_DAS_DRIVING_STYLE_NO_RULES] = 1.5 * lane_speed_limit,
+        [SMART_DAS_DRIVING_STYLE_RECKLESS] = 1.25 * lane_speed_limit,
+        [SMART_DAS_DRIVING_STYLE_AGGRESSIVE] = 1.1 * lane_speed_limit,
+        [SMART_DAS_DRIVING_STYLE_NORMAL] = lane_speed_limit,
+        [SMART_DAS_DRIVING_STYLE_DEFENSIVE] = 0.9 * lane_speed_limit
+    };
+
+    return speed_limits[style];
 }
 
 
@@ -480,49 +506,11 @@ void driving_assistant_smart_update_das_variables(DrivingAssistant* das, Car* ca
             [SMART_DAS_DRIVING_STYLE_DEFENSIVE] = 4.0
         };
 
-        MetersPerSecond lane_speed_limit = lane_get_speed_limit(sa->lane);
-
-        if (sa->road) {
-            int num_lanes = road_get_num_lanes(sa->road);
-            // on two or three lane roads, increase speed limit of passing lane by 5 mph
-            if ((num_lanes == 2 || num_lanes == 3) && sa->is_on_leftmost_lane) {
-                lane_speed_limit += from_mph(5);
-            }
-            // on three lanes road, decrease speed limit of rightmost lane by 5 mph
-            if (num_lanes == 3 && sa->is_on_rightmost_lane) {
-                lane_speed_limit -= from_mph(5);
-            }
-
-            // on 4 lane roads, increase speed limit of leftmost by 10 mph, 2nd from left by 5 mph, and decrease of rightmost lane by 5.
-            if (num_lanes == 4) {
-                if (sa->is_on_leftmost_lane) {
-                    lane_speed_limit += from_mph(10);
-                } else if (road_find_index_of_lane(sa->road, sa->lane->id) == 2) {
-                    lane_speed_limit += from_mph(5);
-                } else if (sa->is_on_rightmost_lane) {
-                    lane_speed_limit -= from_mph(5);
-                }
-            }
-
-            // for more than 4 lanes, no adjustments for now. raise warning
-            if (num_lanes > 4) {
-                LOG_WARN("Smart DAS: No speed limit adjustments for roads with more than 4 lanes. Road ID: %d, Num Lanes: %d", sa->road->id, num_lanes);
-            }
-        }
-
-        MetersPerSecond speed_limits[] = {
-            [SMART_DAS_DRIVING_STYLE_NO_RULES] = 1.5 * lane_speed_limit,
-            [SMART_DAS_DRIVING_STYLE_RECKLESS] = 1.25 * lane_speed_limit,
-            [SMART_DAS_DRIVING_STYLE_AGGRESSIVE] = 1.1 * lane_speed_limit,
-            [SMART_DAS_DRIVING_STYLE_NORMAL] = lane_speed_limit,
-            [SMART_DAS_DRIVING_STYLE_DEFENSIVE] = 0.9 * lane_speed_limit
-        };
-
         // set the THW and speed target based on driving style
+        das->speed_target = determine_preferred_speed_limit(sim_get_map(sim), sa->lane, das->smart_das_driving_style);
+        das->speed_target = fmin(das->speed_target, car->capabilities.top_speed); // cap speed target to car's max speed
         das->thw = thws[das->smart_das_driving_style];
         das->buffer = buffers[das->smart_das_driving_style];
-        das->speed_target = speed_limits[das->smart_das_driving_style];
-        das->speed_target = fmin(das->speed_target, car->capabilities.top_speed); // cap speed target to car's max speed
         das->use_linear_speed_control = das->smart_das_driving_style <= SMART_DAS_DRIVING_STYLE_RECKLESS; // reckless uses linear speed control instead of exponential error decay control as it likes more abrupt changes
         das->use_preferred_accel_profile = das->smart_das_driving_style >= SMART_DAS_DRIVING_STYLE_NORMAL; // normal and defensive use preferred accel profile (which is smoother than capable), while reckless and aggressive use full capable profile
         das->merge_assistance = true; // smart DAS always has merge assistance on
@@ -584,25 +572,21 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
 
     das->speed_target = fmin(das->speed_target, car->capabilities.top_speed); // cap speed target to car's max speed
 
-    MetersPerSecondSquared accel_prev = car_get_acceleration(car);
-    Seconds dt = sim_get_dt(sim);
-
-    // ------------- Follow lead vehicle ------------------------
-    if (das->follow_assistance) {
-        Meters buffer = das->buffer;
-        MetersPerSecondSquared accel_cruise = car_compute_acceleration_adaptive_cruise(car, sim, sa, fmax(das->speed_target, 0), das->thw, buffer, das->use_preferred_accel_profile); // follow next car or adjust speed. Doesn't work for negative speed target.
-        double step_size = 0.99 * dt; // smoothing step size
-        accel_cruise = step_size * accel_cruise + (1 - step_size) * accel_prev; // smooth it a bit. As a bonus, it simulates driver reaction time delay.
-        // and once you stop, no reversal unless lead car is reversing too
-        if (sa->stopped && accel_cruise < 0 && (!sa->nearby_vehicles.lead || sa->nearby_vehicles.lead->speed > -STOP_SPEED_THRESHOLD)) {
-            accel_cruise = 0; // prevent reversing
-        } 
-        accel = fmin(accel, accel_cruise);
-    }
-
-    // ----------- Speed adjustment ------------------------
+    // ----------- Speed adjustment (general) ------------------------
     MetersPerSecondSquared accel_speed_adjust = das->use_linear_speed_control ? car_compute_acceleration_adjust_speed_linear(car, das->speed_target, das->use_preferred_accel_profile) : car_compute_acceleration_adjust_speed(car, das->speed_target, das->use_preferred_accel_profile); // works for negative speed targets as well
     accel = fmin(accel, accel_speed_adjust);
+
+    // ----------- Speed adjustment (approaching end of lane to a lower speed limit lane) ------------
+    const Lane* next_lane = sa->lane_next_after_turn[das->turn_intent];
+    if (next_lane) {
+        MetersPerSecond next_speed_target = determine_preferred_speed_limit(sim_get_map(sim), next_lane, das->smart_das_driving_style);
+        if (next_speed_target < sa->speed) {
+            Meters position_target = sa->lane_progress_m + sa->distance_to_end_of_lane;
+            MetersPerSecond next_speed_target = determine_preferred_speed_limit(sim_get_map(sim), next_lane, das->smart_das_driving_style);
+            MetersPerSecondSquared accel_approach_end_of_lane = car_compute_acceleration_chase_target(car, position_target, next_speed_target, meters(1), sa->lane->speed_limit, das->use_preferred_accel_profile);
+            accel = fmin(accel, accel_approach_end_of_lane);
+        }
+    }
 
     // ----------- Handle stop at dead end at the last moment with full brake ------------------------
     if (sa->speed > 0 && sa->is_approaching_dead_end && sa->braking_distance.capable >= sa->distance_to_end_of_lane_from_leading_edge - STOP_LINE_BUFFER_METERS) {
@@ -620,39 +604,135 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
         accel = fmin(accel, accel_stop);
     }
 
-    // Seconds dt = sim_get_dt(sim);
+    // ------------- Follow lead vehicle ------------------------
+    if (das->follow_assistance && sa->nearby_vehicles.lead) {
+        Meters distance_to_lead;
+        perceive_lead_vehicle(car, sim, sa, &distance_to_lead, NULL, NULL);
+        distance_to_lead -= (car_get_length(car) + car_get_length(sa->nearby_vehicles.lead)) / 2.0; // bumper to bumper distance
+        Meters buffer = fclamp(distance_to_lead, das->buffer / 2, das->buffer); // if already within das->buffer due to noise etc., do not reverse and let the distance be, but still reverse if way too close.
+        MetersPerSecondSquared accel_cruise = car_compute_acceleration_adaptive_cruise(car, sim, sa, fmax(das->speed_target, 0), das->thw, buffer, das->use_preferred_accel_profile); // follow next car
+        accel = fmin(accel, accel_cruise);
+    }
 
+    // Account for human-like delay in adjusting acceleration (gas/brake pedal presses):
 
+    Seconds dt = sim_get_dt(sim);
+    MetersPerSecondSquared accel_prev = car_get_acceleration(car);
 
+    bool in_forward_gear = sa->going_forward;
+    bool in_reverse_gear = sa->reversing;
+    bool stopped = sa->stopped;
+    bool gas_pedal_pressed = ((in_forward_gear || stopped) && accel_prev > 1e-6) || (in_reverse_gear && accel_prev < -1e-6);
+    bool brake_pedal_pressed = ((in_forward_gear || stopped) && accel_prev < -1e-6) || (in_reverse_gear && accel_prev > 1e-6);
+    bool no_pedals_pressed = !gas_pedal_pressed && !brake_pedal_pressed;
+    bool trying_gas_pedal = ((in_forward_gear || stopped) && accel > 1e-6) || ((in_reverse_gear || stopped) && accel < -1e-6);
+    bool trying_brake_pedal = (in_forward_gear && accel < -1e-6) || (in_reverse_gear && accel > 1e-6);
+    bool trying_no_pedals = !trying_gas_pedal && !trying_brake_pedal;
 
-    // smooth acceleration changes to prevent jerky behavior
-    // MetersPerSecondSquared accel_prev = car_get_acceleration(car);
-    // // if (accel * accel_prev < 0) {
-    // //     accel = 0; // changing pedals, go through zero first
-    // // } else {
-    // //     // same direction, limit change rate
-        // MetersPerSecondSquared accel_change_mag = fabs(accel - accel_prev);
-        
-        // if (accel_change_mag / dt > car->capabilities.accel_profile.max_acceleration) {
-        //     // smooth and clip it:
-        //     if (accel > accel_prev) {
-        //         accel = accel_prev + car->capabilities.accel_profile.max_acceleration * dt;
-        //     } else {
-        //         accel = accel_prev - car->capabilities.accel_profile.max_acceleration * dt;
-        //     }
-        //     // accel = 0.5 * (accel + accel_prev); // average to smoothen further
-        // }
-    // }
-    // accel = 0.5 * (accel + accel_prev);
+    MetersPerSecondSquared pressing_gas_harder_max_change = car->capabilities.accel_profile.max_acceleration * dt / HUMAN_TIME_TO_PRESS_FULL_PEDAL;
+    MetersPerSecondSquared releasing_gas_max_change = car->capabilities.accel_profile.max_acceleration * dt / HUMAN_TIME_TO_RELEASE_FULL_PEDAL;
+    MetersPerSecondSquared pressing_brake_harder_max_change = car->capabilities.accel_profile.max_deceleration * dt / HUMAN_TIME_TO_PRESS_FULL_PEDAL;
+    MetersPerSecondSquared releasing_brake_max_change = car->capabilities.accel_profile.max_deceleration * dt / HUMAN_TIME_TO_RELEASE_FULL_PEDAL;
 
-    // once you stop, never reverse, unless speed target is negative, and don't do micro adjustments either.
-    // if (car_get_speed(car) <= 1e-9 && das->speed_target >= 0) {
-    //     if (accel < 0) {
-    //         accel = 0; // prevent reversing
-    //     } else if (accel < 0.1 * car->capabilities.accel_profile.max_acceleration) {
-    //         accel = 0; // prevent micro adjustments
-    //     }
-    // }
+    // consider all combinations
+    if (in_forward_gear) {
+        if (gas_pedal_pressed) {
+            if (trying_gas_pedal) {
+                double max_change = accel > accel_prev ? pressing_gas_harder_max_change : releasing_gas_max_change;
+                accel = accel_prev + fclamp(accel - accel_prev, -max_change, max_change);
+            } else if (trying_brake_pedal || trying_no_pedals) {
+                // first, we need to go through no pedals and set accel to zero
+                MetersPerSecondSquared max_change_gas_pedal = releasing_gas_max_change;
+                accel = accel_prev - max_change_gas_pedal;
+                if (accel < 0) {
+                    accel = 0;  // release gas pedal fully
+                }
+            }
+        } else if (brake_pedal_pressed) {
+            if (trying_brake_pedal) {
+                double max_change = accel < accel_prev ? pressing_brake_harder_max_change : releasing_brake_max_change;
+                accel = accel_prev + fclamp(accel - accel_prev, -max_change, max_change);
+            } else if (trying_gas_pedal || trying_no_pedals) {
+                // first, we need to go through no pedals and set accel to zero
+                MetersPerSecondSquared max_change_brake_pedal = releasing_brake_max_change;
+                accel = accel_prev + max_change_brake_pedal;
+                if (accel > 0) {
+                    accel = 0;  // release brake pedal fully
+                }
+            }
+        } else if (no_pedals_pressed) {    // no pedals pressed
+            if (trying_no_pedals) {
+                accel = 0;      // already no pedals, stay there
+            } else {
+                double foot_still_in_air_probability = 1 - dt / HUMAN_AVERAGE_DELAY_SWITCHING_PEDALS;
+                bool foot_switched = rand_0_to_1() > foot_still_in_air_probability;
+                if (foot_switched) {
+                    if (trying_gas_pedal) {
+                        accel = fmin(pressing_gas_harder_max_change, accel);
+                    } else if (trying_brake_pedal) {
+                        accel = fmax(-pressing_brake_harder_max_change, accel);
+                    }
+                } else {
+                    accel = 0; // remain with no pedals
+                }
+            }
+        }
+    } else if (in_reverse_gear) {
+        pressing_gas_harder_max_change = car->capabilities.accel_profile.max_acceleration_reverse_gear * dt / HUMAN_TIME_TO_PRESS_FULL_PEDAL;
+        releasing_gas_max_change = car->capabilities.accel_profile.max_acceleration_reverse_gear * dt / HUMAN_TIME_TO_RELEASE_FULL_PEDAL;
+        if (gas_pedal_pressed) {
+            if (trying_gas_pedal) {
+                double max_change = accel < accel_prev ? pressing_gas_harder_max_change : releasing_gas_max_change;
+                accel = accel_prev + fclamp(accel - accel_prev, -max_change, max_change);
+            } else if (trying_brake_pedal || trying_no_pedals) {
+                // first, we need to go through no pedals and set accel to zero
+                MetersPerSecondSquared max_change_gas_pedal = releasing_gas_max_change;
+                accel = accel_prev + max_change_gas_pedal;
+                if (accel > 0) {
+                    accel = 0;  // release gas pedal fully
+                }
+            }
+        } else if (brake_pedal_pressed) {
+            if (trying_brake_pedal) {
+                double max_change = accel > accel_prev ? pressing_brake_harder_max_change : releasing_brake_max_change;
+                accel = accel_prev + fclamp(accel - accel_prev, -max_change, max_change);
+            } else if (trying_gas_pedal || trying_no_pedals) {
+                // first, we need to go through no pedals and set accel to zero
+                MetersPerSecondSquared max_change_brake_pedal = releasing_brake_max_change;
+                accel = accel_prev - max_change_brake_pedal;
+                if (accel < 0) {
+                    accel = 0;  // release brake pedal fully
+                }
+            }
+        } else if (no_pedals_pressed) {
+            if (trying_no_pedals) {
+                accel = 0;      // already no pedals, stay there
+            } else {
+                double foot_still_in_air_probability = 1 - dt / HUMAN_AVERAGE_DELAY_SWITCHING_PEDALS;
+                bool foot_switched = rand_0_to_1() > foot_still_in_air_probability;
+                if (foot_switched) {
+                    if (trying_gas_pedal) {
+                        accel = fmax(-pressing_gas_harder_max_change, accel);
+                    } else if (trying_brake_pedal) {
+                        accel = fmin(pressing_brake_harder_max_change, accel);
+                    }
+                } else {
+                    accel = 0; // remain with no pedals
+                }
+            }
+        }
+    } else { // fully stopped right now.
+        if (accel < 0) {
+            pressing_gas_harder_max_change = car->capabilities.accel_profile.max_acceleration_reverse_gear * dt / HUMAN_TIME_TO_PRESS_FULL_PEDAL;   // adjust for reverse gear
+        }
+        if (trying_gas_pedal) {
+            accel = accel_prev + fclamp(accel - accel_prev, -pressing_gas_harder_max_change, pressing_gas_harder_max_change);
+        } else if (trying_brake_pedal) {
+            accel = accel_prev + fclamp(accel - accel_prev, -pressing_brake_harder_max_change, pressing_brake_harder_max_change);
+        } else {
+            accel = 0; // no input
+        }
+    }
 
 
 
@@ -672,8 +752,7 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
             // LOG_DEBUG("AEB engaged for car %d. Best-case gap: %.2f feet, speed: %.2f mph", car->id, to_feet(best_case_braking_gap), to_mph(car_get_speed(car)));
         }
         MetersPerSecondSquared accel_aeb = car_compute_acceleration_stop_max_brake(car, das->use_preferred_accel_profile);
-        accel = fmin(accel, accel_aeb);
-        // accel = accel_aeb; // AEB overrides all other acceleration commands
+        accel = accel_aeb; // AEB overrides all other acceleration commands
         LOG_TRACE("AEB in progress for car %d. Best-case gap: %.2f feet, speed: %.2f mph", car->id, to_feet(best_case_braking_gap), to_mph(car_get_speed(car)));
         // NOTE: Forward crash is still possible if the lead vehicle is backing into us, but we don't handle that case here since that is not about emergency braking.
     }

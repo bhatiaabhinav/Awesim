@@ -11,6 +11,49 @@
 #define LANE_CHANGE_INTERVAL 40.0 // Meters between lane change nodes
 
 
+static Vec2D get_node_pos(const PathPlanner* planner, int node_idx) {
+    if (node_idx < 0 || node_idx >= MAX_GRAPH_NODES) return vec_create(0, 0);
+    const MapNode* node = &planner->map_nodes[node_idx];
+    Lane* lane = map_get_lane(planner->map, node->lane_id);
+    if (!lane) return vec_create(0, 0);
+
+    // Calculate position based on progress
+    if (lane->type == LINEAR_LANE) {
+        Vec2D diff = vec_sub(lane->end_point, lane->start_point);
+        double len = lane->length;
+        if (len < 1e-3) return lane->start_point;
+        double t = node->progress / len;
+        // Clamp t [0, 1]
+        if (t < 0) t = 0; if (t > 1) t = 1;
+        return vec_add(lane->start_point, vec_scale(diff, t));
+    } else {
+        // Quarter Arc
+        double angle_diff = lane->end_angle - lane->start_angle;
+        double len = lane->length;
+         if (len < 1e-3) return lane->start_point;
+        double t = node->progress / len; 
+         // Clamp t [0, 1]
+        if (t < 0) t = 0; if (t > 1) t = 1;
+        
+        double angle = lane->start_angle + angle_diff * t;
+        return vec_create(
+            lane->center.x + lane->radius * cos(angle),
+            lane->center.y + lane->radius * sin(angle)
+        );
+    }
+}
+
+static double astar_heuristic(int node_idx, int end_idx, void* user_data) {
+    PathPlanner* planner = (PathPlanner*)user_data;
+    Vec2D p1 = get_node_pos(planner, node_idx);
+    Vec2D p2 = get_node_pos(planner, end_idx);
+    
+    double dx = p1.x - p2.x;
+    double dy = p1.y - p2.y;
+    return sqrt(dx*dx + dy*dy);
+}
+
+
 static double get_cost(double distance, double speed_limit, bool consider_speed_limits);
 
 void path_planner_build_graph(PathPlanner* planner) {
@@ -431,9 +474,9 @@ void path_planner_compute_shortest_path(PathPlanner* planner, const Lane* start_
 
     if (node1_idx == -1 || node_end_minus_1_idx == -1) return;
 
-    // 3. Call Dijkstra
+    // 3. Call Dijkstra -> A*
     double out_cost = 0.0;
-    int path_num_nodes = dg_dijkstra_path(planner->decision_graph, node1_idx, node_end_minus_1_idx, planner->solution_intermediate_node_ids, MAX_SOLUTION_CAPACITY - 2, &out_cost);
+    int path_num_nodes = dg_astar_path(planner->decision_graph, node1_idx, node_end_minus_1_idx, astar_heuristic, planner, planner->solution_intermediate_node_ids, MAX_SOLUTION_CAPACITY - 2, &out_cost);
     
     if (path_num_nodes > 0) {
         planner->path_exists = true;

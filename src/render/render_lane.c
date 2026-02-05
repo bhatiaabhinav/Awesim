@@ -183,6 +183,26 @@ void render_lane_linear(SDL_Renderer* renderer, const Lane* lane, Map* map, bool
             LOG_ERROR("Right edge cannot be opposite direction!");
             exit(EXIT_FAILURE);
         }
+
+        // Render stop line if applicable
+        Lane* straight_conn = lane_get_connection_straight(lane, map);
+        if (straight_conn && lane_is_at_intersection(straight_conn) && lane->length > STOP_LINE_BUFFER_METERS) {
+            Vec2D direction_vec = vec_sub(lane->end_point, lane->start_point);
+            Vec2D forward = vec_normalize(direction_vec);
+            Vec2D stop_center = vec_sub(lane->end_point, vec_scale(forward, STOP_LINE_BUFFER_METERS));
+
+            // Perpendicular vector for width
+            Vec2D perp = {-forward.y, forward.x};
+            
+            // Calculate start and end points of the stop line
+            Coordinates p1_world = vec_add(stop_center, vec_scale(perp, lane->width / 2.0));
+            Coordinates p2_world = vec_sub(stop_center, vec_scale(perp, lane->width / 2.0));
+
+            SDL_Point p1 = to_screen_coords(p1_world, width, height);
+            SDL_Point p2 = to_screen_coords(p2_world, width, height);
+
+            thickLineRGBA_ignore_if_outside_screen(renderer, p1.x, p1.y, p2.x, p2.y, wthick, white.r, white.g, white.b, white.a);
+        }
     }
 
     if (paint_arrows) {
