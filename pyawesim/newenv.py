@@ -29,6 +29,7 @@ class AwesimCityEnv(gym.Env):
         deprecated_map: bool = False,
         npc_rogue_factor: float = 0.05,
         perception_noise: bool = True,
+        observation_radius: float = 200.0,
         cam_resolution: Tuple[int, int] = (128, 128),
         anti_aliasing: bool = True,
         reward_shaping: bool = False,
@@ -61,6 +62,7 @@ class AwesimCityEnv(gym.Env):
         self.npc_rogue_factor = npc_rogue_factor
         self.cam_resolution = cam_resolution
         self.perception_noise = perception_noise
+        self.observation_radius = observation_radius
         self.anti_aliasing = anti_aliasing
         self.reward_shaping = reward_shaping
         self.reward_shaping_gamma = reward_shaping_gamma
@@ -112,7 +114,7 @@ class AwesimCityEnv(gym.Env):
 
         # action space: discrete. Edit personality, indicate
         self.action_meanings = [
-            "set_style_no_rules",
+            # "set_style_no_rules",
             "set_style_reckless",
             "set_style_aggressive",
             "set_style_normal",
@@ -276,6 +278,9 @@ class AwesimCityEnv(gym.Env):
         exists = True
         if relative_to_agent:
             position = A.coords_compute_relative_to_car(self.agent, car.center)
+            if A.vec_magnitude(position) > self.observation_radius:
+                exists = False
+                return np.zeros((23,), dtype=np.float32)
             speed = A.vec2d_rotate_to_car_frame(self.agent, A.vec_sub(car.true_speed_vector, self.agent.true_speed_vector))
             acc = A.vec2d_rotate_to_car_frame(self.agent, A.vec_sub(car.true_acceleration_vector, self.agent.true_acceleration_vector))
             orien = car.orientation - self.agent.orientation
@@ -767,6 +772,14 @@ class AwesimCityEnv(gym.Env):
             "timeout": timeout,
             "cost": cost,
             "opt_dist_to_goal_m": self.prev_opt_distance_to_goal if self.goal_lane is not None else np.nan,
+            "action_no_rules": self.action_meanings[action] == "set_style_no_rules",
+            "action_reckless": self.action_meanings[action] == "set_style_reckless",
+            "action_aggressive": self.action_meanings[action] == "set_style_aggressive",
+            "action_normal": self.action_meanings[action] == "set_style_normal",
+            "action_defensive": self.action_meanings[action] == "set_style_defensive",
+            "action_indicate_left": self.action_meanings[action] == "indicate_left",
+            "action_indicate_right": self.action_meanings[action] == "indicate_right",
+            "action_indicate_nav": self.action_meanings[action] == "indicate_nav",
         }
         self.steps += 1
         self.synchronized_sim_speedup = self.sim.simulation_speedup  # record this so that we preserve it across resets if it was modified through GUI during the episode

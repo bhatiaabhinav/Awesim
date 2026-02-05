@@ -15,8 +15,24 @@ from ppo import Actor, ActorBase, Critic, PPO
 
 
 class ModelArchitecture(nn.Module):
+    """
+    Agent token (tgt) attends to context tokens (memory):
+      memory = [NPCs, Roads, Intersections, Misc]
 
-    def __init__(self, env: AwesimCityEnv, dim_out: int, d_model: int, num_decoder_layers: int, num_heads: int):
+    NPC slots are fixed-size; NPC existence is indicated by npcs[..., 0] (exists flag).
+    Roads / intersections / misc are assumed always valid (not padded).
+    """
+
+    def __init__(
+        self,
+        env,
+        dim_out: int,
+        d_model: int,
+        num_decoder_layers: int,
+        num_heads: int,
+        npc_exists_index: int = 0,
+        npc_exists_threshold: float = 0.5,
+    ):
         super().__init__()
         self.feature_dim = env.feature_dim
         self.entity_count = env.entity_count
@@ -29,61 +45,54 @@ class ModelArchitecture(nn.Module):
         self.misc_state_feature_dim = env.misc_state_feature_dim
         self.misc_state_entity_count = env.misc_state_entity_count
 
+        self.npc_exists_index = npc_exists_index
+        self.npc_exists_threshold = npc_exists_threshold
+
         dim_ff = d_model * 4
-        self.proj_agent = nn.Sequential(
-            nn.Linear(self.car_feature_dim, dim_ff),
-            nn.LayerNorm(dim_ff),
-            nn.GELU(),
-            nn.Linear(dim_ff, d_model),
-            nn.LayerNorm(d_model),
-            nn.GELU(),
-        )
-        self.proj_npcs = nn.Sequential(
-            nn.Linear(self.car_feature_dim, dim_ff),
-            nn.LayerNorm(dim_ff),
-            nn.GELU(),
-            nn.Linear(dim_ff, d_model),
-            nn.LayerNorm(d_model),
-            nn.GELU(),
-        )
-        self.proj_roads = nn.Sequential(
-            nn.Linear(self.road_feature_dim, dim_ff),
-            nn.LayerNorm(dim_ff),
-            nn.GELU(),
-            nn.Linear(dim_ff, d_model),
-            nn.LayerNorm(d_model),
-            nn.GELU(),
-        )
-        self.proj_intersections = nn.Sequential(
-            nn.Linear(self.intersection_feature_dim, dim_ff),
-            nn.LayerNorm(dim_ff),
-            nn.GELU(),
-            nn.Linear(dim_ff, d_model),
-            nn.LayerNorm(d_model),
-            nn.GELU(),
-        )
-        self.proj_misc_states = nn.Sequential(
-            nn.Linear(self.misc_state_feature_dim, dim_ff),
-            nn.LayerNorm(dim_ff),
-            nn.GELU(),
-            nn.Linear(dim_ff, d_model),
-            nn.LayerNorm(d_model),
-            nn.GELU(),
-        )
 
-        self.agent_embedding = torch.nn.Parameter(torch.empty(1, 1, d_model), requires_grad=True)
-        nn.init.normal_(self.agent_embedding.data, 0, 0.02)
-        self.npcs_embedding = torch.nn.Parameter(torch.empty(1, 1, d_model), requires_grad=True)
-        nn.init.normal_(self.npcs_embedding.data, 0, 0.02)
-        self.roads_embedding = torch.nn.Parameter(torch.empty(1, 1, d_model), requires_grad=True)
-        nn.init.normal_(self.roads_embedding.data, 0, 0.02)
-        self.intersections_embedding = torch.nn.Parameter(torch.empty(1, 1, d_model), requires_grad=True)
-        nn.init.normal_(self.intersections_embedding.data, 0, 0.02)
-        self.misc_states_embedding = torch.nn.Parameter(torch.empty(1, 1, d_model), requires_grad=True)
-        nn.init.normal_(self.misc_states_embedding.data, 0, 0.02)
+        def proj_mlp(in_dim: int) -> nn.Module:
+            return nn.Sequential(
+                nn.Linear(in_dim, dim_ff),
+                nn.LayerNorm(dim_ff),
+                nn.GELU(),
+                nn.Linear(dim_ff, d_model),
+                nn.LayerNorm(d_model),
+                nn.GELU(),
+            )
 
-        decoder_layer = nn.TransformerDecoderLayer(d_model=d_model, nhead=num_heads, dim_feedforward=dim_ff, batch_first=True, norm_first=True, dropout=0, activation='gelu')
-        self.decoder = nn.TransformerDecoder(decoder_layer, num_layers=num_decoder_layers, norm=nn.LayerNorm(d_model))
+        self.proj_agent = proj_mlp(self.car_feature_dim)
+        self.proj_npcs = proj_mlp(self.car_feature_dim)
+        self.proj_roads = proj_mlp(self.road_feature_dim)
+        self.proj_intersections = proj_mlp(self.intersection_feature_dim)
+        self.proj_misc_states = proj_mlp(self.misc_state_feature_dim)
+
+        # Learned type embeddings (broadcast over batch/sequence)
+        def make_type_emb():
+            p = nn.Parameter(torch.empty(1, 1, d_model), requires_grad=True)
+            nn.init.normal_(p.data, 0, 0.02)
+            return p
+
+        self.agent_embedding = make_type_emb()
+        self.npcs_embedding = make_type_emb()
+        self.roads_embedding = make_type_emb()
+        self.intersections_embedding = make_type_emb()
+        self.misc_states_embedding = make_type_emb()
+
+        decoder_layer = nn.TransformerDecoderLayer(
+            d_model=d_model,
+            nhead=num_heads,
+            dim_feedforward=dim_ff,
+            batch_first=True,
+            norm_first=True,
+            dropout=0.0,
+            activation="gelu",
+        )
+        # Optional final norm helps stability; you can remove norm=... if you prefer
+        self.decoder = nn.TransformerDecoder(
+            decoder_layer,
+            num_layers=num_decoder_layers,
+            norm=nn.LayerNorm(d_model),
+        )
 
         self.mlp = nn.Sequential(
             nn.Linear(d_model, dim_ff),
@@ -95,54 +104,76 @@ class ModelArchitecture(nn.Module):
             nn.Linear(d_model, dim_out),
         )
 
-    def _get_cars_matrix_from_state(self, state):
-        # extract cars from last two dims of state (which may have a batch dim)
-        return state[..., :self.car_count, :self.car_feature_dim]
-    
-    def _get_roads_matrix_from_state(self, state):
+    def _get_cars_matrix_from_state(self, state: torch.Tensor) -> torch.Tensor:
+        # state: (B, entity_count, feature_dim)
+        return state[..., : self.car_count, : self.car_feature_dim]
+
+    def _get_roads_matrix_from_state(self, state: torch.Tensor) -> torch.Tensor:
         return state[..., self.car_count:self.car_count + self.road_count, :self.road_feature_dim]
-    
-    def _get_intersections_matrix_from_state(self, state):
-        return state[..., self.car_count + self.road_count:self.car_count + self.road_count + self.intersection_count, :self.intersection_feature_dim]
-    
-    def _get_misc_state_matrix_from_state(self, state):
-        return state[..., -self.misc_state_entity_count:, :self.misc_state_feature_dim]
+
+    def _get_intersections_matrix_from_state(self, state: torch.Tensor) -> torch.Tensor:
+        start = self.car_count + self.road_count
+        end = start + self.intersection_count
+        return state[..., start:end, : self.intersection_feature_dim]
+
+    def _get_misc_state_matrix_from_state(self, state: torch.Tensor) -> torch.Tensor:
+        return state[..., -self.misc_state_entity_count:, : self.misc_state_feature_dim]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # input x: (batch_size, entity_count, feature_dim)
+        """
+        x: (B, entity_count, feature_dim)
+        Returns: (B, dim_out)
+        """
+        B = x.size(0)
 
-        cars = self._get_cars_matrix_from_state(x)                   # (batch_size, num_cars, car_feature_dim)
-        agent = cars[:, 0:1, :]                                       # (batch_size, 1, car_feature_dim)
-        npcs = cars[:, 1:, :]                                        # (batch_size, num_cars-1, car_feature_dim)
-        roads = self._get_roads_matrix_from_state(x)                 # (batch_size, num_roads, road_feature_dim)
-        intersections = self._get_intersections_matrix_from_state(x) # (batch_size, num_intersections, intersection_feature_dim)
-        misc_states = self._get_misc_state_matrix_from_state(x)      # (batch_size, num_misc_states, misc_state_feature_dim)
-        
-        # projs
-        x_agent = self.proj_agent(agent)                             # (batch_size, 1, d_model)
-        x_npcs = self.proj_npcs(npcs)                               # (batch_size, num_cars-1, d_model)
-        x_roads = self.proj_roads(roads)                             # (batch_size, num_roads, d_model)
-        x_intersections = self.proj_intersections(intersections)     # (batch_size, num_intersections, d_model)
-        x_misc_states = self.proj_misc_states(misc_states)           # (batch_size, num_misc_states, d_model)
+        cars = self._get_cars_matrix_from_state(x)  # (B, car_count, car_feature_dim)
+        agent = cars[:, 0:1, :]                     # (B, 1, car_feature_dim)
+        npcs = cars[:, 1:, :]                       # (B, car_count-1, car_feature_dim)
 
-        # add embeddings
-        x_agent = x_agent + self.agent_embedding                     # (batch_size, 1, d_model)
-        x_npcs = x_npcs + self.npcs_embedding                       # (batch_size, num_cars-1, d_model)
-        x_roads = x_roads + self.roads_embedding                     # (batch_size, num_roads, d_model)
-        x_intersections = x_intersections + self.intersections_embedding # (batch_size, num_intersections, d_model)
-        x_misc_states = x_misc_states + self.misc_states_embedding   # (batch_size, num_misc_states, d_model)
+        roads = self._get_roads_matrix_from_state(x)                 # (B, road_count, road_feature_dim)
+        intersections = self._get_intersections_matrix_from_state(x)  # (B, intersection_count, intersection_feature_dim)
+        misc_states = self._get_misc_state_matrix_from_state(x)      # (B, misc_state_entity_count, misc_state_feature_dim)
 
-        # cat everything but agent
-        x_context = torch.cat([x_npcs, x_roads, x_intersections, x_misc_states], dim=1)  # (batch_size, entity_count-1, d_model)
+        # Build NPC padding mask from exists flag (True = ignore)
+        npc_exists = (npcs[..., self.npc_exists_index] > self.npc_exists_threshold)  # (B, car_count-1) bool
+        npc_pad = ~npc_exists  # True means "mask out / ignore" in PyTorch key_padding_mask
 
-        # decoder agent in context of others
-        x_agent = self.decoder(tgt=x_agent, memory=x_context)       # (batch_size, 1, d_model)
+        # Projections to d_model
+        x_agent = self.proj_agent(agent)                       # (B, 1, d_model)
+        x_npcs = self.proj_npcs(npcs)                          # (B, car_count-1, d_model)
+        x_roads = self.proj_roads(roads)                       # (B, road_count, d_model)
+        x_intersections = self.proj_intersections(intersections)  # (B, intersection_count, d_model)
+        x_misc_states = self.proj_misc_states(misc_states)      # (B, misc_state_entity_count, d_model)
 
-        # take agent token and apply mlp
-        x = x_agent.squeeze(1)                                      # (batch_size, d_model)
-        x = self.mlp(x)                                             # (batch_size, dim_out)
+        # Add type embeddings
+        x_agent = x_agent + self.agent_embedding
+        x_npcs = x_npcs + self.npcs_embedding
+        x_roads = x_roads + self.roads_embedding
+        x_intersections = x_intersections + self.intersections_embedding
+        x_misc_states = x_misc_states + self.misc_states_embedding
 
-        return x
+        # Concatenate context tokens (memory)
+        x_context = torch.cat([x_npcs, x_roads, x_intersections, x_misc_states], dim=1)  # (B, S, d_model)
+
+        # Build full memory_key_padding_mask for the concatenated memory
+        # Roads/intersections/misc are always valid => all False (do not mask).
+        road_pad = torch.zeros((B, self.road_count), dtype=torch.bool, device=x.device)
+        inter_pad = torch.zeros((B, self.intersection_count), dtype=torch.bool, device=x.device)
+        misc_pad = torch.zeros((B, self.misc_state_entity_count), dtype=torch.bool, device=x.device)
+
+        mem_pad = torch.cat([npc_pad, road_pad, inter_pad, misc_pad], dim=1)  # (B, S), True = ignore
+
+        # Decoder: agent token attends to memory
+        x_agent_ctx = self.decoder(
+            tgt=x_agent,
+            memory=x_context,
+            memory_key_padding_mask=mem_pad,
+        )  # (B, 1, d_model)
+
+        # Head on the updated agent token
+        out = x_agent_ctx.squeeze(1)  # (B, d_model)
+        out = self.mlp(out)           # (B, dim_out)
+        return out
 
 
 WANDB_CONFIG = {
@@ -156,7 +187,9 @@ WANDB_CONFIG = {
 }
 ENV_CONFIG = {
     "deprecated_map": False,           # use the old small map if True
-    "npc_rogue_factor": 0.0,           # fraction of NPC cars that behave more aggressively
+    "npc_rogue_factor": 0.05,           # fraction of NPC cars that behave more aggressively
+    "perception_noise": True,          # whether to add noise to the perception inputs
+    "observation_radius": 200.0,      # in meters, radius around agent for which NPCs are observed
     "city_width": 1500,                 # in meters
     "num_cars": 256,                    # number of other cars in the environment
     "decision_interval": 1.0,           # in seconds, how often the agent can take an action (reconfigure the driving assist), or how often the acceleration is applied in non-DAS mode
@@ -266,7 +299,7 @@ def train_model(load_actor=None, load_critic=None) -> Tuple[ActorBase, Critic, P
         print(f"Loading critic model from {load_critic}")
         critic.load_state_dict(torch.load(load_critic, map_location=torch.device(PPO_CONFIG["training_device"])))
 
-    ppo = PPO(vec_env, actor, critic, cost_critic=cost_critic, **PPO_CONFIG, custom_info_keys_to_log_at_episode_end=['crashed', 'reached_goal', 'reached_in_time', 'reached_but_late', 'out_of_fuel', 'timeout', 'total_fuel_consumed', 'crashed_forward', 'crashed_backward', 'progress_m_during_crash', 'progress_m_during_front_crash', 'progress_m_during_back_crash', 'crashed_on_intersection', 'aeb_in_progress_during_crash', 'opt_dist_to_goal_m'])  # type: ignore
+    ppo = PPO(vec_env, actor, critic, cost_critic=cost_critic, **PPO_CONFIG, custom_info_keys_to_log_at_episode_end=['crashed', 'reached_goal', 'reached_in_time', 'reached_but_late', 'out_of_fuel', 'timeout', 'total_fuel_consumed', 'crashed_forward', 'crashed_backward', 'progress_m_during_crash', 'progress_m_during_front_crash', 'progress_m_during_back_crash', 'crashed_on_intersection', 'aeb_in_progress_during_crash', 'opt_dist_to_goal_m', 'action_no_rules', 'action_reckless', 'action_aggressive', 'action_normal', 'action_defensive', 'action_indicate_left', 'action_indicate_right', 'action_indicate_nav'])  # type: ignore
 
     # make dir for saving models
     model_dir = f"./models/{WANDB_CONFIG['experiment_name']}"
@@ -315,6 +348,14 @@ def train_model(load_actor=None, load_critic=None) -> Tuple[ActorBase, Critic, P
                 "rollout/crashed_on_intersection_rate": ppo.stats['info_key_means']['crashed_on_intersection'][-1],
                 "rollout/aeb_in_progress_during_crash_rate": ppo.stats['info_key_means']['aeb_in_progress_during_crash'][-1],
                 "rollout/opt_dist_to_goal_m_mean": ppo.stats['info_key_means']['opt_dist_to_goal_m'][-1],
+                "rollout/action_no_rules_rate": ppo.stats['info_key_means']['action_no_rules'][-1],
+                "rollout/action_reckless_rate": ppo.stats['info_key_means']['action_reckless'][-1],
+                "rollout/action_aggressive_rate": ppo.stats['info_key_means']['action_aggressive'][-1],
+                "rollout/action_normal_rate": ppo.stats['info_key_means']['action_normal'][-1],
+                "rollout/action_defensive_rate": ppo.stats['info_key_means']['action_defensive'][-1],
+                "rollout/action_indicate_left_rate": ppo.stats['info_key_means']['action_indicate_left'][-1],
+                "rollout/action_indicate_right_rate": ppo.stats['info_key_means']['action_indicate_right'][-1],
+                "rollout/action_indicate_nav_rate": ppo.stats['info_key_means']['action_indicate_nav'][-1],
                 "train/loss": ppo.stats["losses"][-1],
                 "train/value_loss": ppo.stats["critic_losses"][-1],
                 "train/cost_value_loss": ppo.stats["cost_losses"][-1],
