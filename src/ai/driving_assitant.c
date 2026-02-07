@@ -176,7 +176,6 @@ static bool driving_assistant_smart_das_should_engage_intersection_approach(Driv
     }
     if (situation->is_an_intersection_upcoming) {
         Meters distance_to_stop_line = situation->distance_to_end_of_lane_from_leading_edge - STOP_LINE_BUFFER_METERS;
-        distance_to_stop_line += situation->speed * 1; // account for reaction delay of up to 1 second
         // check if we need to engage now. Are we within the appropriate distance to start slowing down for stopping at intersection? braking distance situation->braking_distance.preferred_smooth, situation->braking_distance.preferred, situation->braking_distance.capable depending on SmartDASDrivingStyle.
         Meters braking_distances[SMART_DAS_DRIVING_STYLES_COUNT] = {
             [SMART_DAS_DRIVING_STYLE_RECKLESS] = situation->braking_distance.capable,
@@ -188,7 +187,7 @@ static bool driving_assistant_smart_das_should_engage_intersection_approach(Driv
         if (situation->speed < 0) {
             braking_distance_to_use = 0; // if reversing, no braking distance needed, which is originally positive even if speed is negative
         }
-        return distance_to_stop_line <= 1.01 * braking_distance_to_use || situation->is_approaching_end_of_lane;
+        return distance_to_stop_line <= 1.1 * braking_distance_to_use; // the 10% extra buffer is to account for reaction/actuation delays
     }
     return false;
 }
@@ -239,6 +238,13 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
                 [SMART_DAS_DRIVING_STYLE_AGGRESSIVE] = true,
                 [SMART_DAS_DRIVING_STYLE_NORMAL] = false,
                 [SMART_DAS_DRIVING_STYLE_DEFENSIVE] = false
+            };
+            bool defensive_even_if_right_of_way[SMART_DAS_DRIVING_STYLES_COUNT] = {
+                [SMART_DAS_DRIVING_STYLE_NO_RULES] = false,
+                [SMART_DAS_DRIVING_STYLE_RECKLESS] = false,
+                [SMART_DAS_DRIVING_STYLE_AGGRESSIVE] = false,
+                [SMART_DAS_DRIVING_STYLE_NORMAL] = true,
+                [SMART_DAS_DRIVING_STYLE_DEFENSIVE] = true
             };
 
             switch (light)
@@ -386,6 +392,15 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
                 }
             }
 
+            bool should_brake = should_brake_for_full_stop || should_brake_for_rolling_stop || should_brake_for_yield;
+
+            if (!should_brake && defensive_even_if_right_of_way[das->smart_das_driving_style] && defensive_yield_despite_right_of_way(car, sim, situation, das->turn_intent, yield_thw, sim_get_dt(sim))) {
+                // even if we have the right of way, if we are defensive and there is something to yield to with a short time headway, we should yield
+                should_brake_for_yield = true;
+                should_speed_up_to_make_light = false; // if we were going to speed up for yellow, now we should not do that because we are going to yield instead
+                should_brake = true;
+            }
+
             if (das->smart_das_driving_style == SMART_DAS_DRIVING_STYLE_NO_RULES) {
                 // in this mode, we don't brake for anything at intersections
                 should_brake_for_full_stop = false;
@@ -412,7 +427,7 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
             }
 
 
-            bool should_brake = should_brake_for_full_stop || should_brake_for_rolling_stop || should_brake_for_yield;
+            should_brake = should_brake_for_full_stop || should_brake_for_rolling_stop || should_brake_for_yield;   // update should_brake after adjustments based on feasibility and style
             if (should_brake) {
                 // compute position target delta. If full stop or rolling stop, target is stop line - buffer. If yield, target is end of lane.
                 Meters car_position = situation->lane_progress_m;
@@ -424,16 +439,15 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
                 // compute speed limit. Post stop line, limit speed to CREEP_SPEED.
                 MetersPerSecond speed_limit = distance_to_stop_line > 0 ? das->speed_target : fmin(CREEP_SPEED, das->speed_target);
                 MetersPerSecondSquared accel_to_stop = car_compute_acceleration_chase_target(car, position_target, speed_at_target, fmax(situation->distance_to_end_of_lane_from_leading_edge - position_target, meters(0)), speed_limit, das->use_preferred_accel_profile);
-                // accel_to_stop = 0.5 * accel_to_stop + 0.5 * car_get_acceleration(car); // smooth it a bit
-                bool stop_right_away = (situation->distance_to_end_of_lane_from_leading_edge < 0.2 && situation->going_forward) || (accel_to_stop < 0 && (situation->stopped || situation->reversing));
+                bool stop_right_away = (situation->distance_to_end_of_lane_from_leading_edge < 0 && situation->going_forward) || (accel_to_stop < 0 && (situation->stopped || situation->reversing));
                 if (stop_right_away) {
                     accel_to_stop = -situation->speed / sim_get_dt(sim); // just enough to stop right away
                     accel_to_stop = fclamp(accel_to_stop, -car->capabilities.accel_profile.max_deceleration, car->capabilities.accel_profile.max_acceleration);
                 }
                 accel = accel_to_stop; // take the minimum of the two accelerations
-            } else if (should_speed_up_to_make_light) {
+            } else if (should_speed_up_to_make_light && das->turn_intent != INDICATOR_RIGHT) {
                 // compute acceleration to speed up to make the light
-                das->speed_target = das->speed_target + from_mph(10);  // speed up by 10 mph to try to make the light
+                das->speed_target = das->speed_target + from_mph(10);
             }
         }
     } else {
@@ -576,11 +590,11 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
     MetersPerSecondSquared accel_speed_adjust = das->use_linear_speed_control ? car_compute_acceleration_adjust_speed_linear(car, das->speed_target, das->use_preferred_accel_profile) : car_compute_acceleration_adjust_speed(car, das->speed_target, das->use_preferred_accel_profile); // works for negative speed targets as well
     accel = fmin(accel, accel_speed_adjust);
 
-    // ----------- Speed adjustment (approaching end of lane to a lower speed limit lane) ------------
+    // ----------- Speed adjustment (approaching end of lane to a lower speed limit lane, unless going straight into an intersection -- where we may speed up to make light and the speed limit is usually anyway the same) ------------
     const Lane* next_lane = sa->lane_next_after_turn[das->turn_intent];
     if (next_lane) {
         MetersPerSecond next_speed_target = determine_preferred_speed_limit(sim_get_map(sim), next_lane, das->smart_das_driving_style);
-        if (next_speed_target < sa->speed) {
+        if (next_speed_target < sa->speed && !(sa->is_an_intersection_upcoming && das->turn_intent == INDICATOR_NONE)) {
             Meters position_target = sa->lane_progress_m + sa->distance_to_end_of_lane;
             MetersPerSecond next_speed_target = determine_preferred_speed_limit(sim_get_map(sim), next_lane, das->smart_das_driving_style);
             MetersPerSecondSquared accel_approach_end_of_lane = car_compute_acceleration_chase_target(car, position_target, next_speed_target, meters(1), sa->lane->speed_limit, das->use_preferred_accel_profile);

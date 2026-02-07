@@ -202,6 +202,15 @@ void render_lane_linear(SDL_Renderer* renderer, const Lane* lane, Map* map, bool
             SDL_Point p2 = to_screen_coords(p2_world, width, height);
 
             thickLineRGBA_ignore_if_outside_screen(renderer, p1.x, p1.y, p2.x, p2.y, wthick, white.r, white.g, white.b, white.a);
+
+            // Also render line at end of lane
+            Coordinates e1_world = vec_add(lane->end_point, vec_scale(perp, lane->width / 2.0));
+            Coordinates e2_world = vec_sub(lane->end_point, vec_scale(perp, lane->width / 2.0));
+
+            SDL_Point e1 = to_screen_coords(e1_world, width, height);
+            SDL_Point e2 = to_screen_coords(e2_world, width, height);
+
+            thickLineRGBA_ignore_if_outside_screen(renderer, e1.x, e1.y, e2.x, e2.y, wthick, white.r, white.g, white.b, white.a);
         }
     }
 
