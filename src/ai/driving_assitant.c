@@ -187,7 +187,7 @@ static bool driving_assistant_smart_das_should_engage_intersection_approach(Driv
         if (situation->speed < 0) {
             braking_distance_to_use = 0; // if reversing, no braking distance needed, which is originally positive even if speed is negative
         }
-        return distance_to_stop_line <= 1.1 * braking_distance_to_use; // the 10% extra buffer is to account for reaction/actuation delays
+        return distance_to_stop_line <= 1.1 * braking_distance_to_use || situation->is_approaching_end_of_lane; // the 10% extra buffer is to account for reaction/actuation delays
     }
     return false;
 }
@@ -621,11 +621,29 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
     // ------------- Follow lead vehicle ------------------------
     if (das->follow_assistance && sa->nearby_vehicles.lead) {
         Meters distance_to_lead;
-        perceive_lead_vehicle(car, sim, sa, &distance_to_lead, NULL, NULL);
-        distance_to_lead -= (car_get_length(car) + car_get_length(sa->nearby_vehicles.lead)) / 2.0; // bumper to bumper distance
-        Meters buffer = fclamp(distance_to_lead, das->buffer / 2, das->buffer); // if already within das->buffer due to noise etc., do not reverse and let the distance be, but still reverse if way too close.
-        MetersPerSecondSquared accel_cruise = car_compute_acceleration_adaptive_cruise(car, sim, sa, fmax(das->speed_target, 0), das->thw, buffer, das->use_preferred_accel_profile); // follow next car
-        accel = fmin(accel, accel_cruise);
+        MetersPerSecond speed_lead;
+        perceive_lead_vehicle(car, sim, sa, &distance_to_lead, &speed_lead, NULL);
+        Meters distance_to_lead_bumper_to_bumper = distance_to_lead - (car_get_length(car) + car_get_length(sa->nearby_vehicles.lead)) / 2.0; // bumper to bumper distance
+        Meters target_distance_bumper_to_bumper = das->buffer + fmax(sa->speed, 0) * das->thw;
+        Meters position_delta = distance_to_lead_bumper_to_bumper - target_distance_bumper_to_bumper;
+        MetersPerSecond speed_target = speed_lead; // we want to match the lead vehicle's speed
+        if (sa->almost_stopped) {
+            if (sa->speed >= 0) {
+                if (from_feet(1) < distance_to_lead_bumper_to_bumper && distance_to_lead_bumper_to_bumper < 1.5 * das->buffer) {
+                    position_delta = 0; // if we are almost stopped and within a reasonable range of the target distance, don't adjust position target to prevent microadjustments
+                    speed_target = 0;  // and stop or stay stopped
+                }
+            } else {
+                if (distance_to_lead_bumper_to_bumper > das->buffer) {
+                    position_delta = 0; // if we are almost stopped after reversing and the lead is not too close, don't adjust position target to prevent microadjustments
+                    speed_target = 0;   // and stop or stay stopped
+                }
+            }
+        }
+        Meters position_target = sa->lane_progress_m + position_delta;
+        Meters overshoot_buffer = sa->speed >= 0 ? distance_to_lead_bumper_to_bumper - from_feet(1) : from_feet(1);
+        MetersPerSecondSquared accel_follow = car_compute_acceleration_chase_target(car, position_target, speed_target, overshoot_buffer, das->speed_target, das->use_preferred_accel_profile);
+        accel = fmin(accel, accel_follow);
     }
 
     // Account for human-like delay in adjusting acceleration (gas/brake pedal presses):
