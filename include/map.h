@@ -3,24 +3,8 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include "utils.h"
+#include "constants.h"
 
-// Constants
-#define MAX_CARS_PER_LANE 64
-#define MAX_NUM_ROADS 512
-#define MAX_NUM_LANES_PER_ROAD 4
-#define MAX_NUM_INTERSECTIONS 64
-#define MAX_NUM_LANES_PER_INTERSECTION 32
-#define MAX_NUM_LANES 2048
-#define LANE_DEGRADATIONS_BUCKETS 4
-#define GREEN_DURATION 13
-#define YELLOW_DURATION 5
-#define MINOR_RED_EXTENSION 2
-#define ID_NULL -1
-#define LANE_LENGTH_EPSILON 0.1
-#define STOP_LINE_BUFFER_METERS 1.524       // Stop line distance from end of lane in meters
-#define STOP_SPEED_THRESHOLD 1e-3           // 1 mm/s considered as stopped
-#define ALMOST_STOP_SPEED_THRESHOLD 0.044704 // 0.1 mph in m/s considered as almost stopped
-#define CREEP_SPEED 2.2352                // 5 mph in m/s
 
 // Typedef Definitions
 
@@ -33,6 +17,7 @@ typedef int CarId;
 
 typedef struct Car Car;
 typedef struct Road Road;
+
 typedef struct Lane Lane;
 typedef struct Intersection Intersection;
 typedef struct Map Map;
@@ -91,8 +76,27 @@ struct Lane {
     Quadrant quadrant;      // Quadrant for quarter arc lanes
 
     RoadId road_id;                    // The road this lane belongs to, if any
+    int index_in_road;                 // Index of this lane within its road (0 = leftmost). -1 if not in a road.
     IntersectionId intersection_id;    // The intersection this lane belongs to, if any
     bool is_at_intersection;        // True if this lane is at an intersection, false otherwise
+
+    // Precomputed geometry cache (populated at lane creation / finalization for performance)
+    // For LINEAR lanes:
+    Radians cached_orientation;        // atan2(delta.y, delta.x)
+    double cached_cos_orientation;     // cos(cached_orientation)
+    double cached_sin_orientation;     // sin(cached_orientation)
+    // For QUARTER_ARC lanes:
+    double cached_cos_start_angle;
+    double cached_sin_start_angle;
+    double cached_cos_end_angle;
+    double cached_sin_end_angle;
+    Vec2D cached_theoretical_start;    // center + radius * (cos_start, sin_start)
+    Vec2D cached_theoretical_end;      // center + radius * (cos_end, sin_end)
+    Radians cached_theoretical_start_orient;
+    Radians cached_theoretical_end_orient;
+    Vec2D cached_actual_start;         // incoming->end_point or start_point
+    Vec2D cached_actual_end;           // outgoing->start_point or end_point
+    bool arc_geometry_precomputed;     // true after lane_precompute_arc_geometry is called
 
     CarId cars_ids[MAX_CARS_PER_LANE]; // Array of cars currently in this lane, ordered/ranked by their position on the lane in descending order (i.e., the first car (index = 0) is the one closest to the end of the lane).
     int num_cars;                  // Number of cars currently in this lane
@@ -117,6 +121,11 @@ void lane_set_degradations(Lane* self, Degradations degradations);
 void lane_set_road(Lane* self, const Road* road);
 void lane_set_intersection(Lane* self, const Intersection* intersection);
 void lane_set_name(Lane* self, const char* name);
+
+// Precompute cached geometry for arc lanes (call after all lane connections are established)
+void lane_precompute_arc_geometry(Lane* self, Map* map);
+// Precompute cached geometry for all lanes in the map
+void map_precompute_lane_geometry(Map* map);
 
 // Lane Vehicle Management
 void lane_add_car(Lane* self, Car* car, Simulation* sim);

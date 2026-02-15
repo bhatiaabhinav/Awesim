@@ -11,12 +11,12 @@ static char* SERVER_IP = "127.0.0.1";
 static int SERVER_PORT = 4242;
 
 int main(int argc, char* argv[]) {
-    Meters city_width = argc >= 2 ? meters(atof(argv[1])) : meters(1000); // width of the city in meters. Prefer to read from command line argument, else use default.
+    Meters city_width = argc >= 2 ? meters(atof(argv[1])) : meters(1500); // width of the city in meters. Prefer to read from command line argument, else use default.
     if (city_width <= 0) {
         LOG_ERROR("Invalid input. City width must be greater than 0. Exiting.");
         exit(EXIT_FAILURE);
     }
-    int num_cars = argc >= 3 ? atoi(argv[2]) : 256;  // number of cars to simulate. Prefer to read from command line argument, else use default.
+    int num_cars = argc >= 3 ? atoi(argv[2]) : 512;  // number of cars to simulate. Prefer to read from command line argument, else use default.
     if (num_cars <= 0) {
         LOG_ERROR("Invalid input. Number of cars must be greater than 0. Exiting.");
         exit(EXIT_FAILURE);
@@ -38,6 +38,7 @@ int main(int argc, char* argv[]) {
     sim_set_npc_rogue_factor(sim, 0.05); // Set NPC rogue factor between 0.0 (law-abiding) to 1.0 (maximum rogue)
     // Make a file to store map information
     sim_get_driving_assistant(sim, 0)->smart_das_driving_style = SMART_DAS_DRIVING_STYLE_NORMAL;
+    sim->agent_goal_lane_id = 84;
     FILE* map_file = fopen("map_info.txt", "w");
     if (map_file) {
         map_print(sim_get_map(sim), map_file); // Print the map information to the file

@@ -5,7 +5,6 @@
 #include "map.h"
 #include "car.h"
 #include "sim.h"
-#include "bad.h"
 
 // Settings
 extern int WINDOW_SIZE_WIDTH;

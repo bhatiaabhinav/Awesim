@@ -1,5 +1,7 @@
 #include "ai.h"
 #include "map.h"
+#include "sim.h"
+#include "car.h"
 #include "utils.h"
 #include "logging.h"
 #include <stdlib.h>
@@ -9,6 +11,13 @@
 
 // Constants for graph generation
 #define LANE_CHANGE_INTERVAL 40.0 // Meters between lane change nodes
+
+// Traffic flow smoothing: exponential moving average
+// alpha = dt / tau, where tau is the effective time constant.
+// For a ~5 minute window with updates every 1s: tau = 300s, alpha ~ 0.0033
+#define TRAFFIC_FLOW_TAU 120.0                  // EMA time constant in seconds (effective ~2 min window)
+#define TRAFFIC_FLOW_MIN_SPEED 0.044704              // Minimum traffic flow speed (m/s) to avoid division by zero in cost
+#define HIGHWAY_AVOIDANCE_PENALTY 10.0          // Cost multiplier for highway lanes (roads with 3+ lanes) when avoid_highways is enabled
 
 
 static Vec2D get_node_pos(const PathPlanner* planner, int node_idx) {
@@ -54,7 +63,7 @@ static double astar_heuristic(int node_idx, int end_idx, void* user_data) {
 }
 
 
-static double get_cost(double distance, double speed_limit, bool consider_speed_limits);
+static double get_cost_with_traffic(double distance, double speed_limit, bool consider_speed_limits, bool use_live_traffic, double traffic_flow);
 
 void path_planner_build_graph(PathPlanner* planner) {
     if (!planner->map || !planner->decision_graph) return;
@@ -190,6 +199,15 @@ void path_planner_build_graph(PathPlanner* planner) {
         MapNode* u = &planner->map_nodes[u_id];
         Lane* lane_u = map_get_lane(planner->map, u->lane_id);
 
+        // Highway avoidance penalty
+        double highway_penalty = 1.0;
+        if (planner->avoid_highways && lane_u->road_id >= 0) {
+            Road* road = map_get_road(planner->map, lane_u->road_id);
+            if (road && road->num_lanes >= 3) {
+                highway_penalty = HIGHWAY_AVOIDANCE_PENALTY;
+            }
+        }
+
         // A. Longitudinal (Next node on same lane)
         int* lane_nodes = planner->lane_id_to_node_ids_list[u->lane_id];
         int count = planner->lane_id_to_node_ids_count[u->lane_id];
@@ -200,7 +218,8 @@ void path_planner_build_graph(PathPlanner* planner) {
                 MapNode* v = &planner->map_nodes[v_id];
                 double dist = v->progress - u->progress;
                 if (dist > 0) {
-                    dg_add_edge_w(planner->decision_graph, u_id, v_id, get_cost(dist, lane_u->speed_limit, planner->consider_speed_limits));
+                    double cost = get_cost_with_traffic(dist, lane_u->speed_limit, planner->consider_speed_limits, planner->use_live_traffic_info, planner->traffic_flow_per_lane[u->lane_id]);
+                    dg_add_edge_w(planner->decision_graph, u_id, v_id, cost * highway_penalty);
                 }
                 break;
             }
@@ -319,6 +338,10 @@ PathPlanner* path_planner_create(Map* map, bool consider_speed_limits) {
     if (planner) {
         planner->map = map;
         planner->consider_speed_limits = consider_speed_limits;
+        planner->use_live_traffic_info = false;
+        planner->avoid_highways = false;
+        memset(planner->traffic_flow_per_lane, 0, sizeof(planner->traffic_flow_per_lane));
+        planner->last_traffic_update_time = -1.0;
         planner->start_lane_id = ID_NULL;
         planner->end_lane_id = ID_NULL;
         planner->path_exists = false;
@@ -352,9 +375,15 @@ void path_planner_free(PathPlanner* planner) {
     }
 }
 
-static double get_cost(double distance, double speed_limit, bool consider_speed_limits) {
+static double get_cost_with_traffic(double distance, double speed_limit, bool consider_speed_limits, bool use_live_traffic, double traffic_flow) {
     if (distance < 0) distance = 0;
     if (consider_speed_limits) {
+        if (use_live_traffic && traffic_flow > 0.0) {
+            // Use live traffic flow speed, but clamp to a minimum
+            double effective_speed = traffic_flow;
+            if (effective_speed < TRAFFIC_FLOW_MIN_SPEED) effective_speed = TRAFFIC_FLOW_MIN_SPEED;
+            return distance / effective_speed;
+        }
         if (speed_limit < 1.0) speed_limit = 1.0;
         return distance / speed_limit;
     }
@@ -430,7 +459,7 @@ void path_planner_compute_shortest_path(PathPlanner* planner, const Lane* start_
     // if we are on the same lane and start_progress <= end_progress, trivial path
     if (start_lane->id == end_lane->id && start_progress <= end_progress) {
         planner->path_exists = true;
-        planner->optimal_cost = get_cost(end_progress - start_progress, start_lane->speed_limit, planner->consider_speed_limits);
+        planner->optimal_cost = get_cost_with_traffic(end_progress - start_progress, start_lane->speed_limit, planner->consider_speed_limits, planner->use_live_traffic_info, planner->traffic_flow_per_lane[start_lane->id]);
         planner->num_solution_actions = 1;
         planner->num_solution_actions_non_trivial = 1;
         planner->solution_nodes[0].lane_id = start_lane->id;
@@ -532,5 +561,82 @@ NavAction path_planner_get_solution_action(const PathPlanner* planner, bool igno
             return NAV_NONE;
         }
         return planner->solution_actions[action_index];
+    }
+}
+
+
+// ---------------------------------------------------------------------------
+// Live Traffic Flow
+// ---------------------------------------------------------------------------
+
+static void path_planner_rebuild_graph(PathPlanner* planner) {
+    // Free old graph and create a fresh one, then rebuild all nodes and edges
+    if (planner->decision_graph) {
+        dg_free(planner->decision_graph);
+    }
+    planner->decision_graph = dg_create(MAX_GRAPH_NODES);
+    memset(planner->map_nodes, 0, sizeof(planner->map_nodes));
+    memset(planner->lane_id_to_node_ids_count, 0, sizeof(planner->lane_id_to_node_ids_count));
+    for (int i = 0; i < MAX_NUM_LANES; ++i) {
+        for (int j = 0; j < MAX_NODES_PER_LANE; ++j) {
+            planner->lane_id_to_node_ids_list[i][j] = -1;
+        }
+    }
+    path_planner_build_graph(planner);
+}
+
+void path_planner_update_traffic_flow(Simulation* sim, PathPlanner* planner) {
+    if (!sim || !planner || !planner->map) return;
+
+    Map* map = &sim->map;
+
+    // Compute actual elapsed sim-time since last call
+    double elapsed;
+    if (planner->last_traffic_update_time < 0.0) {
+        elapsed = 0.0; // first call — will initialize directly
+    } else {
+        elapsed = sim->time - planner->last_traffic_update_time;
+    }
+    planner->last_traffic_update_time = sim->time;
+
+    if (elapsed < 0.0) elapsed = 0.0;
+
+    // EMA alpha from elapsed time: alpha = 1 - exp(-elapsed / tau)
+    // This is frame-rate independent and gives the correct ~5 min window.
+    double alpha = (elapsed > 0.0) ? (1.0 - exp(-elapsed / TRAFFIC_FLOW_TAU)) : 0.0;
+
+    for (int i = 0; i < map->num_lanes; ++i) {
+        Lane* lane = map_get_lane(map, i);
+        if (!lane) continue;
+
+        int num_cars = lane->num_cars;
+        if (num_cars > 0) {
+            // Compute instantaneous average speed of cars on this lane
+            double total_speed = 0.0;
+            for (int c = 0; c < num_cars; ++c) {
+                Car* car = sim_get_car(sim, lane->cars_ids[c]);
+                if (car) {
+                    total_speed += car_get_speed(car);
+                }
+            }
+            double avg_speed = total_speed / (double)num_cars;
+
+            // Exponential moving average update
+            if (planner->traffic_flow_per_lane[i] <= 0.0 || alpha == 0.0) {
+                // First observation or first call — initialize directly
+                planner->traffic_flow_per_lane[i] = avg_speed;
+            } else {
+                planner->traffic_flow_per_lane[i] =
+                    (1.0 - alpha) * planner->traffic_flow_per_lane[i] + alpha * avg_speed;
+            }
+        }
+        // If no cars on the lane, keep the previous estimate (or 0 if never observed).
+        // A value of 0 means "no traffic data available" and get_cost_with_traffic
+        // will fall back to the speed limit.
+    }
+
+    // Rebuild the decision graph so edge weights reflect updated traffic flow
+    if (planner->use_live_traffic_info) {
+        path_planner_rebuild_graph(planner);
     }
 }

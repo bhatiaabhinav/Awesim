@@ -337,7 +337,9 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, bool draw_lanes, bool d
         Car* highlighted_car = sim_get_car(sim, HIGHLIGHTED_CARS[0]);
         if (highlighted_car_minimap == NULL) {
             highlighted_car_minimap = minimap_malloc(256, 256, map);
-            highlighted_car_path_planner = path_planner_create(sim_get_map(sim), false);
+            highlighted_car_path_planner = path_planner_create(sim_get_map(sim), true);
+            highlighted_car_path_planner->use_live_traffic_info = true;
+            highlighted_car_path_planner->avoid_highways = false;
         }
         
         if (highlighted_car && highlighted_car_minimap) {
@@ -347,6 +349,7 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, bool draw_lanes, bool d
             if (lane_goal) {
                 highlighted_car_minimap->marked_landmarks[0] = lane_goal->center;
                 highlighted_car_minimap->marked_landmark_colors[0] = (RGB){0, 0, 255};
+                path_planner_update_traffic_flow(sim, highlighted_car_path_planner);
                 path_planner_compute_shortest_path(highlighted_car_path_planner, map_get_lane(map, highlighted_car->lane_id), car_get_lane_progress_meters(highlighted_car), lane_goal, 0.5 * lane_goal->length);
                 highlighted_car_minimap->marked_path = highlighted_car_path_planner;
             }

@@ -378,6 +378,7 @@ void awesim_setup(Simulation* sim, Meters city_width, int num_cars, Seconds dt, 
     } else {
         awesim_map_setup(map, city_width);
     }
+    map_precompute_lane_geometry(map);
     int num_intersection_lanes = 0;
     for (int i = 0; i < map->num_lanes; i++) {
         Lane* lane = map_get_lane(map, i);

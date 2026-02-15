@@ -137,6 +137,12 @@ void sim_init(Simulation* sim) {
         driving_assistant_reset_settings(&sim->driving_assistants[i], &sim->cars[i]); // Reset driving assistant settings for each car
     }
     sim_set_npc_rogue_factor(sim, 0.0); // Initialize NPC rogue factor and driving styles
+
+    // zero out the traffic violations logs queue
+    for (int i = 0; i < MAX_CARS_IN_SIMULATION; i++) {
+        sim->traffic_violations_logs_queue.enabled[i] = false;  // disable logging for all cars by default
+        traffic_violations_logs_queue_clear_for_car(&sim->traffic_violations_logs_queue, i);
+    }
 }
 
 Car* sim_get_new_car(Simulation* self) {

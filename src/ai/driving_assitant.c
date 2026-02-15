@@ -5,6 +5,75 @@
 #include <math.h>
 #include <stdlib.h>
 
+// #define BENCHMARK_DAS_CONTROL
+// ^^ Uncomment to enable per-section timing of driving_assistant_control_car
+// #define BENCHMARK_DAS_INTERSECTION
+// ^^ Uncomment to enable per-section timing of handle_intersection
+// #define BENCHMARK_AEB
+// ^^ Uncomment to enable per-section timing of compute_best_case_braking_gap
+// #define BENCHMARK_DAS_POST_STEP
+// ^^ Uncomment to enable per-section timing of driving_assistant_post_sim_step
+
+// Shared timer utility for any benchmark in this file
+#if defined(BENCHMARK_DAS_CONTROL) || defined(BENCHMARK_DAS_INTERSECTION) || defined(BENCHMARK_AEB) || defined(BENCHMARK_DAS_POST_STEP)
+#include <stdio.h>
+#ifdef _WIN32
+#include <windows.h>
+static double _bdas_get_time_us(void) {
+    LARGE_INTEGER freq, counter;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&counter);
+    return (double)counter.QuadPart * 1e6 / (double)freq.QuadPart;
+}
+#else
+#include <time.h>
+static double _bdas_get_time_us(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec * 1e6 + (double)ts.tv_nsec / 1000.0;
+}
+#endif
+#endif
+
+#ifdef BENCHMARK_DAS_CONTROL
+static double _bdas_sa_build_us = 0;
+static double _bdas_smart_das_us = 0;
+static double _bdas_speed_ctrl_us = 0;
+static double _bdas_pedal_sim_us = 0;
+static double _bdas_aeb_us = 0;
+static double _bdas_merge_turn_us = 0;
+static double _bdas_apply_us = 0;
+static int _bdas_call_count = 0;
+#define BDAS_INTERVAL 500000
+#endif
+
+#ifdef BENCHMARK_DAS_INTERSECTION
+static double _bdas_intx_setup_us = 0;
+static double _bdas_intx_lightswitch_us = 0;
+static double _bdas_intx_exitcheck_us = 0;
+static double _bdas_intx_defyield_us = 0;
+static double _bdas_intx_brakecomp_us = 0;
+static int _bdas_intx_count = 0;
+#define BDAS_INTX_INTERVAL 500000
+#endif
+
+#ifdef BENCHMARK_AEB
+static double _baeb_perceive_us = 0;
+static double _baeb_physics_us = 0;
+static double _baeb_total_us = 0;
+static int _baeb_call_count = 0;
+#define BAEB_INTERVAL 500000
+#endif
+
+#ifdef BENCHMARK_DAS_POST_STEP
+static double _bpost_sa_build_us = 0;
+static double _bpost_aeb_disengage_us = 0;
+static double _bpost_intx_update_us = 0;
+static double _bpost_cleanup_us = 0;
+static int _bpost_call_count = 0;
+#define BPOST_INTERVAL 500000
+#endif
+
 
 bool driving_assistant_reset_settings(DrivingAssistant* das, Car* car) {
     if (!car || !das) {
@@ -25,7 +94,6 @@ bool driving_assistant_reset_settings(DrivingAssistant* das, Car* car) {
     das->smart_das = true;          // Default to true
     das->smart_das_driving_style = SMART_DAS_DRIVING_STYLE_NORMAL; // Default driving style
     das->aeb_in_progress = false;    // Reset AEB state
-    das->aeb_manually_disengaged = false; // Reset manual disengagement state
     das->smart_das_intersection_approach_engaged = false; // Reset smart DAS intersection approach state
     das->use_preferred_accel_profile = false; // Reset preferred acceleration profile state
     das->use_linear_speed_control = false; // Reset linear speed control state
@@ -46,7 +114,10 @@ bool driving_assistant_reset_settings(DrivingAssistant* das, Car* car) {
 // Returns:
 //   The best-case gap (in meters) under maximum braking, or INFINITY if inputs are invalid
 //   or just the current distance to the lead vehicle if no forward collision risk exists (e.g., ego reversing).
-static Meters compute_best_case_braking_gap(Simulation* sim, const Car* car, const SituationalAwareness* sa) {
+static Meters compute_best_case_braking_gap(Simulation* sim, const Car* car, const SituationalAwareness* sa, Meters* distance_to_lead_cached, MetersPerSecond* speed_lead_cached, MetersPerSecondSquared* accel_lead_cached) {
+    #ifdef BENCHMARK_AEB
+    double _baeb_t0 = _bdas_get_time_us();
+    #endif
     // Validate inputs
     if (!car || !sa) {
         LOG_ERROR("NULL car or situational awareness.");
@@ -60,10 +131,20 @@ static Meters compute_best_case_braking_gap(Simulation* sim, const Car* car, con
     const double EPS = 1e-6;  // Small threshold for floating-point comparisons
 
     // Initial conditions
+    bool cached = (distance_to_lead_cached && speed_lead_cached && accel_lead_cached);
     Meters distance_to_lead;
     MetersPerSecond speed_lead;
     MetersPerSecondSquared accel_lead;
-    perceive_lead_vehicle(car, sim, sa, &distance_to_lead, &speed_lead, &accel_lead);
+    if (cached) {
+        distance_to_lead = *distance_to_lead_cached;
+        speed_lead = *speed_lead_cached;
+        accel_lead = *accel_lead_cached;
+    } else {
+        perceive_lead_vehicle(car, sim, sa, &distance_to_lead, &speed_lead, &accel_lead);
+    }
+    #ifdef BENCHMARK_AEB
+    double _baeb_t1 = _bdas_get_time_us();
+    #endif
 
     const Meters initial_gap = distance_to_lead  - (car_get_length(car) + car_get_length(sa->nearby_vehicles.lead)) / 2.0;  // Initial bumper-to-bumper gap
     if (initial_gap <= 0) {
@@ -164,6 +245,22 @@ static Meters compute_best_case_braking_gap(Simulation* sim, const Car* car, con
     // Ensure non-negative gap; clip to 0 if collision indicated
     min_gap = fmax(min_gap, 0.0);
 
+    #ifdef BENCHMARK_AEB
+    double _baeb_t2 = _bdas_get_time_us();
+    _baeb_perceive_us += _baeb_t1 - _baeb_t0;
+    _baeb_physics_us  += _baeb_t2 - _baeb_t1;
+    _baeb_total_us    += _baeb_t2 - _baeb_t0;
+    _baeb_call_count++;
+    if (_baeb_call_count % BAEB_INTERVAL == 0) {
+        double n = (double)_baeb_call_count;
+        printf("[BENCH aeb_gap] Avg over %d calls: Perceive=%.3f us | Physics=%.3f us | Total=%.3f us\n",
+            _baeb_call_count,
+            _baeb_perceive_us / n,
+            _baeb_physics_us / n,
+            _baeb_total_us / n);
+    }
+    #endif
+
     return min_gap;
 }
 
@@ -176,14 +273,13 @@ static bool driving_assistant_smart_das_should_engage_intersection_approach(Driv
     }
     if (situation->is_an_intersection_upcoming) {
         Meters distance_to_stop_line = situation->distance_to_end_of_lane_from_leading_edge - STOP_LINE_BUFFER_METERS;
-        // check if we need to engage now. Are we within the appropriate distance to start slowing down for stopping at intersection? braking distance situation->braking_distance.preferred_smooth, situation->braking_distance.preferred, situation->braking_distance.capable depending on SmartDASDrivingStyle.
-        Meters braking_distances[SMART_DAS_DRIVING_STYLES_COUNT] = {
-            [SMART_DAS_DRIVING_STYLE_RECKLESS] = situation->braking_distance.capable,
-            [SMART_DAS_DRIVING_STYLE_AGGRESSIVE] = situation->braking_distance.preferred,
-            [SMART_DAS_DRIVING_STYLE_NORMAL] = situation->braking_distance.preferred_smooth,
-            [SMART_DAS_DRIVING_STYLE_DEFENSIVE] = situation->braking_distance.preferred_smooth
-        };
-        Meters braking_distance_to_use = braking_distances[das->smart_das_driving_style];
+        // Compute braking distance based on driving style directly
+        Meters braking_distance_to_use;
+        switch (das->smart_das_driving_style) {
+            case SMART_DAS_DRIVING_STYLE_RECKLESS:    braking_distance_to_use = situation->braking_distance.capable; break;
+            case SMART_DAS_DRIVING_STYLE_AGGRESSIVE:  braking_distance_to_use = situation->braking_distance.preferred; break;
+            default:                                  braking_distance_to_use = situation->braking_distance.preferred_smooth; break;
+        }
         if (situation->speed < 0) {
             braking_distance_to_use = 0; // if reversing, no braking distance needed, which is originally positive even if speed is negative
         }
@@ -192,11 +288,30 @@ static bool driving_assistant_smart_das_should_engage_intersection_approach(Driv
     return false;
 }
 
+static const bool _like_to_speed_up_for_yellows[SMART_DAS_DRIVING_STYLES_COUNT] = {
+    [SMART_DAS_DRIVING_STYLE_NO_RULES] = false,
+    [SMART_DAS_DRIVING_STYLE_RECKLESS] = true,
+    [SMART_DAS_DRIVING_STYLE_AGGRESSIVE] = true,
+    [SMART_DAS_DRIVING_STYLE_NORMAL] = false,
+    [SMART_DAS_DRIVING_STYLE_DEFENSIVE] = false
+};
+static const bool _defensive_even_if_right_of_way[SMART_DAS_DRIVING_STYLES_COUNT] = {
+    [SMART_DAS_DRIVING_STYLE_NO_RULES] = false,
+    [SMART_DAS_DRIVING_STYLE_RECKLESS] = false,
+    [SMART_DAS_DRIVING_STYLE_AGGRESSIVE] = false,
+    [SMART_DAS_DRIVING_STYLE_NORMAL] = true,
+    [SMART_DAS_DRIVING_STYLE_DEFENSIVE] = true
+};
+
 static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(DrivingAssistant* das, Car* car, Simulation* sim, SituationalAwareness* situation) {
     Map* map = sim_get_map(sim);
+    Seconds dt = sim_get_dt(sim);
     MetersPerSecondSquared accel = car->capabilities.accel_profile.max_acceleration;
     if (situation->is_an_intersection_upcoming) {
         if (das->smart_das_intersection_approach_engaged) {
+            #ifdef BENCHMARK_DAS_INTERSECTION
+            double _bi_t0 = _bdas_get_time_us();
+            #endif
             Meters distance_to_stop_line = situation->distance_to_end_of_lane_from_leading_edge - STOP_LINE_BUFFER_METERS;
             TrafficLight light = situation->light_for_turn[das->turn_intent];
             bool is_sudden_emergency_braking_possible = (situation->braking_distance.capable < situation->distance_to_end_of_lane);
@@ -218,34 +333,20 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
             bool should_brake_for_yield = false;
             bool should_speed_up_to_make_light = false;
 
-            bool is_ok_with_yieldings[SMART_DAS_DRIVING_STYLES_COUNT] = {
-                [SMART_DAS_DRIVING_STYLE_NO_RULES] = false,
-                [SMART_DAS_DRIVING_STYLE_RECKLESS] = is_smooth_braking_possible,
-                [SMART_DAS_DRIVING_STYLE_AGGRESSIVE] = is_sudden_semi_hard_braking_possible,
-                [SMART_DAS_DRIVING_STYLE_NORMAL] = is_sudden_emergency_braking_possible,
-                [SMART_DAS_DRIVING_STYLE_DEFENSIVE] = is_sudden_emergency_braking_possible
-            };
-            bool should_brake_for_yellows[SMART_DAS_DRIVING_STYLES_COUNT] = {
-                [SMART_DAS_DRIVING_STYLE_NO_RULES] = false,
-                [SMART_DAS_DRIVING_STYLE_RECKLESS] = false,
-                [SMART_DAS_DRIVING_STYLE_AGGRESSIVE] = is_smooth_braking_possible,
-                [SMART_DAS_DRIVING_STYLE_NORMAL] = is_smooth_braking_possible,
-                [SMART_DAS_DRIVING_STYLE_DEFENSIVE] = is_smooth_braking_possible
-            };
-            bool like_to_speed_up_for_yellows[SMART_DAS_DRIVING_STYLES_COUNT] = {
-                [SMART_DAS_DRIVING_STYLE_NO_RULES] = false,
-                [SMART_DAS_DRIVING_STYLE_RECKLESS] = true,
-                [SMART_DAS_DRIVING_STYLE_AGGRESSIVE] = true,
-                [SMART_DAS_DRIVING_STYLE_NORMAL] = false,
-                [SMART_DAS_DRIVING_STYLE_DEFENSIVE] = false
-            };
-            bool defensive_even_if_right_of_way[SMART_DAS_DRIVING_STYLES_COUNT] = {
-                [SMART_DAS_DRIVING_STYLE_NO_RULES] = false,
-                [SMART_DAS_DRIVING_STYLE_RECKLESS] = false,
-                [SMART_DAS_DRIVING_STYLE_AGGRESSIVE] = false,
-                [SMART_DAS_DRIVING_STYLE_NORMAL] = true,
-                [SMART_DAS_DRIVING_STYLE_DEFENSIVE] = true
-            };
+            // Compute is_ok_with_yielding directly instead of building array
+            SmartDASDrivingStyle style = das->smart_das_driving_style;
+            bool is_ok_with_yielding;
+            switch (style) {
+                case SMART_DAS_DRIVING_STYLE_NO_RULES:    is_ok_with_yielding = false; break;
+                case SMART_DAS_DRIVING_STYLE_RECKLESS:    is_ok_with_yielding = is_smooth_braking_possible; break;
+                case SMART_DAS_DRIVING_STYLE_AGGRESSIVE:  is_ok_with_yielding = is_sudden_semi_hard_braking_possible; break;
+                default:                                  is_ok_with_yielding = is_sudden_emergency_braking_possible; break;
+            }
+            // Compute should_brake_for_yellow directly
+            bool should_brake_for_yellow = (style >= SMART_DAS_DRIVING_STYLE_AGGRESSIVE) && is_smooth_braking_possible;
+            #ifdef BENCHMARK_DAS_INTERSECTION
+            double _bi_t1 = _bdas_get_time_us();
+            #endif
 
             switch (light)
             {
@@ -259,21 +360,21 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
             case TRAFFIC_LIGHT_GREEN_YIELD:
                 should_brake_for_full_stop = false;
                 should_brake_for_rolling_stop = false;
-                should_brake_for_yield = is_ok_with_yieldings[das->smart_das_driving_style] && car_has_something_to_yield_to_at_intersection(car, sim, situation, das->turn_intent, yield_thw, sim_get_dt(sim));
+                should_brake_for_yield = is_ok_with_yielding && car_has_something_to_yield_to_at_intersection(car, sim, situation, das->turn_intent, yield_thw, dt);
                 should_speed_up_to_make_light = false;
                 break;
             case TRAFFIC_LIGHT_YELLOW:
                 // note: we are not lawfully expected to hard brake on yellows in general. No driving style should do that.
-                should_brake_for_full_stop = should_brake_for_yellows[das->smart_das_driving_style];
+                should_brake_for_full_stop = should_brake_for_yellow;
                 should_brake_for_rolling_stop = false;
                 should_brake_for_yield = false;
-                should_speed_up_to_make_light = !should_brake_for_full_stop && like_to_speed_up_for_yellows[das->smart_das_driving_style];
+                should_speed_up_to_make_light = !should_brake_for_full_stop && _like_to_speed_up_for_yellows[style];
                 break;
             case TRAFFIC_LIGHT_YELLOW_YIELD:
                 // note: we are not lawfully expected to hard brake on yellows in general. No driving style should do that. Also, we may need to yield here in case we decide to go through the yellow. Also, we won't be speeding up to make the light here, because when combined with yielding, it messes up things.
-                should_brake_for_full_stop = should_brake_for_yellows[das->smart_das_driving_style];
+                should_brake_for_full_stop = should_brake_for_yellow;
                 should_brake_for_rolling_stop = false;
-                should_brake_for_yield = !should_brake_for_full_stop && is_ok_with_yieldings[das->smart_das_driving_style] && car_has_something_to_yield_to_at_intersection(car, sim, situation, das->turn_intent, yield_thw, sim_get_dt(sim));
+                should_brake_for_yield = !should_brake_for_full_stop && is_ok_with_yielding && car_has_something_to_yield_to_at_intersection(car, sim, situation, das->turn_intent, yield_thw, dt);
                 should_speed_up_to_make_light = false;
                 break;
             case TRAFFIC_LIGHT_RED:
@@ -285,21 +386,21 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
             case TRAFFIC_LIGHT_RED_YIELD: {
                 // e.g., free right. first stop at stop line, then yield once you are beyond it
                 bool yield_mode = distance_to_stop_line <= meters(0.1); // within 10 cm of stop line
-                if (das->smart_das_driving_style == SMART_DAS_DRIVING_STYLE_DEFENSIVE) {
+                if (style == SMART_DAS_DRIVING_STYLE_DEFENSIVE) {
                     yield_mode = false; // defensive treats red-yield as red
                 }
-                if (das->smart_das_driving_style == SMART_DAS_DRIVING_STYLE_RECKLESS) {
+                if (style == SMART_DAS_DRIVING_STYLE_RECKLESS) {
                     yield_mode = true; // reckless treats red-yield as yield
                 }
                 if (yield_mode) {
                     should_brake_for_full_stop = false;
                     should_brake_for_rolling_stop = false;
-                    should_brake_for_yield = car_has_something_to_yield_to_at_intersection(car, sim, situation, das->turn_intent, yield_thw, sim_get_dt(sim));
+                    should_brake_for_yield = car_has_something_to_yield_to_at_intersection(car, sim, situation, das->turn_intent, yield_thw, dt);
                 } else {
                     should_brake_for_full_stop = true;
                     should_brake_for_rolling_stop = false; 
                     should_brake_for_yield = false;
-                    if (das->smart_das_driving_style <= SMART_DAS_DRIVING_STYLE_AGGRESSIVE) {
+                    if (style <= SMART_DAS_DRIVING_STYLE_AGGRESSIVE) {
                         should_brake_for_full_stop = false;
                         should_brake_for_rolling_stop = true; // rolling stop for aggressive
                     }
@@ -327,10 +428,10 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
                     }
                 } else {
                     // come to full stop or rolling stop at stop line
-                    should_brake_for_full_stop = das->smart_das_driving_style == SMART_DAS_DRIVING_STYLE_NORMAL || das->smart_das_driving_style == SMART_DAS_DRIVING_STYLE_DEFENSIVE;
-                    should_brake_for_rolling_stop = das->smart_das_driving_style == SMART_DAS_DRIVING_STYLE_RECKLESS || das->smart_das_driving_style == SMART_DAS_DRIVING_STYLE_AGGRESSIVE;
+                    should_brake_for_full_stop = style == SMART_DAS_DRIVING_STYLE_NORMAL || style == SMART_DAS_DRIVING_STYLE_DEFENSIVE;
+                    should_brake_for_rolling_stop = style == SMART_DAS_DRIVING_STYLE_RECKLESS || style == SMART_DAS_DRIVING_STYLE_AGGRESSIVE;
                     // for reckless, if we are approaching faster than other cars, do not even do rolling stop, just go through
-                    if (das->smart_das_driving_style == SMART_DAS_DRIVING_STYLE_RECKLESS && should_brake_for_rolling_stop) {
+                    if (style == SMART_DAS_DRIVING_STYLE_RECKLESS && should_brake_for_rolling_stop) {
                         bool is_approaching_faster_than_others = true;
                         if (!all_clear) {
                             // someone is already on intersection
@@ -340,7 +441,7 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
                             Meters perceived_progress;
                             MetersPerSecond perceived_speed;
                             // Add perception dropout for the other vehicle
-                            bool perceived = car_noisy_perceive_other(car, foremost_vehicle, sim, NULL, &perceived_progress, &perceived_speed, NULL, NULL, NULL, NULL, NULL, NULL, false, sim_get_dt(sim));
+                            bool perceived = car_noisy_perceive_other(car, foremost_vehicle, sim, NULL, &perceived_progress, &perceived_speed, NULL, NULL, NULL, NULL, NULL, NULL, false, dt);
                             if (!perceived) {
                                 foremost_vehicle = NULL;
                             }
@@ -376,6 +477,9 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
             }
 
 
+            #ifdef BENCHMARK_DAS_INTERSECTION
+            double _bi_t2 = _bdas_get_time_us();
+            #endif
             // Finally, as you enter the intersection (e.g., going straight), and someone else in front of you just went to a different lane (e.g., turned left), we should brake a bit to let them make some distance. Basically, check all outgoing connections and see if there is a car very close to the intersection in front of us but in a different lane.
             for (int turn_dir = 0; turn_dir < 3; turn_dir++) {
                 const Lane* next_lane = situation->lane_next_after_turn[turn_dir];
@@ -392,16 +496,19 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
                 }
             }
 
+            #ifdef BENCHMARK_DAS_INTERSECTION
+            double _bi_t3 = _bdas_get_time_us();
+            #endif
             bool should_brake = should_brake_for_full_stop || should_brake_for_rolling_stop || should_brake_for_yield;
 
-            if (!should_brake && defensive_even_if_right_of_way[das->smart_das_driving_style] && defensive_yield_despite_right_of_way(car, sim, situation, das->turn_intent, yield_thw, sim_get_dt(sim))) {
+            if (!should_brake && _defensive_even_if_right_of_way[style] && defensive_yield_despite_right_of_way(car, sim, situation, das->turn_intent, yield_thw, dt)) {
                 // even if we have the right of way, if we are defensive and there is something to yield to with a short time headway, we should yield
                 should_brake_for_yield = true;
                 should_speed_up_to_make_light = false; // if we were going to speed up for yellow, now we should not do that because we are going to yield instead
                 should_brake = true;
             }
 
-            if (das->smart_das_driving_style == SMART_DAS_DRIVING_STYLE_NO_RULES) {
+            if (style == SMART_DAS_DRIVING_STYLE_NO_RULES) {
                 // in this mode, we don't brake for anything at intersections
                 should_brake_for_full_stop = false;
                 should_brake_for_rolling_stop = false;
@@ -411,7 +518,7 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
 
             if (should_brake_for_full_stop && !is_sudden_emergency_braking_possible) {
                 // cannot brake in time even with max capable braking, so gotta run through (other than reckless, which should speed instead even if red)
-                if (das->smart_das_driving_style == SMART_DAS_DRIVING_STYLE_RECKLESS) {
+                if (style == SMART_DAS_DRIVING_STYLE_RECKLESS) {
                     should_brake_for_full_stop = false;
                     should_speed_up_to_make_light = true;
                 } else {
@@ -427,6 +534,9 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
             }
 
 
+            #ifdef BENCHMARK_DAS_INTERSECTION
+            double _bi_t4 = _bdas_get_time_us();
+            #endif
             should_brake = should_brake_for_full_stop || should_brake_for_rolling_stop || should_brake_for_yield;   // update should_brake after adjustments based on feasibility and style
             if (should_brake) {
                 // compute position target delta. If full stop or rolling stop, target is stop line - buffer. If yield, target is end of lane.
@@ -441,7 +551,7 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
                 MetersPerSecondSquared accel_to_stop = car_compute_acceleration_chase_target(car, position_target, speed_at_target, fmax(situation->distance_to_end_of_lane_from_leading_edge - position_target, meters(0)), speed_limit, das->use_preferred_accel_profile);
                 bool stop_right_away = (situation->distance_to_end_of_lane_from_leading_edge < 0 && situation->going_forward) || (accel_to_stop < 0 && (situation->stopped || situation->reversing));
                 if (stop_right_away) {
-                    accel_to_stop = -situation->speed / sim_get_dt(sim); // just enough to stop right away
+                    accel_to_stop = -situation->speed / dt; // just enough to stop right away
                     accel_to_stop = fclamp(accel_to_stop, -car->capabilities.accel_profile.max_deceleration, car->capabilities.accel_profile.max_acceleration);
                 }
                 accel = accel_to_stop; // take the minimum of the two accelerations
@@ -449,6 +559,27 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
                 // compute acceleration to speed up to make the light
                 das->speed_target = das->speed_target + from_mph(10);
             }
+            #ifdef BENCHMARK_DAS_INTERSECTION
+            double _bi_t5 = _bdas_get_time_us();
+            _bdas_intx_setup_us       += _bi_t1 - _bi_t0;
+            _bdas_intx_lightswitch_us += _bi_t2 - _bi_t1;
+            _bdas_intx_exitcheck_us   += _bi_t3 - _bi_t2;
+            _bdas_intx_defyield_us    += _bi_t4 - _bi_t3;
+            _bdas_intx_brakecomp_us   += _bi_t5 - _bi_t4;
+            _bdas_intx_count++;
+            if (_bdas_intx_count % BDAS_INTX_INTERVAL == 0) {
+                double n = (double)_bdas_intx_count;
+                double total = (_bdas_intx_setup_us + _bdas_intx_lightswitch_us + _bdas_intx_exitcheck_us + _bdas_intx_defyield_us + _bdas_intx_brakecomp_us) / n;
+                printf("  [BENCH intx_handle] Avg over %d calls: Setup=%.3f us | LightSwitch=%.3f us | ExitCheck=%.3f us | DefYield=%.3f us | BrakeComp=%.3f us | Total=%.3f us\n",
+                    _bdas_intx_count,
+                    _bdas_intx_setup_us / n,
+                    _bdas_intx_lightswitch_us / n,
+                    _bdas_intx_exitcheck_us / n,
+                    _bdas_intx_defyield_us / n,
+                    _bdas_intx_brakecomp_us / n,
+                    total);
+            }
+            #endif
         }
     } else {
         das->smart_das_intersection_approach_engaged = false; // reset the flag
@@ -457,74 +588,65 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
     return accel;
 }
 
+static const double _speed_limit_multipliers[SMART_DAS_DRIVING_STYLES_COUNT] = {
+    [SMART_DAS_DRIVING_STYLE_NO_RULES] = 1.5,
+    [SMART_DAS_DRIVING_STYLE_RECKLESS] = 1.25,
+    [SMART_DAS_DRIVING_STYLE_AGGRESSIVE] = 1.1,
+    [SMART_DAS_DRIVING_STYLE_NORMAL] = 1.0,
+    [SMART_DAS_DRIVING_STYLE_DEFENSIVE] = 0.9
+};
+
+// Precomputed mph-to-mps constants for speed limit adjustments
+static const MetersPerSecond _mph5  = 5.0  * (1609.34 / 3600.0);
+static const MetersPerSecond _mph10 = 10.0 * (1609.34 / 3600.0);
+
 static MetersPerSecond determine_preferred_speed_limit(Map* map, const Lane* lane, SmartDASDrivingStyle style) {
-    MetersPerSecond lane_speed_limit = lane_get_speed_limit(lane);
-    Road* road = lane_is_at_intersection(lane) ? NULL : map_get_road(map, lane->road_id);
+    MetersPerSecond lane_speed_limit = lane->speed_limit;
 
-    if (road) {
-        int num_lanes = road_get_num_lanes(road);
-        // on two or three lane roads, increase speed limit of passing lane by 5 mph
-        if ((num_lanes == 2 || num_lanes == 3) && lane == road_get_leftmost_lane(road, map)) {
-            lane_speed_limit += from_mph(5);
-        }
-        // on three lanes road, decrease speed limit of rightmost lane by 5 mph
-        if (num_lanes == 3 && lane == road_get_rightmost_lane(road, map)) {
-            lane_speed_limit -= from_mph(5);
-        }
+    if (!lane->is_at_intersection) {
+        Road* road = &map->roads[lane->road_id];
+        int num_lanes = road->num_lanes;
+        int idx = lane->index_in_road;
 
-        // on 4 lane roads, increase speed limit of leftmost by 10 mph, 2nd from left by 5 mph, and decrease of rightmost lane by 5.
-        if (num_lanes == 4) {
-            if (lane == road_get_leftmost_lane(road, map)) {
-                lane_speed_limit += from_mph(10);
-            } else if (road_find_index_of_lane(road, lane->id) == 2) {
-                lane_speed_limit += from_mph(5);
-            } else if (lane == road_get_rightmost_lane(road, map)) {
-                lane_speed_limit -= from_mph(5);
-            }
+        if (num_lanes == 2 || num_lanes == 3) {
+            if (idx == 0) lane_speed_limit += _mph5;              // leftmost = passing lane
+            if (num_lanes == 3 && idx == num_lanes - 1) lane_speed_limit -= _mph5; // rightmost
+        } else if (num_lanes == 4) {
+            if (idx == 0) lane_speed_limit += _mph10;             // leftmost
+            else if (idx == 2) lane_speed_limit += _mph5;         // 2nd from right (matches original index==2)
+            else if (idx == 3) lane_speed_limit -= _mph5;         // rightmost
         }
-
-        // for more than 4 lanes, no adjustments for now. raise warning
-        if (num_lanes > 4) {
-            LOG_WARN("Smart DAS: No speed limit adjustments for roads with more than 4 lanes. Road ID: %d, Num Lanes: %d", road->id, num_lanes);
-        }
+        // for more than 4 lanes, no adjustments
     }
 
-    MetersPerSecond speed_limits[] = {
-        [SMART_DAS_DRIVING_STYLE_NO_RULES] = 1.5 * lane_speed_limit,
-        [SMART_DAS_DRIVING_STYLE_RECKLESS] = 1.25 * lane_speed_limit,
-        [SMART_DAS_DRIVING_STYLE_AGGRESSIVE] = 1.1 * lane_speed_limit,
-        [SMART_DAS_DRIVING_STYLE_NORMAL] = lane_speed_limit,
-        [SMART_DAS_DRIVING_STYLE_DEFENSIVE] = 0.9 * lane_speed_limit
-    };
-
-    return speed_limits[style];
+    return _speed_limit_multipliers[style] * lane_speed_limit;
 }
 
+
+static const Seconds _smart_das_thws[SMART_DAS_DRIVING_STYLES_COUNT] = {
+    [SMART_DAS_DRIVING_STYLE_NO_RULES] = 0.5,
+    [SMART_DAS_DRIVING_STYLE_RECKLESS] = 1.0,
+    [SMART_DAS_DRIVING_STYLE_AGGRESSIVE] = 2.0,
+    [SMART_DAS_DRIVING_STYLE_NORMAL] = 3.0,
+    [SMART_DAS_DRIVING_STYLE_DEFENSIVE] = 4.0
+};
+
+static const Meters _smart_das_buffers[SMART_DAS_DRIVING_STYLES_COUNT] = {
+    [SMART_DAS_DRIVING_STYLE_NO_RULES] = 0.5,
+    [SMART_DAS_DRIVING_STYLE_RECKLESS] = 1.0,
+    [SMART_DAS_DRIVING_STYLE_AGGRESSIVE] = 2.0,
+    [SMART_DAS_DRIVING_STYLE_NORMAL] = 3.0,
+    [SMART_DAS_DRIVING_STYLE_DEFENSIVE] = 4.0
+};
 
 void driving_assistant_smart_update_das_variables(DrivingAssistant* das, Car* car, Simulation* sim, SituationalAwareness* sa) {
     if (das->smart_das) {
 
-        Seconds thws[] = {
-            [SMART_DAS_DRIVING_STYLE_NO_RULES] = 0.5,
-            [SMART_DAS_DRIVING_STYLE_RECKLESS] = 1.0,
-            [SMART_DAS_DRIVING_STYLE_AGGRESSIVE] = 2.0,
-            [SMART_DAS_DRIVING_STYLE_NORMAL] = 3.0,
-            [SMART_DAS_DRIVING_STYLE_DEFENSIVE] = 4.0
-        };
-
-        Meters buffers[] = {
-            [SMART_DAS_DRIVING_STYLE_NO_RULES] = 0.5,
-            [SMART_DAS_DRIVING_STYLE_RECKLESS] = 1.0,
-            [SMART_DAS_DRIVING_STYLE_AGGRESSIVE] = 2.0,
-            [SMART_DAS_DRIVING_STYLE_NORMAL] = 3.0,
-            [SMART_DAS_DRIVING_STYLE_DEFENSIVE] = 4.0
-        };
-
         // set the THW and speed target based on driving style
         das->speed_target = determine_preferred_speed_limit(sim_get_map(sim), sa->lane, das->smart_das_driving_style);
         das->speed_target = fmin(das->speed_target, car->capabilities.top_speed); // cap speed target to car's max speed
-        das->thw = thws[das->smart_das_driving_style];
-        das->buffer = buffers[das->smart_das_driving_style];
+        das->thw = _smart_das_thws[das->smart_das_driving_style];
+        das->buffer = _smart_das_buffers[das->smart_das_driving_style];
         das->use_linear_speed_control = das->smart_das_driving_style <= SMART_DAS_DRIVING_STYLE_RECKLESS; // reckless uses linear speed control instead of exponential error decay control as it likes more abrupt changes
         das->use_preferred_accel_profile = das->smart_das_driving_style >= SMART_DAS_DRIVING_STYLE_NORMAL; // normal and defensive use preferred accel profile (which is smoother than capable), while reckless and aggressive use full capable profile
         das->merge_assistance = true; // smart DAS always has merge assistance on
@@ -572,8 +694,14 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
     bool request_lane_change = false;
     bool request_turn = false;
 
+    #ifdef BENCHMARK_DAS_CONTROL
+    double _bdas_t0 = _bdas_get_time_us();
+    #endif
     situational_awareness_build(sim, car->id);  // ensure up-to-date situational awareness
     SituationalAwareness* sa = sim_get_situational_awareness(sim, car_get_id(car));
+    #ifdef BENCHMARK_DAS_CONTROL
+    double _bdas_t1 = _bdas_get_time_us();
+    #endif
 
     if (das->smart_das) {
 
@@ -585,6 +713,9 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
     }
 
     das->speed_target = fmin(das->speed_target, car->capabilities.top_speed); // cap speed target to car's max speed
+    #ifdef BENCHMARK_DAS_CONTROL
+    double _bdas_t2 = _bdas_get_time_us();
+    #endif
 
     // ----------- Speed adjustment (general) ------------------------
     MetersPerSecondSquared accel_speed_adjust = das->use_linear_speed_control ? car_compute_acceleration_adjust_speed_linear(car, das->speed_target, das->use_preferred_accel_profile) : car_compute_acceleration_adjust_speed(car, das->speed_target, das->use_preferred_accel_profile); // works for negative speed targets as well
@@ -619,10 +750,13 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
     }
 
     // ------------- Follow lead vehicle ------------------------
+    Meters distance_to_lead;
+    MetersPerSecond speed_lead;
+    MetersPerSecondSquared accel_lead;
+    bool lead_perception_cached = false;
     if (das->follow_assistance && sa->nearby_vehicles.lead) {
-        Meters distance_to_lead;
-        MetersPerSecond speed_lead;
-        perceive_lead_vehicle(car, sim, sa, &distance_to_lead, &speed_lead, NULL);
+        perceive_lead_vehicle(car, sim, sa, &distance_to_lead, &speed_lead, &accel_lead);
+        lead_perception_cached = true;
         Meters distance_to_lead_bumper_to_bumper = distance_to_lead - (car_get_length(car) + car_get_length(sa->nearby_vehicles.lead)) / 2.0; // bumper to bumper distance
         Meters target_distance_bumper_to_bumper = das->buffer + fmax(sa->speed, 0) * das->thw;
         Meters position_delta = distance_to_lead_bumper_to_bumper - target_distance_bumper_to_bumper;
@@ -647,6 +781,9 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
     }
 
     // Account for human-like delay in adjusting acceleration (gas/brake pedal presses):
+    #ifdef BENCHMARK_DAS_CONTROL
+    double _bdas_t3 = _bdas_get_time_us();
+    #endif
 
     Seconds dt = sim_get_dt(sim);
     MetersPerSecondSquared accel_prev = car_get_acceleration(car);
@@ -769,12 +906,20 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
 
 
     // ---- AEB logic overrides everything else ----
+    #ifdef BENCHMARK_DAS_CONTROL
+    double _bdas_t4 = _bdas_get_time_us();
+    #endif
 
     // auto engagement conditions
     bool execute_aeb = false;
-    Meters best_case_braking_gap = compute_best_case_braking_gap(sim, car, sa); // todo: fix this fn
-    if (das->aeb_in_progress || (das->aeb_assistance && sa->nearby_vehicles.lead && sa->speed >= AEB_ENGAGE_MIN_SPEED_MPS && best_case_braking_gap < AEB_ENGAGE_BEST_CASE_BRAKING_GAP_M)) {
-        execute_aeb = !das->aeb_manually_disengaged;
+    Meters best_case_braking_gap;
+    if (das->aeb_assistance && sa->nearby_vehicles.lead) {
+        if (das->aeb_in_progress) {
+            execute_aeb = true; // once AEB is engaged, stay engaged until lead is gone or we are stopped to prevent oscillation
+        } else if (sa->speed >= AEB_ENGAGE_MIN_SPEED_MPS) {
+            best_case_braking_gap = compute_best_case_braking_gap(sim, car, sa, lead_perception_cached ? &distance_to_lead : NULL, lead_perception_cached ? &speed_lead : NULL, lead_perception_cached ? &accel_lead : NULL); // todo: fix this fn
+            execute_aeb = best_case_braking_gap < AEB_ENGAGE_BEST_CASE_BRAKING_GAP_M;
+        }
     }
 
     // execute AEB
@@ -792,6 +937,9 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
     
 
     // ----------- Merge ----------------------
+    #ifdef BENCHMARK_DAS_CONTROL
+    double _bdas_t5 = _bdas_get_time_us();
+    #endif
 
 
     // first of all, if merge is not possible, cancel the merge intent and reset current indicator and requests
@@ -834,6 +982,9 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
     }
 
     // ---- Apply control commands ----
+    #ifdef BENCHMARK_DAS_CONTROL
+    double _bdas_t6 = _bdas_get_time_us();
+    #endif
 
     car_set_acceleration(car, accel);
     car_set_indicator_lane(car, lane_indicator);
@@ -841,6 +992,32 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
     car_set_request_indicated_lane(car, request_lane_change);
     car_set_request_indicated_turn(car, request_turn);
     car_set_auto_turn_off_indicators(car, true); // Needed to detect successful lane/turn changes
+
+    #ifdef BENCHMARK_DAS_CONTROL
+    double _bdas_t7 = _bdas_get_time_us();
+    _bdas_sa_build_us   += _bdas_t1 - _bdas_t0;
+    _bdas_smart_das_us  += _bdas_t2 - _bdas_t1;
+    _bdas_speed_ctrl_us += _bdas_t3 - _bdas_t2;
+    _bdas_pedal_sim_us  += _bdas_t4 - _bdas_t3;
+    _bdas_aeb_us        += _bdas_t5 - _bdas_t4;
+    _bdas_merge_turn_us += _bdas_t6 - _bdas_t5;
+    _bdas_apply_us      += _bdas_t7 - _bdas_t6;
+    _bdas_call_count++;
+    if (_bdas_call_count % BDAS_INTERVAL == 0) {
+        double n = (double)_bdas_call_count;
+        double total = (_bdas_sa_build_us + _bdas_smart_das_us + _bdas_speed_ctrl_us + _bdas_pedal_sim_us + _bdas_aeb_us + _bdas_merge_turn_us + _bdas_apply_us) / n;
+        printf("[BENCH das_control] Avg over %d calls: SA_Build=%.3f us | SmartDAS=%.3f us | SpeedCtrl+Follow=%.3f us | PedalSim=%.3f us | AEB=%.3f us | MergeTurn=%.3f us | Apply=%.3f us | Total=%.3f us\n",
+            _bdas_call_count,
+            _bdas_sa_build_us / n,
+            _bdas_smart_das_us / n,
+            _bdas_speed_ctrl_us / n,
+            _bdas_pedal_sim_us / n,
+            _bdas_aeb_us / n,
+            _bdas_merge_turn_us / n,
+            _bdas_apply_us / n,
+            total);
+    }
+    #endif
 
     return true; // Indicating successful control without error
 }
@@ -851,33 +1028,48 @@ void driving_assistant_post_sim_step(DrivingAssistant* das, Car* car, Simulation
         LOG_ERROR("Invalid car, simulation, or driving assistant provided to driving_assistant_post_step");
         return; // Early return if input validation fails
     }
+    #ifdef BENCHMARK_DAS_POST_STEP
+    double _bpost_t0 = _bdas_get_time_us();
+    #endif
     situational_awareness_build(sim, car_get_id(car)); // Ensure situational awareness is up-to-date
     SituationalAwareness* sa = sim_get_situational_awareness(sim, car_get_id(car));
+    #ifdef BENCHMARK_DAS_POST_STEP
+    double _bpost_t1 = _bdas_get_time_us();
+    #endif
 
     if (das->aeb_in_progress) {
         das->speed_target = car_get_speed(car); // Update speed target to current speed if AEB is in progress, so that once AEB is disengaged (automatic or manual), the car will not accelerate or decelerate unexpectedly
     }
 
-    Meters best_case_braking_gap = compute_best_case_braking_gap(sim, car, sim_get_situational_awareness(sim, car_get_id(car)));
-
-    // auto disengagement conditions
-    bool disengagement_conditions_met = false;
-    if (best_case_braking_gap > AEB_DISENGAGE_BEST_CASE_BRAKING_GAP_M || sa->speed < AEB_DISENGAGE_MAX_SPEED_MPS) {
-        disengagement_conditions_met = true;
-    }
-
-    if (disengagement_conditions_met) {
-        if (das->aeb_in_progress) {
-            // LOG_DEBUG("AEB disengaged for car %d. Best case braking gap: %.2f feet, speed: %.2f mph", car->id, to_feet(best_case_braking_gap), to_mph(car_get_speed(car)));
+    if (das->aeb_assistance && das->aeb_in_progress) {
+        bool disengagement_conditions_met = false;
+        Meters best_case_braking_gap = -INFINITY;  // Initialize to invalid value
+        if (sa->nearby_vehicles.lead == NULL) {
+            disengagement_conditions_met = true; // If lead vehicle is gone, disengage AEB
+        } else if (sa->speed < AEB_DISENGAGE_MAX_SPEED_MPS) {
+            disengagement_conditions_met = true;
+        } else {
+            best_case_braking_gap = compute_best_case_braking_gap(sim, car, sim_get_situational_awareness(sim, car_get_id(car)), NULL, NULL, NULL); // recompute with up-to-date SA after the sim step
+            if (best_case_braking_gap > AEB_DISENGAGE_BEST_CASE_BRAKING_GAP_M) {
+                disengagement_conditions_met = true;
+            }
         }
-        das->aeb_in_progress = false; // Reset AEB state if auto disengagement conditions are met
-        das->aeb_manually_disengaged = false; // Reset manual disengagement state if auto disengagement occurs
+        if (disengagement_conditions_met) {
+            LOG_DEBUG("AEB disengaged for car %d. Best case braking gap: %.2f feet, speed: %.2f mph", car->id, to_feet(best_case_braking_gap), to_mph(car_get_speed(car)));
+            das->aeb_in_progress = false; // Reset AEB state if auto disengagement conditions are met
+        }
     }
+    #ifdef BENCHMARK_DAS_POST_STEP
+    double _bpost_t2 = _bdas_get_time_us();
+    #endif
 
     // update intersection approach engagement flag
     if (das->smart_das) {
         das->smart_das_intersection_approach_engaged = driving_assistant_smart_das_should_engage_intersection_approach(das, car, sim, sa);
     }
+    #ifdef BENCHMARK_DAS_POST_STEP
+    double _bpost_t3 = _bdas_get_time_us();
+    #endif
 
     // reset merge intent once merge successful. Detected by checking mismatch between merge_intent and current lane indicator, assuming car has auto-turn off indicator enabled
     if (das->merge_intent != car_get_indicator_lane(car)) {
@@ -892,6 +1084,26 @@ void driving_assistant_post_sim_step(DrivingAssistant* das, Car* car, Simulation
         das->turn_intent = INDICATOR_NONE; // Reset turn intent
         LOG_TRACE("Turn intent reset for car %d after successful turn.", car->id);
     }
+
+    #ifdef BENCHMARK_DAS_POST_STEP
+    double _bpost_t4 = _bdas_get_time_us();
+    _bpost_sa_build_us      += _bpost_t1 - _bpost_t0;
+    _bpost_aeb_disengage_us += _bpost_t2 - _bpost_t1;
+    _bpost_intx_update_us   += _bpost_t3 - _bpost_t2;
+    _bpost_cleanup_us       += _bpost_t4 - _bpost_t3;
+    _bpost_call_count++;
+    if (_bpost_call_count % BPOST_INTERVAL == 0) {
+        double n = (double)_bpost_call_count;
+        double total = (_bpost_sa_build_us + _bpost_aeb_disengage_us + _bpost_intx_update_us + _bpost_cleanup_us) / n;
+        printf("[BENCH das_post_step] Avg over %d calls: SA_Build=%.3f us | AEB_Disengage=%.3f us | Intx_Update=%.3f us | Cleanup=%.3f us | Total=%.3f us\n",
+            _bpost_call_count,
+            _bpost_sa_build_us / n,
+            _bpost_aeb_disengage_us / n,
+            _bpost_intx_update_us / n,
+            _bpost_cleanup_us / n,
+            total);
+    }
+    #endif
 }
 
 
@@ -909,7 +1121,6 @@ bool driving_assistant_get_follow_assistance(const DrivingAssistant* das) { retu
 bool driving_assistant_get_merge_assistance(const DrivingAssistant* das) { return das->merge_assistance; }
 bool driving_assistant_get_aeb_assistance(const DrivingAssistant* das) { return das->aeb_assistance; }
 bool driving_assistant_get_aeb_in_progress(const DrivingAssistant* das) { return das->aeb_in_progress; }
-bool driving_assistant_get_aeb_manually_disengaged(const DrivingAssistant* das) { return das->aeb_manually_disengaged; }
 bool driving_assistant_get_use_preferred_accel_profile(const DrivingAssistant* das) { return das->use_preferred_accel_profile; }
 bool driving_assistant_get_use_linear_speed_control(const DrivingAssistant* das) { return das->use_linear_speed_control; }
 bool driving_assistant_get_smart_das(const DrivingAssistant* das) { return das->smart_das; }
@@ -1009,7 +1220,6 @@ void driving_assistant_configure_aeb_assistance(DrivingAssistant* das, const Car
     }
     if (!aeb_assistance) {
         das->aeb_in_progress = false; // Reset AEB state if AEB assistance is disabled
-        das->aeb_manually_disengaged = false; // Reset manual disengagement state if AEB assistance is disabled
     }
     das->aeb_assistance = aeb_assistance;
     das->last_configured_at = sim_get_time(sim);
@@ -1049,20 +1259,4 @@ void driving_assistant_configure_smart_das_driving_style(DrivingAssistant* das, 
     }
     das->smart_das_driving_style = driving_style;
     das->last_configured_at = sim_get_time(sim);
-}
-
-void driving_assistant_aeb_manually_disengage(DrivingAssistant* das, const Car* car, const Simulation* sim) {
-    if (!validate_input(car, das, sim)) {
-        return;
-    }
-    if (das->aeb_in_progress) {
-        LOG_DEBUG("Manually disengaging AEB for car %d", car->id);
-        das->aeb_in_progress = false;
-    } else {
-        LOG_TRACE("%s for car %d. Nothing more to disengage.", das->aeb_manually_disengaged ? "AEB already manually disengaged" : "AEB is not in progress", car->id);
-        return;
-    }
-    das->aeb_manually_disengaged = true;
-    das->last_configured_at = sim_get_time(sim);
-    LOG_DEBUG("AEB manually disengaged for car %d", car->id);
 }

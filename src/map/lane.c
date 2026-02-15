@@ -115,6 +115,16 @@ void lane_set_road(Lane* self, const Road* road) {
         return;
     }
     self->road_id = road ? road->id : -1; // Set the road id, or -1 if no road
+    // Compute and cache index_in_road
+    self->index_in_road = -1;
+    if (road) {
+        for (int i = 0; i < road->num_lanes; i++) {
+            if (road->lane_ids[i] == self->id) {
+                self->index_in_road = i;
+                break;
+            }
+        }
+    }
 }
 
 void lane_set_intersection(Lane* self, const Intersection* intersection) {
@@ -320,6 +330,22 @@ Lane* lane_create(Map* map, const LaneType type, const Direction direction, cons
     lane->intersection_id = -1; // no intersection by default
     lane->is_at_intersection = false;
 
+    // Initialize geometry cache
+    lane->cached_orientation = 0.0;
+    lane->cached_cos_orientation = 1.0;
+    lane->cached_sin_orientation = 0.0;
+    lane->cached_cos_start_angle = 1.0;
+    lane->cached_sin_start_angle = 0.0;
+    lane->cached_cos_end_angle = 1.0;
+    lane->cached_sin_end_angle = 0.0;
+    lane->cached_theoretical_start = vec_create(0.0, 0.0);
+    lane->cached_theoretical_end = vec_create(0.0, 0.0);
+    lane->cached_theoretical_start_orient = 0.0;
+    lane->cached_theoretical_end_orient = 0.0;
+    lane->cached_actual_start = vec_create(0.0, 0.0);
+    lane->cached_actual_end = vec_create(0.0, 0.0);
+    lane->arc_geometry_precomputed = false;
+
     return lane;
 }
 
@@ -347,6 +373,13 @@ Lane* linear_lane_create_from_center_dir_len(
     LineSegment seg = line_segment_from_center(center, direction_to_vector(direction), length);
     lane->start_point = seg.start;
     lane->end_point = seg.end;
+
+    // Precompute orientation cache for linear lanes
+    Vec2D delta = vec_sub(seg.end, seg.start);
+    lane->cached_orientation = angle_normalize(atan2(delta.y, delta.x));
+    lane->cached_cos_orientation = cos(lane->cached_orientation);
+    lane->cached_sin_orientation = sin(lane->cached_orientation);
+
     return lane;
 }
 
@@ -436,12 +469,68 @@ Lane* quarter_arc_lane_create_from_start_end(
         }
     }
 
+    // Precompute trig cache for arc lanes
+    lane->cached_cos_start_angle = cos(lane->start_angle);
+    lane->cached_sin_start_angle = sin(lane->start_angle);
+    lane->cached_cos_end_angle = cos(lane->end_angle);
+    lane->cached_sin_end_angle = sin(lane->end_angle);
+    lane->cached_theoretical_start = (Vec2D){
+        lane->center.x + lane->radius * lane->cached_cos_start_angle,
+        lane->center.y + lane->radius * lane->cached_sin_start_angle
+    };
+    lane->cached_theoretical_end = (Vec2D){
+        lane->center.x + lane->radius * lane->cached_cos_end_angle,
+        lane->center.y + lane->radius * lane->cached_sin_end_angle
+    };
+    double dir_sign = (direction == DIRECTION_CCW) ? 1.0 : -1.0;
+    lane->cached_theoretical_start_orient = angle_normalize(lane->start_angle + dir_sign * M_PI_2);
+    lane->cached_theoretical_end_orient = angle_normalize(lane->end_angle + dir_sign * M_PI_2);
+
     return lane;
 }
 
+void lane_precompute_arc_geometry(Lane* self, Map* map) {
+    if (self->type != QUARTER_ARC_LANE) return;
+    Lane* incoming = lane_get_connection_incoming_straight(self, map);
+    Lane* outgoing = lane_get_connection_straight(self, map);
+    self->cached_actual_start = incoming ? incoming->end_point : self->start_point;
+    self->cached_actual_end = outgoing ? outgoing->start_point : self->end_point;
 
+    // Precompute actual orientations at boundaries
+    double actual_start_orient;
+    if (incoming && incoming->type == LINEAR_LANE) {
+        actual_start_orient = incoming->cached_orientation;
+    } else {
+        actual_start_orient = self->cached_theoretical_start_orient;
+    }
+    double actual_end_orient;
+    if (outgoing && outgoing->type == LINEAR_LANE) {
+        actual_end_orient = outgoing->cached_orientation;
+    } else {
+        actual_end_orient = self->cached_theoretical_end_orient;
+    }
+    // Store cos/sin for the orientation (reuse cached_cos/sin_orientation for the precomputed diff values)
+    // Actually, store the angular diffs directly since those are what the hot path needs
+    double diff_start = actual_start_orient - self->cached_theoretical_start_orient;
+    while (diff_start <= -M_PI) diff_start += 2 * M_PI;
+    while (diff_start > M_PI) diff_start -= 2 * M_PI;
+    double diff_end = actual_end_orient - self->cached_theoretical_end_orient;
+    while (diff_end <= -M_PI) diff_end += 2 * M_PI;
+    while (diff_end > M_PI) diff_end -= 2 * M_PI;
+    // Reuse cached_cos/sin_orientation to store diff_start and diff_end for arc lanes
+    self->cached_cos_orientation = diff_start; // repurposed: angular offset at start
+    self->cached_sin_orientation = diff_end;   // repurposed: angular offset at end
+    self->arc_geometry_precomputed = true;
+}
 
-//
+void map_precompute_lane_geometry(Map* map) {
+    for (int i = 0; i < map->num_lanes; i++) {
+        Lane* lane = map_get_lane(map, i);
+        if (lane->type == QUARTER_ARC_LANE) {
+            lane_precompute_arc_geometry(lane, map);
+        }
+    }
+}
 // Lane Car Management
 //
 

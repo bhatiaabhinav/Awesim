@@ -447,25 +447,6 @@ MetersPerSecondSquared control_compute_bounded_accel(ControlError error, MetersP
 //   then follows exponential convergence once |Δv| ≤ max_speed / 4
 MetersPerSecondSquared control_speed_compute_bounded_accel(ControlError error, MetersPerSecondSquared max_accel, MetersPerSecond max_speed);
 
-#define AEB_ENGAGE_MIN_SPEED_MPS 0.89408                // AEB engages only if ego speed exceeds 0.89408 m/s (≈ 2 mph)
-#define AEB_DISENGAGE_MAX_SPEED_MPS 0.0045              // AEB disengages when ego speed falls below 0.0045 m/s (≈ 0.01 mph)
-#define AEB_ENGAGE_BEST_CASE_BRAKING_GAP_M 0.3048       // AEB engages if best-case gap under maximum braking is less than 0.3048 m (≈ 1 ft)
-#define AEB_DISENGAGE_BEST_CASE_BRAKING_GAP_M 0.9144    // AEB disengages if best-case gap under maximum braking exceeds 0.9144 m (≈ 3 ft)
-#define DRIVING_ASSISTANT_DEFAULT_TIME_HEADWAY 3.0                     // Default time headway to maintain from lead car in follow mode
-#define DRIVING_ASSISTANT_DEFAULT_CAR_DISTANCE_BUFFER 3.0                // Default minimum distance to maintain from lead car in follow mode (in meters)
-
-// #define NO_REACTION_DEPLAYS
-
-#ifdef NO_REACTION_DEPLAYS
-    #define HUMAN_TIME_TO_PRESS_FULL_PEDAL 0.0          // Time to go from 0 to full brake/gas pedal in seconds once the foot is on the pedal. Going from setting p0 to p1 takes time = |p1 - p0| * HUMAN_TIME_TO_PRESS_FULL_PEDAL
-    #define HUMAN_TIME_TO_RELEASE_FULL_PEDAL 0.0        // Time to go from full brake/gas pedal to 0 in seconds once the foot is off the pedal. Going from setting p0 to p1 takes time = |p1 - p0| * HUMAN_TIME_TO_RELEASE_FULL_PEDAL
-    #define HUMAN_AVERAGE_DELAY_SWITCHING_PEDALS 0.0      // Time to switch foot from brake to gas or vice versa, in seconds. During this time, neither pedal is pressed.
-#else
-    #define HUMAN_TIME_TO_PRESS_FULL_PEDAL 0.1          // Time to go from 0 to full brake/gas pedal in seconds once the foot is on the pedal. Going from setting p0 to p1 takes time = |p1 - p0| * HUMAN_TIME_TO_PRESS_FULL_PEDAL
-    #define HUMAN_TIME_TO_RELEASE_FULL_PEDAL 0.1        // Time to go from full brake/gas pedal to 0 in seconds once the foot is off the pedal. Going from setting p0 to p1 takes time = |p1 - p0| * HUMAN_TIME_TO_RELEASE_FULL_PEDAL
-    #define HUMAN_AVERAGE_DELAY_SWITCHING_PEDALS 0.1      // Time to switch foot from brake to gas or vice versa, in seconds. During this time, neither pedal is pressed.
-#endif
-
 
 typedef enum SmartDASDrivingStyle {
     SMART_DAS_DRIVING_STYLE_NO_RULES,               // speed max = 50% over speed limit, follow THW = 0.5s + 0.5m. Pass/merge thw = 0.5s + 0.5m. Runs through intersections without stopping or yielding.
@@ -500,8 +481,7 @@ typedef struct DrivingAssistant {
     SmartDASDrivingStyle smart_das_driving_style; // Driving style for smart driving assistant. Ranging from RECKLESS (least safe and causes most traffic violations) to DEFENSIVE (most safe and compliant with traffic rules). Periodically changing this setting, based on context, can simulate different driver personalities.
 
     // Internal state variables
-    bool aeb_in_progress;           // Disengages automatically once the best case braking gap > AEB_DISENGAGE_BEST_CASE_BRAKING_GAP, or the ego stops, or manually disengaged.
-    bool aeb_manually_disengaged;   // Once true, will stay until auto-disengagement condition is met. See `aeb_in_progress`.
+    bool aeb_in_progress;           // Disengages automatically once the best case braking gap > AEB_DISENGAGE_BEST_CASE_BRAKING_GAP, or the ego stops
     bool smart_das_intersection_approach_engaged; // Internal flag for smart DAS to indicate whether it is approaching an intersection where it may need to stop or slow down. Lane changes are disabled while this flag is true and the turn intent is frozen to what it was when the flag was set.
 
     // Other settings
@@ -532,7 +512,6 @@ bool driving_assistant_get_follow_assistance(const DrivingAssistant* das);
 bool driving_assistant_get_merge_assistance(const DrivingAssistant* das);
 bool driving_assistant_get_aeb_assistance(const DrivingAssistant* das);
 bool driving_assistant_get_aeb_in_progress(const DrivingAssistant* das);
-bool driving_assistant_get_aeb_manually_disengaged(const DrivingAssistant* das);
 bool driving_assistant_get_use_preferred_accel_profile(const DrivingAssistant* das);
 bool driving_assistant_get_use_linear_speed_control(const DrivingAssistant* das);
 bool driving_assistant_get_smart_das(const DrivingAssistant* das);
@@ -555,10 +534,6 @@ void driving_assistant_configure_use_linear_speed_control(DrivingAssistant* das,
 void driving_assistant_configure_smart_das(DrivingAssistant* das, const Car* car, const Simulation* sim, bool smart_das);
 void driving_assistant_configure_smart_das_driving_style(DrivingAssistant* das, const Car* car, const Simulation* sim, SmartDASDrivingStyle style);
 void driving_assistant_smart_update_das_variables(DrivingAssistant* das, Car* car, Simulation* sim, SituationalAwareness* sa);
-
-
-// Manually disengage AEB. `aeb_manually_disengaged` flag will stay true and won't reset until standard disengagement conditions are also met
-void driving_assistant_aeb_manually_disengage(DrivingAssistant* das, const Car* car, const Simulation* sim);
 
 
 //
@@ -629,12 +604,7 @@ int dg_astar_path(const DirectedGraph* g,
 
 
 
-// use it in the path planner:
 
-
-#define MAX_NODES_PER_LANE 100    // Estimate
-#define MAX_SOLUTION_CAPACITY 256
-#define MAX_GRAPH_NODES (MAX_NUM_LANES * MAX_NODES_PER_LANE)
 
 // Navigation Actions
 typedef enum {
@@ -662,6 +632,10 @@ typedef struct MapNode {
 typedef struct PathPlanner {
     Map* map;                                       // Pointer to the map
     bool consider_speed_limits;                     // Whether to consider speed limits when computing lane costs. Should not be changed after creation.
+    bool use_live_traffic_info;                     // Whether to use live traffic flow data instead of speed limits for time-based costs. Requires consider_speed_limits to be true.
+    bool avoid_highways;                             // Whether to penalize routes through highways (roads with 3+ lanes). Routes through highways are still possible but strongly discouraged.
+    MetersPerSecond traffic_flow_per_lane[MAX_NUM_LANES]; // Smoothed average speed of traffic on each lane, updated periodically from simulation data.
+    Seconds last_traffic_update_time;                // Sim-time of the last traffic flow update (used to compute correct EMA alpha regardless of call frequency)
 
     LaneId start_lane_id;                           // Starting lane for the path planning
     Meters start_progress;                          // Progress along the starting lane (in meters)
@@ -693,3 +667,4 @@ PathPlanner* path_planner_create(Map* map, bool consider_speed_limits);     // a
 void path_planner_free(PathPlanner* planner);   // does not free the map
 void path_planner_compute_shortest_path(PathPlanner* planner, const Lane* start_lane, Meters start_progress, const Lane* end_lane, Meters end_progress);    // updates the planner with the optimal path information
 NavAction path_planner_get_solution_action(const PathPlanner* planner, bool ignore_trivial, int action_index);   // get the action at action_index in the solution path. If ignore_trivial is true, trivial straight actions are ignored (except the last one if it is straight)
+void path_planner_update_traffic_flow(Simulation* sim, PathPlanner* planner); // Updates the smoothed average traffic flow speed per lane from live simulation data. Call periodically (e.g., every few seconds). Uses exponential moving average with a ~5 minute effective window.

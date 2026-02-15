@@ -1,5 +1,6 @@
 #pragma once
 
+#include "constants.h"
 #include "utils.h"
 #include "map.h"
 
@@ -66,6 +67,34 @@ typedef struct CarPersonality CarPersonality;
 
 CarPersonality preferences_sample_random(void);
 
+struct CarTravelStats {
+    Meters total_distance_traveled;
+    Seconds total_time_traveled;
+    int turns_left_made;
+    int turns_right_made;
+    int intersections_passed;
+    int traffic_lights_passed;
+    int stop_signs_passed;
+    int t_junctions_passed;
+    int lane_changes_left;
+    int lane_changes_right;
+    Meters total_distance_on_leftmost_lane;    // for roads with 2 or more lanes
+    Meters total_distance_on_middle_lane;      // only for roads with 3 or more lanes
+    Meters total_distance_on_rightmost_lane;   // for roads with 2 or more lanes
+    Meters total_distance_on_single_lane_roads;
+    Meters total_distance_on_two_lane_roads;
+    Meters total_distance_on_three_or_more_lane_roads;
+    Seconds total_time_on_leftmost_lane;    // for roads with 2 or more lanes
+    Seconds total_time_on_middle_lane;      // only for roads with 3 or more lanes
+    Seconds total_time_on_rightmost_lane;   // for roads with 2 or more lanes
+    Seconds total_time_on_single_lane_roads;
+    Seconds total_time_on_two_lane_roads;
+    Seconds total_time_on_three_or_more_lane_roads;
+    Seconds total_time_stopped;                     // time spent with speed less than STOP_SPEED_THRESHOLD
+    Seconds total_time_almost_stopped;              // time spent with speed less than ALMOST_STOP_SPEED_THRESHOLD
+    Seconds total_time_moving;                     // total time spent driving (speed > ALMOST_STOP_SPEED_THRESHOLD)
+};
+typedef struct CarTravelStats CarTravelStats;
 
 
 // -------- Car struct -----------
@@ -115,6 +144,9 @@ struct Car {
     // history:
     LaneId prev_lane_id; // Previous lane ID, useful to detect lane changes. This is the lane that the car was at the previous simulation timestep.
     Meters recent_forward_movement;
+    
+    // stats:
+    CarTravelStats travel_stats;
 };
 typedef struct Car Car;
 
@@ -160,6 +192,8 @@ bool car_get_auto_turn_off_indicators(const Car* self);
 
 // Returns the recent forward movement of the car in the current simulation timestep.
 Meters car_get_recent_forward_movement(const Car* self);
+// Returns the total distance traveled by the car since the start of the simulation.
+Meters car_get_total_distance_traveled(const Car* self);
 // Returns the previous lane ID of the car.
 LaneId car_get_prev_lane_id(const Car* self);
 

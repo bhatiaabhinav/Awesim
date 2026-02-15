@@ -191,12 +191,8 @@ Radians angles_sub(Radians theta1, Radians theta2) {
 }
 
 Radians angle_normalize(Radians theta) {
-    while (theta < 0) {
-        theta += 2 * M_PI;
-    }
-    while (theta >= 2 * M_PI) {
-        theta -= 2 * M_PI;
-    }
+    theta = fmod(theta, 2 * M_PI);
+    if (theta < 0) theta += 2 * M_PI;
     return theta;
 }
 

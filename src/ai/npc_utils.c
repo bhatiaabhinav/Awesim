@@ -5,6 +5,38 @@
 #include <stdio.h>
 #include <math.h>
 
+// #define BENCHMARK_YIELD_FUNCS
+// ^^ Uncomment to enable per-section timing of yield functions
+#ifdef BENCHMARK_YIELD_FUNCS
+#ifdef _WIN32
+#include <windows.h>
+static double _byield_get_time_us(void) {
+    LARGE_INTEGER freq, counter;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&counter);
+    return (double)counter.QuadPart * 1e6 / (double)freq.QuadPart;
+}
+#else
+#include <time.h>
+static double _byield_get_time_us(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec * 1e6 + (double)ts.tv_nsec / 1000.0;
+}
+#endif
+// car_has_something_to_yield_to accumulators
+static double _byield_yield_setup_us = 0;
+static double _byield_yield_build_us = 0;
+static double _byield_yield_check_us = 0;
+static int    _byield_yield_count = 0;
+// defensive_yield accumulators
+static double _byield_def_setup_us = 0;
+static double _byield_def_build_us = 0;
+static double _byield_def_check_us = 0;
+static int    _byield_def_count = 0;
+#define BYIELD_INTERVAL 500000
+#endif
+
 
 CarIndicator turn_sample_possible(const SituationalAwareness* situation) {
     if (situation->is_approaching_dead_end) {
@@ -124,8 +156,12 @@ bool car_is_lane_change_dangerous(Car* car, Simulation* sim, const SituationalAw
 
 
 bool car_has_something_to_yield_to_at_intersection(const Car* self, Simulation* sim, const SituationalAwareness* situation, CarIndicator turn_indicator, Seconds yield_time_headway_threshold, double dropout_probability_multiplier) {
-    Map* map = sim_get_map(sim);
+    bool result = false;
+    #ifdef BENCHMARK_YIELD_FUNCS
+    double _byt0 = _byield_get_time_us();
+    #endif
 
+    Map* map = sim_get_map(sim);
     const Intersection* intersection = situation->intersection;
 
     Road* inbound_roads[4] = {
@@ -138,6 +174,12 @@ bool car_has_something_to_yield_to_at_intersection(const Car* self, Simulation* 
     Road* road_from_left = inbound_roads[direction_perp_cw(my_dir)];
     Road* road_from_right = inbound_roads[direction_perp_ccw(my_dir)];
     Road* road_from_opposite = inbound_roads[direction_opposite(my_dir)];
+    Direction opposite_dir = direction_opposite(my_dir);  // cache for bottom loop
+
+    #ifdef BENCHMARK_YIELD_FUNCS
+    double _byt1 = _byield_get_time_us();
+    double _byt2 = _byt1; // updated after build phase
+    #endif
 
     Lane* incoming_lanes_to_worry_about[3 * MAX_NUM_LANES_PER_ROAD] = {NULL};           // max 3 roads to worry about, each with max lanes.
     int num_incoming_lanes_to_worry_about = 0;
@@ -150,18 +192,22 @@ bool car_has_something_to_yield_to_at_intersection(const Car* self, Simulation* 
         if (i_am_merging) {
             // If turning right, worry about the rightmost lane on the road coming from the left
             if (turn_indicator == INDICATOR_RIGHT) {
-                incoming_lanes_to_worry_about[num_incoming_lanes_to_worry_about++] = road_get_rightmost_lane(road_from_left, map);
-                intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_straight(road_get_rightmost_lane(road_from_left, map), map);
+                Lane* rightmost_from_left = road_get_rightmost_lane(road_from_left, map);
+                incoming_lanes_to_worry_about[num_incoming_lanes_to_worry_about++] = rightmost_from_left;
+                intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_straight(rightmost_from_left, map);
             } else if (turn_indicator == INDICATOR_LEFT) {
                 // If turning left, worry about the leftmost lane on the road coming from the right and all lanes on the road coming from left
-                incoming_lanes_to_worry_about[num_incoming_lanes_to_worry_about++] = road_get_leftmost_lane(road_from_right, map);
-                intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_straight(road_get_leftmost_lane(road_from_right, map), map);
-                for (int i = 0; i < road_get_num_lanes(road_from_left); i++) {
-                    incoming_lanes_to_worry_about[num_incoming_lanes_to_worry_about++] = road_get_lane(road_from_left, map, i);
-                    intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_straight(road_get_lane(road_from_left, map, i), map);
+                Lane* leftmost_from_right = road_get_leftmost_lane(road_from_right, map);
+                incoming_lanes_to_worry_about[num_incoming_lanes_to_worry_about++] = leftmost_from_right;
+                intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_straight(leftmost_from_right, map);
+                int num_lanes_from_left = road_get_num_lanes(road_from_left);
+                for (int i = 0; i < num_lanes_from_left; i++) {
+                    Lane* lane_i = road_get_lane(road_from_left, map, i);
+                    incoming_lanes_to_worry_about[num_incoming_lanes_to_worry_about++] = lane_i;
+                    intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_straight(lane_i, map);
                 }
                 // also worry about the traffic exiting left from the road coming from the right as it has the right of way over us
-                intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_left(road_get_leftmost_lane(road_from_right, map), map);
+                intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_left(leftmost_from_right, map);
             } else {
                 // Not possible to go straight in a T-junction
             }
@@ -170,12 +216,16 @@ bool car_has_something_to_yield_to_at_intersection(const Car* self, Simulation* 
                 // free exit
             } else if (turn_indicator == INDICATOR_LEFT) {
                 // exit while yeilding to oncoming traffic
-                for (int i = 0; i < road_get_num_lanes(road_from_opposite); i++) {
-                    incoming_lanes_to_worry_about[num_incoming_lanes_to_worry_about++] = road_get_lane(road_from_opposite, map, i);
-                    intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_straight(road_get_lane(road_from_opposite, map, i), map);
+                int num_lanes_opp = road_get_num_lanes(road_from_opposite);
+                bool single_lane_exit = (road_get_num_lanes(road_from_right) == 1);
+                Lane* rightmost_opp = single_lane_exit ? road_get_rightmost_lane(road_from_opposite, map) : NULL;
+                for (int i = 0; i < num_lanes_opp; i++) {
+                    Lane* lane_i = road_get_lane(road_from_opposite, map, i);
+                    incoming_lanes_to_worry_about[num_incoming_lanes_to_worry_about++] = lane_i;
+                    intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_straight(lane_i, map);
                     // if we are exiting on to a single lane road, we need to worry about the oncoming traffic turning into that lane as well
-                    if (road_get_num_lanes(road_from_right) == 1) { // assuming both road_from_right and road_to_left have same number of lanes
-                        intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_right(road_get_rightmost_lane(road_from_opposite, map), map);
+                    if (single_lane_exit) { // assuming both road_from_right and road_to_left have same number of lanes
+                        intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_right(rightmost_opp, map);
                     }
                 }
             } else {
@@ -185,13 +235,16 @@ bool car_has_something_to_yield_to_at_intersection(const Car* self, Simulation* 
     } else if (intersection->state != FOUR_WAY_STOP) {
         if (turn_indicator == INDICATOR_RIGHT) {
             // If turning right, worry about the rightmost lane on the road coming from the left
-            incoming_lanes_to_worry_about[num_incoming_lanes_to_worry_about++] = road_get_rightmost_lane(road_from_left, map);
-            intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_straight(road_get_rightmost_lane(road_from_left, map), map);
+            Lane* rightmost_from_left = road_get_rightmost_lane(road_from_left, map);
+            incoming_lanes_to_worry_about[num_incoming_lanes_to_worry_about++] = rightmost_from_left;
+            intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_straight(rightmost_from_left, map);
         } else if (turn_indicator == INDICATOR_LEFT) {
             // If turning left, worry about all the lanes on the road coming from the opposite direction
-            for (int i = 0; i < road_get_num_lanes(road_from_opposite); i++) {
-                incoming_lanes_to_worry_about[num_incoming_lanes_to_worry_about++] = road_get_lane(road_from_opposite, map, i);
-                intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_straight(road_get_lane(road_from_opposite, map, i), map);
+            int num_lanes_opp = road_get_num_lanes(road_from_opposite);
+            for (int i = 0; i < num_lanes_opp; i++) {
+                Lane* lane_i = road_get_lane(road_from_opposite, map, i);
+                incoming_lanes_to_worry_about[num_incoming_lanes_to_worry_about++] = lane_i;
+                intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_straight(lane_i, map);
             }
             // if we are turning left onto a single lane road, we need to worry about the oncoming traffic turning into that lane as well
             if (road_get_num_lanes(road_from_right) == 1) { // assuming both road_from_right and road_to_left have same number of lanes
@@ -200,65 +253,103 @@ bool car_has_something_to_yield_to_at_intersection(const Car* self, Simulation* 
         }
     } else {
         // Yeilding not revelevant for four-way stop
-        return false;
+        goto done;
     }
 
-    // Go through the intersection lanes to worry about and if any of them have cars, we have to yield.
-    for (int i = 0; i < num_intersection_lanes_to_worry_about; i++) {
-        Lane* lane = intersection_lanes_to_worry_about[i];
-        if (lane && lane_get_num_cars(lane) > 0) {
-            // Check if we perceive any car in the lane
-            bool perceived_any = false;
-            for (int j = 0; j < lane_get_num_cars(lane); j++) {
-                // Determine if we see this car
-                double net_dropout_probability = sim->perception_noise_dropout_probability * dropout_probability_multiplier;
-                bool dropped = net_dropout_probability > 1e-9 && rand_0_to_1() < net_dropout_probability;
-                if (!dropped) {    
-                    perceived_any = true;
-                    break;
+    #ifdef BENCHMARK_YIELD_FUNCS
+    _byt2 = _byield_get_time_us();
+    #endif
+
+    // Pre-compute dropout probability (loop-invariant)
+    {
+        double net_dropout_probability = sim->perception_noise_dropout_probability * dropout_probability_multiplier;
+        bool dropout_active = net_dropout_probability > 1e-9;
+
+        // Go through the intersection lanes to worry about and if any of them have cars, we have to yield.
+        for (int i = 0; i < num_intersection_lanes_to_worry_about; i++) {
+            Lane* lane = intersection_lanes_to_worry_about[i];
+            if (!lane) continue;
+            int num_cars = lane_get_num_cars(lane);
+            if (num_cars > 0) {
+                // Check if we perceive any car in the lane
+                bool perceived_any = false;
+                for (int j = 0; j < num_cars; j++) {
+                    bool dropped = dropout_active && rand_0_to_1() < net_dropout_probability;
+                    if (!dropped) {    
+                        perceived_any = true;
+                        break;
+                    }
+                }
+                if (perceived_any) {
+                    result = true;
+                    goto done;
                 }
             }
-            if (perceived_any) {
-                return true;    // have to yield
+        }
+
+        // Go through the leading cars on incoming lanes and if any of them are less than yield_time_headway_threshold seconds away from their lane end, then we have to yield.
+        for (int i = 0; i < num_incoming_lanes_to_worry_about; i++) {
+            Lane* lane = incoming_lanes_to_worry_about[i];
+            if (!lane || lane_get_num_cars(lane) == 0) continue;
+            Car* c = lane_get_car(lane, sim, 0); // get the leading car
+            Meters car_progress_m;
+            MetersPerSecond car_speed;
+            bool noticed = car_noisy_perceive_other(self, c, sim, NULL, &car_progress_m, &car_speed, NULL, NULL, NULL, NULL, NULL, NULL, false, dropout_probability_multiplier);
+            if (!noticed) {
+                continue;   // did not perceive this car
+            }
+
+            // deadlock avoidance: If we are turning left, we don't need to yield to opposing left turners as our paths don't cross (usually)
+            if (!intersection->is_T_junction && turn_indicator == INDICATOR_LEFT && c->indicator_turn == INDICATOR_LEFT && lane->direction == opposite_dir) {
+                continue;
+            }
+            Meters lane_length = lane_get_length(lane);
+            Meters distance_to_stop_line = lane_length - car_progress_m - car_get_length(c) / 2 - STOP_LINE_BUFFER_METERS;
+
+            if (distance_to_stop_line < meters(1)) {
+                result = true;
+                goto done;
+            }
+
+            Seconds time_to_end_s = compute_time_headway(distance_to_stop_line, fmax(car_speed, 0.0));
+            if (time_to_end_s < yield_time_headway_threshold) {
+                result = true;
+                goto done;
             }
         }
     }
 
-    // Go through the leading cars on incoming lanes and if any of them are less than yield_time_headway_threshold seconds away from their lane end, then we have to yield.
-    for (int i = 0; i < num_incoming_lanes_to_worry_about; i++) {
-        Lane* lane = incoming_lanes_to_worry_about[i];
-        if (!lane || lane_get_num_cars(lane) == 0) continue;
-        Car* c = lane_get_car(lane, sim, 0); // get the leading car
-        Meters car_progress_m;
-        MetersPerSecond car_speed;
-        bool noticed = car_noisy_perceive_other(self, c, sim, NULL, &car_progress_m, &car_speed, NULL, NULL, NULL, NULL, NULL, NULL, false, dropout_probability_multiplier);
-        if (!noticed) {
-            continue;   // did not perceive this car
-        }
-
-        // deadlock avoidance: If we are turning left, we don't need to yield to opposing left turners as our paths don't cross (usually)
-        if (!intersection->is_T_junction && turn_indicator == INDICATOR_LEFT && c->indicator_turn == INDICATOR_LEFT && lane->direction == direction_opposite(my_dir)) {
-            continue;
-        }
-        Meters lane_length = lane_get_length(lane);
-        Meters distance_to_stop_line = lane_length - car_progress_m - car_get_length(c) / 2 - STOP_LINE_BUFFER_METERS;
-
-        if (distance_to_stop_line < meters(1)) {
-            return true;    // have to yield if already too close to the end, irrespective of speed
-        }
-
-        Seconds time_to_end_s = compute_time_headway(distance_to_stop_line, fmax(car_speed, 0.0));
-        if (time_to_end_s < yield_time_headway_threshold) {
-            return true;    // have to yield if coming in fast or has reached the stop line even if slow
+done:
+    #ifdef BENCHMARK_YIELD_FUNCS
+    {
+        double _byt_end = _byield_get_time_us();
+        _byield_yield_setup_us += _byt1 - _byt0;
+        _byield_yield_build_us += _byt2 - _byt1;
+        _byield_yield_check_us += _byt_end - _byt2;
+        _byield_yield_count++;
+        if (_byield_yield_count % BYIELD_INTERVAL == 0) {
+            double n = (double)_byield_yield_count;
+            double total = (_byield_yield_setup_us + _byield_yield_build_us + _byield_yield_check_us) / n;
+            printf("  [BENCH yield] Avg over %d calls: Setup=%.3f us | Build=%.3f us | Check=%.3f us | Total=%.3f us\n",
+                _byield_yield_count,
+                _byield_yield_setup_us / n,
+                _byield_yield_build_us / n,
+                _byield_yield_check_us / n,
+                total);
         }
     }
-    return false;
+    #endif
+    return result;
 }
 
 
 bool defensive_yield_despite_right_of_way(const Car* self, Simulation* sim, const SituationalAwareness* situation, CarIndicator turn_indicator, Seconds yield_time_headway_threshold, double dropout_probability_multiplier) {
-    Map* map = sim_get_map(sim);
+    bool result = false;
+    #ifdef BENCHMARK_YIELD_FUNCS
+    double _bdt0 = _byield_get_time_us();
+    #endif
 
+    Map* map = sim_get_map(sim);
     const Intersection* intersection = situation->intersection;
 
     Road* inbound_roads[4] = {
@@ -271,6 +362,13 @@ bool defensive_yield_despite_right_of_way(const Car* self, Simulation* sim, cons
     Road* road_from_left = inbound_roads[direction_perp_cw(my_dir)];
     Road* road_from_right = inbound_roads[direction_perp_ccw(my_dir)];
     Road* road_from_opposite = inbound_roads[direction_opposite(my_dir)];
+    Direction opposite_dir = direction_opposite(my_dir);    // cache for bottom loop
+    Direction perp_cw_dir = direction_perp_cw(my_dir);      // cache for bottom loop
+
+    #ifdef BENCHMARK_YIELD_FUNCS
+    double _bdt1 = _byield_get_time_us();
+    double _bdt2 = _bdt1; // updated after build phase
+    #endif
 
     Lane* incoming_lanes_to_worry_about[4 * MAX_NUM_LANES_PER_ROAD] = {NULL};           // max 4 roads to worry about, each with max lanes.
     int num_incoming_lanes_to_worry_about = 0;
@@ -299,7 +397,8 @@ bool defensive_yield_despite_right_of_way(const Car* self, Simulation* sim, cons
                 intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_straight(leftmost_lane_from_right, map);
                 intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_left(leftmost_lane_from_right, map);
 
-                for (int i = 0; i < road_get_num_lanes(road_from_left); i++) {
+                int num_lanes_from_left = road_get_num_lanes(road_from_left);
+                for (int i = 0; i < num_lanes_from_left; i++) {
                     Lane* lane_i = road_get_lane(road_from_left, map, i);
                     Car* c = lane_get_num_cars(lane_i) > 0 ? lane_get_car(lane_i, sim, 0) : NULL;
                     if (c && c->indicator_turn == INDICATOR_NONE) {
@@ -311,8 +410,10 @@ bool defensive_yield_despite_right_of_way(const Car* self, Simulation* sim, cons
                 // Not possible to go straight in a T-junction
             }
         } else {
-            bool is_T_exit_to_our_left = lane_get_connection_left(road_get_leftmost_lane(situation->road, map), map) != NULL;
-            bool is_T_exit_to_our_right = lane_get_connection_right(road_get_rightmost_lane(situation->road, map), map) != NULL;
+            Lane* leftmost_our_road = road_get_leftmost_lane(situation->road, map);
+            Lane* rightmost_our_road = road_get_rightmost_lane(situation->road, map);
+            bool is_T_exit_to_our_left = lane_get_connection_left(leftmost_our_road, map) != NULL;
+            bool is_T_exit_to_our_right = lane_get_connection_right(rightmost_our_road, map) != NULL;
             if (turn_indicator == INDICATOR_RIGHT) {
                 bool is_exit_single_lane = road_get_num_lanes(road_from_left) == 1; // assuming both road_from_left and road_to_right have same number of lanes
                 // if exiting into a single lane road, worry about exiting left from the opposite direction (even though they are supposed to yield to us, they might not)
@@ -327,14 +428,16 @@ bool defensive_yield_despite_right_of_way(const Car* self, Simulation* sim, cons
             } else if (turn_indicator == INDICATOR_LEFT) {
                 bool is_exit_single_lane = road_get_num_lanes(road_from_right) == 1; // assuming both road_from_right and road_to_left have same number of lanes
                 // exit while yeilding to oncoming traffic. if we are exiting on to a single lane road, we need to worry about the oncoming traffic turning into that lane as well
-                for (int i = 0; i < road_get_num_lanes(road_from_opposite); i++) {
+                int num_lanes_opp = road_get_num_lanes(road_from_opposite);
+                Lane* rightmost_opp = road_get_rightmost_lane(road_from_opposite, map);  // hoisted from loop
+                for (int i = 0; i < num_lanes_opp; i++) {
                     Lane* lane_i = road_get_lane(road_from_opposite, map, i);
                     Car* c = lane_get_num_cars(lane_i) > 0 ? lane_get_car(lane_i, sim, 0) : NULL;
-                    if (c && (c->indicator_turn == INDICATOR_NONE || (is_exit_single_lane && road_get_rightmost_lane(road_from_opposite, map) == lane_i && c->indicator_turn == INDICATOR_RIGHT))) {
+                    if (c && (c->indicator_turn == INDICATOR_NONE || (is_exit_single_lane && rightmost_opp == lane_i && c->indicator_turn == INDICATOR_RIGHT))) {
                         incoming_lanes_to_worry_about[num_incoming_lanes_to_worry_about++] = lane_i;
                     }
                     intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_straight(lane_i, map);
-                    if (is_exit_single_lane && road_get_rightmost_lane(road_from_opposite, map) == lane_i ) {
+                    if (is_exit_single_lane && rightmost_opp == lane_i) {
                         intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_right(lane_i, map);
                     }
                 }
@@ -347,7 +450,7 @@ bool defensive_yield_despite_right_of_way(const Car* self, Simulation* sim, cons
                 intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_left(leftmost_lane_from_left, map);
             } else {
                 if (is_T_exit_to_our_left) {
-                    if (situation->lane == road_get_leftmost_lane(situation->road, map)) { // leftmost lane, worry about traffic from the left road merging into us
+                    if (situation->lane == leftmost_our_road) { // leftmost lane, worry about traffic from the left road merging into us
                         Lane* leftmost_lane_from_left = road_get_leftmost_lane(road_from_left, map);
                         Car* c = lane_get_num_cars(leftmost_lane_from_left) > 0 ? lane_get_car(leftmost_lane_from_left, sim, 0) : NULL;
                         if (c && c->indicator_turn == INDICATOR_LEFT) {
@@ -374,7 +477,7 @@ bool defensive_yield_despite_right_of_way(const Car* self, Simulation* sim, cons
                     intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_left(right_road_leftmost_lane, map);
 
                     // if we are on rightmost lane, we also need to worry about traffic from the right merging into our lane
-                    if (situation->lane == road_get_rightmost_lane(situation->road, map)) {
+                    if (situation->lane == rightmost_our_road) {
                         Lane* rightmost_lane_from_right = road_get_rightmost_lane(road_from_right, map);
                         c = lane_get_num_cars(rightmost_lane_from_right) > 0 ? lane_get_car(rightmost_lane_from_right, sim, 0) : NULL;
                         if (c && c->indicator_turn == INDICATOR_RIGHT) {
@@ -408,19 +511,22 @@ bool defensive_yield_despite_right_of_way(const Car* self, Simulation* sim, cons
             }
         } else if (turn_indicator == INDICATOR_LEFT) {
             // If turning left, worry about all the lanes on the road coming from the opposite direction
-            for (int i = 0; i < road_get_num_lanes(road_from_opposite); i++) {
+            int num_lanes_opp = road_get_num_lanes(road_from_opposite);
+            Lane* rightmost_opp = road_get_rightmost_lane(road_from_opposite, map);  // hoisted from loop
+            for (int i = 0; i < num_lanes_opp; i++) {
                 Lane* lane_i = road_get_lane(road_from_opposite, map, i);
                 Car* c = lane_get_num_cars(lane_i) > 0 ? lane_get_car(lane_i, sim, 0) : NULL;
-                if (c && (c->indicator_turn == INDICATOR_NONE || (is_going_into_single_lane_road && road_get_rightmost_lane(road_from_opposite, map) == lane_i && c->indicator_turn == INDICATOR_RIGHT))) {
+                if (c && (c->indicator_turn == INDICATOR_NONE || (is_going_into_single_lane_road && rightmost_opp == lane_i && c->indicator_turn == INDICATOR_RIGHT))) {
                     incoming_lanes_to_worry_about[num_incoming_lanes_to_worry_about++] = lane_i;
                 }
                 intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_straight(lane_i, map);
-                if (is_going_into_single_lane_road && road_get_rightmost_lane(road_from_opposite, map) == lane_i ) {
+                if (is_going_into_single_lane_road && rightmost_opp == lane_i) {
                     intersection_lanes_to_worry_about[num_intersection_lanes_to_worry_about++] = lane_get_connection_right(lane_i, map);
                 }
             }
             // All left-to-right cross traffic:
-            for (int i = 0; i < road_get_num_lanes(road_from_left); i++) {
+            int num_lanes_left = road_get_num_lanes(road_from_left);
+            for (int i = 0; i < num_lanes_left; i++) {
                 Lane* lane_i = road_get_lane(road_from_left, map, i);
                 Car* c = lane_get_num_cars(lane_i) > 0 ? lane_get_car(lane_i, sim, 0) : NULL;
                 if (c && c->indicator_turn == INDICATOR_LEFT) {
@@ -445,10 +551,12 @@ bool defensive_yield_despite_right_of_way(const Car* self, Simulation* sim, cons
             }
 
             // all left to right trafic:
+            Lane* leftmost_from_left = road_get_leftmost_lane(road_from_left, map);  // hoisted from loop
             bool we_in_leftmost_lane = situation->lane == road_get_leftmost_lane(situation->road, map);
-            for (int i = 0; i < road_get_num_lanes(road_from_left); i++) {
+            int num_lanes_left = road_get_num_lanes(road_from_left);
+            for (int i = 0; i < num_lanes_left; i++) {
                 Lane* lane_i = road_get_lane(road_from_left, map, i);
-                bool i_is_leftmost = lane_i == road_get_leftmost_lane(road_from_left, map);
+                bool i_is_leftmost = (lane_i == leftmost_from_left);
                 Car* c = lane_get_num_cars(lane_i) > 0 ? lane_get_car(lane_i, sim, 0) : NULL;
                 if (c && (c->indicator_turn == INDICATOR_NONE || (we_in_leftmost_lane && i_is_leftmost && c->indicator_turn == INDICATOR_LEFT))) {
                     incoming_lanes_to_worry_about[num_incoming_lanes_to_worry_about++] = lane_i;
@@ -460,11 +568,14 @@ bool defensive_yield_despite_right_of_way(const Car* self, Simulation* sim, cons
             }
             
             // all right to left traffic:
+            Lane* leftmost_from_right = road_get_leftmost_lane(road_from_right, map);    // hoisted from loop
+            Lane* rightmost_from_right = road_get_rightmost_lane(road_from_right, map);  // hoisted from loop
             bool we_in_rightmost_lane = situation->lane == road_get_rightmost_lane(situation->road, map);
-            for (int i = 0; i < road_get_num_lanes(road_from_right); i++) {
+            int num_lanes_right = road_get_num_lanes(road_from_right);
+            for (int i = 0; i < num_lanes_right; i++) {
                 Lane* lane_i = road_get_lane(road_from_right, map, i);
-                bool i_is_leftmost = lane_i == road_get_leftmost_lane(road_from_right, map);
-                bool i_is_rightmost = lane_i == road_get_rightmost_lane(road_from_right, map);
+                bool i_is_leftmost = (lane_i == leftmost_from_right);
+                bool i_is_rightmost = (lane_i == rightmost_from_right);
                 Car* c = lane_get_num_cars(lane_i) > 0 ? lane_get_car(lane_i, sim, 0) : NULL;
                 // always worry about straight and left turners, and right turners if we are in the rightmost lane and they are in the rightmost lane as well
                 if (c && (c->indicator_turn == INDICATOR_NONE || c->indicator_turn == INDICATOR_LEFT || (we_in_rightmost_lane && i_is_rightmost && c->indicator_turn == INDICATOR_RIGHT))) {
@@ -481,80 +592,115 @@ bool defensive_yield_despite_right_of_way(const Car* self, Simulation* sim, cons
         }
     }
 
-    // Go through the intersection lanes to worry about and if any of them have cars, we should be defensive and yield to them even if we technically have the right of way, as they might be jumpers who are not yielding to us or running a red light.
-    for (int i = 0; i < num_intersection_lanes_to_worry_about; i++) {
-        Lane* lane = intersection_lanes_to_worry_about[i];
-        if (lane && lane_get_num_cars(lane) > 0) {
-            // Check if we perceive any car in the lane
-            bool perceived_any = false;
-            for (int j = 0; j < lane_get_num_cars(lane); j++) {
-                // Determine if we see this car
-                double net_dropout_probability = sim->perception_noise_dropout_probability * dropout_probability_multiplier;
-                bool dropped = net_dropout_probability > 1e-9 && rand_0_to_1() < net_dropout_probability;
-                if (!dropped) {    
-                    perceived_any = true;
-                    break;
+    #ifdef BENCHMARK_YIELD_FUNCS
+    _bdt2 = _byield_get_time_us();
+    #endif
+
+    // Pre-compute dropout probability (loop-invariant)
+    {
+        double net_dropout_probability = sim->perception_noise_dropout_probability * dropout_probability_multiplier;
+        bool dropout_active = net_dropout_probability > 1e-9;
+
+        // Go through the intersection lanes to worry about and if any of them have cars, we should be defensive and yield to them even if we technically have the right of way, as they might be jumpers who are not yielding to us or running a red light.
+        for (int i = 0; i < num_intersection_lanes_to_worry_about; i++) {
+            Lane* lane = intersection_lanes_to_worry_about[i];
+            if (!lane) continue;
+            int num_cars = lane_get_num_cars(lane);
+            if (num_cars > 0) {
+                // Check if we perceive any car in the lane
+                bool perceived_any = false;
+                for (int j = 0; j < num_cars; j++) {
+                    bool dropped = dropout_active && rand_0_to_1() < net_dropout_probability;
+                    if (!dropped) {    
+                        perceived_any = true;
+                        break;
+                    }
+                }
+                if (perceived_any) {
+                    result = true;
+                    goto done_def;
                 }
             }
-            if (perceived_any) {
-                return true;    // should yield
+        }
+
+        // Go through the leading cars on incoming lanes and if any of them are less than yield_time_headway_threshold seconds away from their lane end, or creeping beyond the lane end, just let them go.
+        for (int i = 0; i < num_incoming_lanes_to_worry_about; i++) {
+            Lane* lane = incoming_lanes_to_worry_about[i];
+            if (!lane || lane_get_num_cars(lane) == 0) continue;
+            Car* c = lane_get_car(lane, sim, 0); // get the leading car
+            Meters car_progress_m;
+            MetersPerSecond car_speed;
+            MetersPerSecondSquared car_acceleration;
+            bool noticed = car_noisy_perceive_other(self, c, sim, NULL, &car_progress_m, &car_speed, &car_acceleration, NULL, NULL, NULL, NULL, NULL, false, dropout_probability_multiplier);
+            if (!noticed) {
+                continue;   // did not perceive this car
             }
-        }
-    }
 
-    // Go through the leading cars on incoming lanes and if any of them are less than yield_time_headway_threshold seconds away from their lane end, or creeping beyond the lane end, just let them go.
-    for (int i = 0; i < num_incoming_lanes_to_worry_about; i++) {
-        Lane* lane = incoming_lanes_to_worry_about[i];
-        if (!lane || lane_get_num_cars(lane) == 0) continue;
-        Car* c = lane_get_car(lane, sim, 0); // get the leading car
-        Meters car_progress_m;
-        MetersPerSecond car_speed;
-        MetersPerSecondSquared car_acceleration;
-        bool noticed = car_noisy_perceive_other(self, c, sim, NULL, &car_progress_m, &car_speed, &car_acceleration, NULL, NULL, NULL, NULL, NULL, false, dropout_probability_multiplier);
-        if (!noticed) {
-            continue;   // did not perceive this car
-        }
-
-        // If we are turning left, we don't need to worry about opposing left turners as our paths don't cross
-        if (!intersection->is_T_junction && turn_indicator == INDICATOR_LEFT && c->indicator_turn == INDICATOR_LEFT && lane->direction == direction_opposite(my_dir)) {
-            continue;
-        }
-        // if we are turning right, and cross traffic is not going straight or left, we don't need to worry about them as our paths don't cross
-        if (turn_indicator == INDICATOR_RIGHT && lane->direction == direction_perp_cw(my_dir)) {
-            if (c->indicator_turn != INDICATOR_NONE && c->indicator_turn != INDICATOR_LEFT) {
+            // If we are turning left, we don't need to worry about opposing left turners as our paths don't cross
+            if (!intersection->is_T_junction && turn_indicator == INDICATOR_LEFT && c->indicator_turn == INDICATOR_LEFT && lane->direction == opposite_dir) {
                 continue;
             }
-        }
+            // if we are turning right, and cross traffic is not going straight or left, we don't need to worry about them as our paths don't cross
+            if (turn_indicator == INDICATOR_RIGHT && lane->direction == perp_cw_dir) {
+                if (c->indicator_turn != INDICATOR_NONE && c->indicator_turn != INDICATOR_LEFT) {
+                    continue;
+                }
+            }
 
 
-        Meters lane_length = lane_get_length(lane);
-        Meters distance_to_lane_end = lane_length - car_progress_m - car_get_length(c) / 2;
+            Meters lane_length = lane_get_length(lane);
+            Meters distance_to_lane_end = lane_length - car_progress_m - car_get_length(c) / 2;
 
-        if (distance_to_lane_end > 0) {
-            if (car_speed > 0) {
-                if (car_acceleration < 0) {
-                    // they are braking, but they do seem to brake hard enough?
-                    Meters stopping_distance = (car_speed * car_speed) / (2 * (-car_acceleration));
-                    if (stopping_distance > distance_to_lane_end) {
-                        return true;    // they won't be able to stop in time, let them go
+            if (distance_to_lane_end > 0) {
+                if (car_speed > 0) {
+                    if (car_acceleration < 0) {
+                        // they are braking, but they do seem to brake hard enough?
+                        Meters stopping_distance = (car_speed * car_speed) / (2 * (-car_acceleration));
+                        if (stopping_distance > distance_to_lane_end) {
+                            result = true;
+                            goto done_def;
+                        }
+                    } else {
+                        // Not braking. Linearly project
+                        Seconds time_to_lane_end = distance_to_lane_end / car_speed;
+                        if (time_to_lane_end < yield_time_headway_threshold) {
+                            result = true;
+                            goto done_def;
+                        }
                     }
                 } else {
-                    // Not braking. Linearly project
-                    Seconds time_to_lane_end = distance_to_lane_end / car_speed;
-                    if (time_to_lane_end < yield_time_headway_threshold) {
-                        return true;    // they will reach the end of the lane within our yield time headway threshold, let them go
-                    }
+                    // they are stopped or going backwards, so, not a threat
                 }
             } else {
-                // they are stopped or going backwards, so, not a threat
-            }
-        } else {
-            if (car_speed > CREEP_SPEED || car_acceleration > 0) {
-                return true;    // they are already beyond the lane end and still moving, or beginning to move, let them go
+                if (car_speed > CREEP_SPEED || car_acceleration > 0) {
+                    result = true;
+                    goto done_def;
+                }
             }
         }
     }
-    return false;
+
+done_def:
+    #ifdef BENCHMARK_YIELD_FUNCS
+    {
+        double _bdt_end = _byield_get_time_us();
+        _byield_def_setup_us += _bdt1 - _bdt0;
+        _byield_def_build_us += _bdt2 - _bdt1;
+        _byield_def_check_us += _bdt_end - _bdt2;
+        _byield_def_count++;
+        if (_byield_def_count % BYIELD_INTERVAL == 0) {
+            double n = (double)_byield_def_count;
+            double total = (_byield_def_setup_us + _byield_def_build_us + _byield_def_check_us) / n;
+            printf("  [BENCH def_yield] Avg over %d calls: Setup=%.3f us | Build=%.3f us | Check=%.3f us | Total=%.3f us\n",
+                _byield_def_count,
+                _byield_def_setup_us / n,
+                _byield_def_build_us / n,
+                _byield_def_check_us / n,
+                total);
+        }
+    }
+    #endif
+    return result;
 }
 
 void nearby_vehicles_flatten(NearbyVehicles* nearby_vehicles, NearbyVehiclesFlattened* flattened) {

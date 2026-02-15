@@ -1,18 +1,11 @@
 #pragma once
 
+#include "constants.h"
 #include "utils.h"
 #include "map.h"
 #include "car.h"
 #include "map.h"
 #include "ai.h"
-
-#define MAX_CARS_IN_SIMULATION 512 // Maximum number of cars in the simulation
-
-// Time-of-day phase start hours
-#define MORNING_START 6
-#define AFTERNOON_START 12
-#define EVENING_START 16
-#define NIGHT_START 20
 
 typedef int Minutes;
 typedef int Hours;
@@ -69,6 +62,35 @@ typedef enum {
 
 extern const char* weather_strings[];
 
+
+typedef enum {
+    TRAFFIC_VIOLATION_RED_LIGHT,    // while entering the lane on the intersection, was the lane guarded by a red light? If so, red light violation.
+    TRAFFIC_VIOLATION_STOP_SIGN,    // what was the speed of the car when it touched/crossed the stop line at the end of the lane? If it was above STOP_SPEED_THRESHOLD, then it is a stop sign violation.
+    TRAFFIC_VIOLATION_SPEEDING,     // was the car's speed above the lane's speed limit by more than a small epsilon?
+} TrafficViolationType;
+
+typedef struct TrafficViolation {
+    CarId car_id;
+    TrafficViolationType type;
+    Seconds time;
+    double detail;
+} TrafficViolation;
+
+typedef struct TrafficViolationsLogsQueue {
+    bool enabled[MAX_CARS_IN_SIMULATION];                   // Whether logging is enabled for each car ID. If false, no violations will be logged for that car.
+    TrafficViolation queue[MAX_CARS_IN_SIMULATION][TRAFFIC_VIOLATIONS_LOG_QUEUE_SIZE];     // For each car ID, a circular buffer queue of the most recent traffic violations involving that car.
+    int next_index[MAX_CARS_IN_SIMULATION];                // For each car ID, the next index in the circular buffer queue to write to. After writing, this index is incremented and wrapped around using modulo with TRAFFIC_VIOLATIONS_LOG_QUEUE_SIZE.
+    int num_violations[MAX_CARS_IN_SIMULATION];              // For each car ID, the total number of violations that have been logged for that car, which may be greater than TRAFFIC_VIOLATIONS_LOG_QUEUE_SIZE if the car has been involved in many violations and the circular buffer has wrapped around multiple times.
+    int queue_num_items[MAX_CARS_IN_SIMULATION];          // For each car ID, the current number of violations stored in the queue, which is at most TRAFFIC_VIOLATIONS_LOG_QUEUE_SIZE.
+} TrafficViolationsLogsQueue;
+
+TrafficViolation traffic_violation_get_for_car(TrafficViolationsLogsQueue* queue, CarId car_id, int violation_index_from_most_recent);
+void traffic_violation_log(TrafficViolationsLogsQueue* queue, CarId car_id, TrafficViolationType type, Seconds time, double detail);
+
+void traffic_violations_logs_queue_clear_for_car(TrafficViolationsLogsQueue* queue, CarId car_id);
+void traffic_violations_logs_queue_clear_all(TrafficViolationsLogsQueue* queue);
+
+
 // Main simulation structure
 typedef struct Simulation {
     Map map;       // Simulation map
@@ -77,6 +99,7 @@ typedef struct Simulation {
     SituationalAwareness situational_awarenesses[MAX_CARS_IN_SIMULATION]; // Situational awareness for each car
     // Procedure ongoing_procedures[MAX_CARS_IN_SIMULATION]; // Ongoing procedures for each car
     DrivingAssistant driving_assistants[MAX_CARS_IN_SIMULATION]; // Driving assistants for each car
+    TrafficViolationsLogsQueue traffic_violations_logs_queue; // Queue for logging traffic violations for each car
     int num_cars;   // Number of cars in simulation
     Seconds time;   // Time simulated so far
     Seconds dt;     // Simulation engine's time resolution for integration (in seconds)
@@ -129,6 +152,7 @@ typedef enum {
 Map* sim_get_map(Simulation* self);
 ClockReading sim_get_initial_clock_reading(Simulation* self);
 int sim_get_num_cars(const Simulation* self);
+Car* sim_get_cars(Simulation* self);
 Car* sim_get_car(Simulation* self, CarId id);
 SituationalAwareness* sim_get_situational_awareness(Simulation* self, CarId id);
 // Procedure* sim_get_ongoing_procedure(Simulation* self, CarId id);
@@ -176,3 +200,29 @@ void simulate(Simulation* self, Seconds sim_duration);
 
 // Advance simulation by one timestep (dt)
 void sim_step(Simulation* self);
+
+
+
+
+// Collisions stuff:
+
+// Sparse collision storage: track up to two current collisions per car.
+typedef struct Collisions {
+    CarId colliding_cars[MAX_CARS_IN_SIMULATION][COLLISIONS_MAX_PER_CAR]; // Packed: indices [0, num_collisions_per_car) are valid IDs, rest are -1.
+    int num_collisions_per_car[MAX_CARS_IN_SIMULATION];
+    int total_collisions; // unique pairs currently tracked
+} Collisions;
+
+Collisions* collisions_malloc();
+void collisions_free(Collisions* collisions);
+void collisions_reset(Collisions* collisions);
+
+int collisions_get_total(Collisions* collisions);
+int collisions_get_count_for_car(Collisions* collisions, CarId car_id);
+bool collisions_are_colliding(Collisions* collisions, CarId car1, CarId car2);
+CarId collisions_get_colliding_car(Collisions* collisions, CarId car_id, int collision_index);
+
+void collisions_detect_all(Collisions* collisions, Simulation* sim);
+void collisions_detect_for_car(Collisions* collisions, Simulation* sim, CarId car_id);
+void collisions_print(Collisions* collisions);
+

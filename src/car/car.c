@@ -7,6 +7,11 @@
 #include "ai.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
+
+static void reset_stats(Car* car) {
+    memset(&car->travel_stats, 0, sizeof(CarTravelStats));
+}
 
 
 void car_init(Car* car, Dimensions3D dimensions, CarCapabilities capabilities, Liters fuel_tank_capacity, CarPersonality preferences) {
@@ -36,6 +41,7 @@ void car_init(Car* car, Dimensions3D dimensions, CarCapabilities capabilities, L
     car->auto_turn_off_indicators = true; // Default to true, can be changed later
     car->prev_lane_id = ID_NULL; // Initialize previous lane ID to NULL
     car->recent_forward_movement = 0.0; // Initialize recent forward movement to 0
+    reset_stats(car);
 }
 
 void car_free(Car* self) {
@@ -214,173 +220,89 @@ static void car_geometry_from_given_position_speed_acc(Simulation* sim, Car* car
     double lane_progress = lane_progress_meters / lane->length;
     Coordinates center;
     Radians orientation;
+    double cos_orient, sin_orient; // Computed once, reused for tangent + corners
     if (lane->type == LINEAR_LANE) {
+        // Use cached orientation/cos/sin — no atan2 or trig needed
+        orientation = lane->cached_orientation;
+        cos_orient = lane->cached_cos_orientation;
+        sin_orient = lane->cached_sin_orientation;
         Vec2D start = lane->start_point;
         Vec2D end = lane->end_point;
         Vec2D delta = vec_sub(end, start);
         center = vec_add(start, vec_scale(delta, lane_progress));
-        orientation = angle_normalize(atan2(delta.y, delta.x));
         if (out_center) *out_center = center;
         if (out_orientation) *out_orientation = orientation;
         
-        // Linear Lane Vectors
-        Vec2D tangent;
-        if (out_speed_vector || out_acceleration_vector) {
-            tangent.x = cos(orientation); tangent.y = sin(orientation);
+        // Linear Lane Vectors — reuse cached cos/sin
+        if (out_speed_vector) {
+            out_speed_vector->x = cos_orient * speed;
+            out_speed_vector->y = sin_orient * speed;
         }
-        if (out_speed_vector) *out_speed_vector = vec_scale(tangent, speed);
-        if (out_acceleration_vector) *out_acceleration_vector = vec_scale(tangent, acceleration);
+        if (out_acceleration_vector) {
+            out_acceleration_vector->x = cos_orient * acceleration;
+            out_acceleration_vector->y = sin_orient * acceleration;
+        }
         
     } else if (lane->type == QUARTER_ARC_LANE) {
-        // Compute theoretical position on the ideal circular arc
+        // Use cached trig values for start/end angles
         double theta = lane->start_angle + lane_progress * (lane->end_angle - lane->start_angle);
-        theta = angle_normalize(theta);
+        double cos_theta = cos(theta);
+        double sin_theta = sin(theta);
         Vec2D theoretical_pos = {
-            lane->center.x + lane->radius * cos(theta),
-            lane->center.y + lane->radius * sin(theta)
+            lane->center.x + lane->radius * cos_theta,
+            lane->center.y + lane->radius * sin_theta
         };
 
-        // Compute theoretical start (p=0) and end (p=1) positions
-        Vec2D theoretical_start = {
-            lane->center.x + lane->radius * cos(lane->start_angle),
-            lane->center.y + lane->radius * sin(lane->start_angle)
-        };
-        Vec2D theoretical_end = {
-            lane->center.x + lane->radius * cos(lane->end_angle),
-            lane->center.y + lane->radius * sin(lane->end_angle)
-        };
-
-        // Get actual start/end points from connecting lanes to fix misalignment
-        Map* map = sim_get_map(sim);
-        Lane* incoming = lane_get_connection_incoming_straight(lane, map);
-        Lane* outgoing = lane_get_connection_straight(lane, map);
-
-        Vec2D actual_start = incoming ? incoming->end_point : lane->start_point;
-        Vec2D actual_end = outgoing ? outgoing->start_point : lane->end_point;
-
-        // Interpolate the offset
-        Vec2D offset_start = vec_sub(actual_start, theoretical_start);
-        Vec2D offset_end = vec_sub(actual_end, theoretical_end);
+        // Use precomputed theoretical start/end positions
+        Vec2D offset_start = vec_sub(lane->cached_actual_start, lane->cached_theoretical_start);
+        Vec2D offset_end = vec_sub(lane->cached_actual_end, lane->cached_theoretical_end);
         double p = lane_progress;
-        Vec2D current_offset = vec_add(vec_scale(offset_start, 1.0 - p), vec_scale(offset_end, p));
+        Vec2D current_offset = {
+            offset_start.x * (1.0 - p) + offset_end.x * p,
+            offset_start.y * (1.0 - p) + offset_end.y * p
+        };
 
         // Apply offset
-        center = vec_add(theoretical_pos, current_offset);
+        center.x = theoretical_pos.x + current_offset.x;
+        center.y = theoretical_pos.y + current_offset.y;
         if (out_center) *out_center = center;
 
-        // Orientation smoothing
-        // 1. Theoretical orientation on the arc
-        double theoretical_orient;
-        if (lane->direction == DIRECTION_CCW) {
-            theoretical_orient = angles_add(theta, M_PI_2);
-        } else {
-            theoretical_orient = angles_add(theta, -M_PI_2);
-        }
-        
-        // 2. Actual orientations at boundaries
-        double actual_start_orient;
-        if (incoming && incoming->type == LINEAR_LANE) {
-            Vec2D d = vec_sub(incoming->end_point, incoming->start_point);
-            actual_start_orient = angle_normalize(atan2(d.y, d.x));
-        } else {
-            // Fallback to theoretical start tangent
-            double angle = lane->start_angle;
-            actual_start_orient = (lane->direction == DIRECTION_CCW) ? angles_add(angle, M_PI_2) : angles_add(angle, -M_PI_2);
-        }
+        // Orientation: use precomputed angular diffs (stored in cached_cos/sin_orientation)
+        double diff_start = lane->cached_cos_orientation; // repurposed: angular offset at start
+        double diff_end = lane->cached_sin_orientation;   // repurposed: angular offset at end
 
-        double actual_end_orient;
-        if (outgoing && outgoing->type == LINEAR_LANE) {
-            Vec2D d = vec_sub(outgoing->end_point, outgoing->start_point);
-            actual_end_orient = angle_normalize(atan2(d.y, d.x));
-        } else {
-             // Fallback to theoretical end tangent
-             double angle = lane->end_angle;
-             actual_end_orient = (lane->direction == DIRECTION_CCW) ? angles_add(angle, M_PI_2) : angles_add(angle, -M_PI_2);
-        }
-
-        // 3. Theoretical orientations at boundaries
-        double theoretical_start_orient = (lane->direction == DIRECTION_CCW) ? angles_add(lane->start_angle, M_PI_2) : angles_add(lane->start_angle, -M_PI_2);
-        double theoretical_end_orient = (lane->direction == DIRECTION_CCW) ? angles_add(lane->end_angle, M_PI_2) : angles_add(lane->end_angle, -M_PI_2);
-
-        // 4. Interpolate the angular offsets
-        double diff_start = actual_start_orient - angle_normalize(theoretical_start_orient);
-        while (diff_start <= -M_PI) diff_start += 2 * M_PI;
-        while (diff_start > M_PI) diff_start -= 2 * M_PI;
-
-        double diff_end = actual_end_orient - angle_normalize(theoretical_end_orient);
-        while (diff_end <= -M_PI) diff_end += 2 * M_PI;
-        while (diff_end > M_PI) diff_end -= 2 * M_PI;
-
+        // Theoretical orientation on the arc
+        double dir_sign = (lane->direction == DIRECTION_CCW) ? 1.0 : -1.0;
+        double theoretical_orient = theta + dir_sign * M_PI_2;
         double current_orient_offset = diff_start * (1.0 - p) + diff_end * p;
         orientation = angle_normalize(theoretical_orient + current_orient_offset);
         if (out_orientation) *out_orientation = orientation;
 
-        // --- Update Speed and Acceleration Vectors ---
-        //
-        // Mathematical Derivation:
-        // ------------------------
-        // We model the car's motion including the geometric correction for asymmetric intersections.
-        // Let v be the car's speed along the lane parameter (ds/dt).
-        // Let R be the turn radius, L be the lane length.
-        //
-        // 1. Angular Velocity (Yaw Rate), omega (w):
-        //    The total orientation theta(t) = theta_theoretical(t) + theta_error(t).
-        //    Differentiating with respect to time:
-        //    w_total = d(theta)/dt = d(theta_theoretical)/dt + d(theta_error)/dt
-        //
-        //    a) Theoretical term: For a circular arc, w = v / R.
-        //       For CCW: w > 0. For CW: w < 0.
-        //       w_theo = (v / R) * direction_sign
-        //
-        //    b) Correction term: The error is interpolated linearly over distance s.
-        //       theta_error(s) = error_start + (error_end - error_start) * (s / L)
-        //       d(theta_error)/dt = d(theta_error)/ds * ds/dt
-        //                         = ((error_end - error_start) / L) * v
-        //
-        //    So, w_total = (v / R * sign) + (delta_error / L * v).
-        //
-        // 2. Speed Vector:
-        //    The geometric correction effectively stretches or compresses the path length.
-        //    The "effective speed" along the actual path is related to the angular velocity and radius.
-        //    v_effective ~= w_total * R * direction_sign
-        //     Substituting w_total:
-        //    v_effective = v * (1 + (delta_error * R / L) * direction_sign)
-        //
-        // 3. Acceleration Vector:
-        //    a_total = a_tangential + a_centripetal
-        //    a_tangential = a * unit_tangent
-        //    a_centripetal = v * w_total * unit_normal_left
-        //    (Note: This works for both CCW and CW because w_total flips sign appropriately).
+        // Compute cos/sin of orientation once for tangent, normal, and corners
+        if (out_speed_vector || out_acceleration_vector || out_corners) {
+            cos_orient = cos(orientation);
+            sin_orient = sin(orientation);
+        }
 
-        // 1. Calculate Angular Velocity (Yaw Rate)
-        double turn_direction, omega_theoretical, omega_correction, omega_total;
-        Vec2D tangent;
+        // Speed and Acceleration Vectors
         if (out_speed_vector || out_acceleration_vector) {
-            // Precompute only if needed
-            turn_direction = (lane->direction == DIRECTION_CCW) ? 1.0 : -1.0;
-            omega_theoretical = (speed / lane->radius) * turn_direction;
-            omega_correction = (diff_end - diff_start) * (speed / lane->length);
-            omega_total = omega_theoretical + omega_correction;
-            tangent.x = cos(orientation); tangent.y = sin(orientation);
-        }
+            double omega_theoretical = (speed / lane->radius) * dir_sign;
+            double omega_correction = (diff_end - diff_start) * (speed / lane->length);
+            double omega_total = omega_theoretical + omega_correction;
 
-        // 2. Speed Vector
-        if (out_speed_vector) {
-            // Effective speed accounts for path stretching/compression due to geometry correction.
-            double effective_speed_scalar = speed * (1.0 + (diff_end - diff_start) * (lane->radius / lane->length) * turn_direction);
-            Vec2D true_speed_vector = vec_scale(tangent, effective_speed_scalar);
-            *out_speed_vector = true_speed_vector;
-        }
-        
-        // 3. Acceleration Vector
-        if (out_acceleration_vector) {
-            // Tangential Acceleration:
-            Vec2D acc_tangential = vec_scale(tangent, acceleration);
-            // Centripetal Acceleration: a_c = v * omega_total (Directed towards center)
-            Vec2D normal_left = { -sin(orientation), cos(orientation) };
-            Vec2D acc_centripetal = vec_scale(normal_left, speed * omega_total);
-            Vec2D true_acceleration_vector = vec_add(acc_tangential, acc_centripetal);
-            *out_acceleration_vector = true_acceleration_vector;
+            // 2. Speed Vector
+            if (out_speed_vector) {
+                double effective_speed_scalar = speed * (1.0 + (diff_end - diff_start) * (lane->radius / lane->length) * dir_sign);
+                out_speed_vector->x = cos_orient * effective_speed_scalar;
+                out_speed_vector->y = sin_orient * effective_speed_scalar;
+            }
+            
+            // 3. Acceleration Vector
+            if (out_acceleration_vector) {
+                double centripetal = speed * omega_total;
+                out_acceleration_vector->x = cos_orient * acceleration + (-sin_orient) * centripetal;
+                out_acceleration_vector->y = sin_orient * acceleration + cos_orient * centripetal;
+            }
         }
     } else {
         LOG_ERROR("Cannot update geometry for car %d: unknown lane type.", car->id);
@@ -388,19 +310,21 @@ static void car_geometry_from_given_position_speed_acc(Simulation* sim, Car* car
     }
 
     if (out_corners) {
-        double width = car->dimensions.x;
-        double length = car->dimensions.y;
-        // Define car corners in local coordinates. Car is facing right (0 radians).
-        Vec2D local_corners[4] = {
-            {length / 2, -width / 2},   // Front-right (0)
-            {length / 2, width / 2},  // Front-left (1)
-            {-length / 2, width / 2}, // Rear-left (2)
-            {-length / 2, -width / 2}   // Rear-right (3)
-        };
-        // Transform corners to world coordinates
-        for (int i = 0; i < 4; i++) {
-            out_corners[i] = vec_add(center, vec_rotate(local_corners[i], orientation));
-        }
+        double half_width = car->dimensions.x * 0.5;
+        double half_length = car->dimensions.y * 0.5;
+        // Inline rotation: rotated = (x*cos - y*sin, x*sin + y*cos) + center
+        // Front-right (half_length, -half_width)
+        out_corners[0].x = center.x + half_length * cos_orient - (-half_width) * sin_orient;
+        out_corners[0].y = center.y + half_length * sin_orient + (-half_width) * cos_orient;
+        // Front-left (half_length, half_width)
+        out_corners[1].x = center.x + half_length * cos_orient - half_width * sin_orient;
+        out_corners[1].y = center.y + half_length * sin_orient + half_width * cos_orient;
+        // Rear-left (-half_length, half_width)
+        out_corners[2].x = center.x + (-half_length) * cos_orient - half_width * sin_orient;
+        out_corners[2].y = center.y + (-half_length) * sin_orient + half_width * cos_orient;
+        // Rear-right (-half_length, -half_width)
+        out_corners[3].x = center.x + (-half_length) * cos_orient - (-half_width) * sin_orient;
+        out_corners[3].y = center.y + (-half_length) * sin_orient + (-half_width) * cos_orient;
     }
 }
 
@@ -438,49 +362,63 @@ bool car_noisy_perceive_other(const Car* self, const Car* other, Simulation* sim
     if (net_probability > 1e-9 && rand_0_to_1() < net_probability) {
         return false; // Not perceived
     }
-    Lane* self_lane = car_get_lane(self, sim_get_map(sim));
-    Lane* other_lane = car_get_lane(other, sim_get_map(sim));
-    double base_blindspot_drop_probability = sim->perception_noise_blind_spot_dropout_base_probability * dropout_probability_multiplier;
-    if (base_blindspot_drop_probability > 1e-9 && consider_blind_spot) {
-        // Check if the other car is in the adjacent lane (and same direction)
-        Lane* self_adjacent_left = lane_get_adjacent_left(self_lane, sim_get_map(sim));
-        if (self_adjacent_left && self_adjacent_left->direction != self_lane->direction) {
-            self_adjacent_left = NULL; // Ignore opposite direction lanes
-        }
-        Lane* self_adjacent_right = lane_get_adjacent_right(self_lane, sim_get_map(sim));
-        if (self_adjacent_right && self_adjacent_right->direction != self_lane->direction) {
-            self_adjacent_right = NULL; // Ignore opposite direction lanes
-        }
-        bool in_adjacent_lane = other_lane == self_adjacent_left || other_lane == self_adjacent_right;
-        if (in_adjacent_lane) {
-            // if we were to jump to the other lane, where would we be?
-            Meters hypothetical_position = calculate_hypothetical_position_on_lane_change(self, self_lane, other_lane, sim_get_map(sim));
-            Meters ego_len = car_get_length(self);
-            Meters other_len = car_get_length(other);
-            Meters bs_start_rel = -ego_len * 0.5 - 3.0; // 3 meters behind rear bumper
-            Meters bs_end_rel = ego_len / 4.0; // 1/4 length ahead of center (~driver's position)
-            Meters bs_len = bs_end_rel - bs_start_rel;
-            Meters other_distance = other->lane_progress_meters - hypothetical_position;  // in our frame of reference
-            Meters other_start = other_distance - other_len / 2.0;
-            Meters other_end = other_distance + other_len / 2.0;
-            if (other_start >= bs_start_rel && other_end <= bs_end_rel) {
-                // Other car is fully inside our blind spot
-                double size_ratio = other_len / bs_len; // smaller cars should be more likely to be missed
-                double drop_probability = base_blindspot_drop_probability * (1.0 - size_ratio);
-                if (drop_probability > 1e-9 && rand_0_to_1() < drop_probability) {
-                    return false; // Not perceived
+    Map* map = sim_get_map(sim);  // cache once
+    Lane* other_lane = car_get_lane(other, map);
+
+    // Blind spot check — only fetch self_lane and adjacency when needed
+    if (consider_blind_spot) {
+        double base_blindspot_drop_probability = sim->perception_noise_blind_spot_dropout_base_probability * dropout_probability_multiplier;
+        if (base_blindspot_drop_probability > 1e-9) {
+            Lane* self_lane = car_get_lane(self, map);
+            Lane* self_adjacent_left = lane_get_adjacent_left(self_lane, map);
+            if (self_adjacent_left && self_adjacent_left->direction != self_lane->direction) {
+                self_adjacent_left = NULL;
+            }
+            Lane* self_adjacent_right = lane_get_adjacent_right(self_lane, map);
+            if (self_adjacent_right && self_adjacent_right->direction != self_lane->direction) {
+                self_adjacent_right = NULL;
+            }
+            bool in_adjacent_lane = other_lane == self_adjacent_left || other_lane == self_adjacent_right;
+            if (in_adjacent_lane) {
+                Meters hypothetical_position = calculate_hypothetical_position_on_lane_change(self, self_lane, other_lane, map);
+                Meters ego_len = car_get_length(self);
+                Meters other_len = car_get_length(other);
+                Meters bs_start_rel = -ego_len * 0.5 - 3.0;
+                Meters bs_end_rel = ego_len / 4.0;
+                Meters bs_len = bs_end_rel - bs_start_rel;
+                Meters other_distance = other->lane_progress_meters - hypothetical_position;
+                Meters other_start = other_distance - other_len / 2.0;
+                Meters other_end = other_distance + other_len / 2.0;
+                if (other_start >= bs_start_rel && other_end <= bs_end_rel) {
+                    double size_ratio = other_len / bs_len;
+                    double drop_probability = base_blindspot_drop_probability * (1.0 - size_ratio);
+                    if (drop_probability > 1e-9 && rand_0_to_1() < drop_probability) {
+                        return false;
+                    }
                 }
             }
         }
     }
     
-    double cosine_alignment = self_lane == other_lane ? 1.0 : fabs(cos(self->orientation - other->orientation));
-    Meters true_distance = self_lane == other_lane ? fabs(other->lane_progress_meters - self->lane_progress_meters) : vec_magnitude(vec_sub(other->center, self->center));
+    // Same-lane check via integer lane_id comparison — avoids needing car_get_lane(self) when blind spot is skipped
+    bool same_lane = (self->lane_id == other->lane_id);
+
+    // Only compute cosine_alignment and true_distance when noise parameters require them
+    bool distance_noise_on = sim->perception_noise_distance_std_dev_percent > 1e-9;
+    bool speed_noise_on = sim->perception_noise_speed_std_dev > 1e-9;
+
     Meters noisy_progress_meters;
-    if (sim->perception_noise_distance_std_dev_percent > 1e-9) {
+    double cosine_alignment;
+    if (distance_noise_on || speed_noise_on) {
+        cosine_alignment = same_lane ? 1.0 : fabs(cos(self->orientation - other->orientation));
+    } else {
+        cosine_alignment = 0.0; // unused
+    }
+
+    if (distance_noise_on) {
+        Meters true_distance = same_lane ? fabs(other->lane_progress_meters - self->lane_progress_meters) : vec_magnitude(vec_sub(other->center, self->center));
         double distance_noise_stddev = sim->perception_noise_distance_std_dev_percent * true_distance;
-        // but it should be scaled by orientation alignment
-        distance_noise_stddev *= cosine_alignment;  // more aligned => more noise, since aligned vehicles are harder to perceive accurately. cos(0)=1, cos(90deg)=0
+        distance_noise_stddev *= cosine_alignment;
         noisy_progress_meters = fclamp(rand_gaussian(other->lane_progress_meters, distance_noise_stddev), 0.0, other_lane->length);
     } else {
         noisy_progress_meters = other->lane_progress_meters;
@@ -489,16 +427,20 @@ bool car_noisy_perceive_other(const Car* self, const Car* other, Simulation* sim
     if (progress_out) *progress_out = noisy_progress_meters / other_lane->length;
 
     MetersPerSecond true_speed = other->speed;
-    MetersPerSecond speed_noise_std = cosine_alignment * sim->perception_noise_speed_std_dev * true_speed;
-    MetersPerSecond noisy_speed = rand_gaussian(true_speed, speed_noise_std);
-    if (speed_out) *speed_out = noisy_speed;
+    if (speed_noise_on) {
+        MetersPerSecond speed_noise_std = cosine_alignment * sim->perception_noise_speed_std_dev * true_speed;
+        MetersPerSecond noisy_speed = rand_gaussian(true_speed, speed_noise_std);
+        if (speed_out) *speed_out = noisy_speed;
+    } else {
+        if (speed_out) *speed_out = true_speed;
+    }
 
     MetersPerSecondSquared true_accel = other->acceleration;
     MetersPerSecondSquared noisy_accel = true_accel; // No noise for acceleration for now
     if (acceleration_out) *acceleration_out = noisy_accel;
 
     double still_need_rel_distance_out = rel_distance_out != NULL;
-    if (still_need_rel_distance_out && self_lane == other_lane) {
+    if (still_need_rel_distance_out && same_lane) {
         *rel_distance_out = fabs(noisy_progress_meters - self->lane_progress_meters);
         still_need_rel_distance_out = false;
     }
@@ -509,9 +451,10 @@ bool car_noisy_perceive_other(const Car* self, const Car* other, Simulation* sim
         Coordinates other_center_perceived;
         Vec2D other_speed_vector_perceived;
         Vec2D other_acceleration_vector_perceived;
+        MetersPerSecond noisy_speed_for_geom = speed_out ? *speed_out : true_speed;
         car_geometry_from_given_position_speed_acc(sim, (Car*)other, 
             noisy_progress_meters,
-            noisy_speed,
+            noisy_speed_for_geom,
             noisy_accel,
             (rel_position_out || still_need_rel_distance_out) ? &other_center_perceived : NULL,
             (rel_orientation_out) ? &other_orientation_perceived : NULL,
