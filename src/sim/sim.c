@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <assert.h>
 #include <math.h>
+#include <string.h>
 
 
 const char* day_of_week_strings[] = { "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday" };
@@ -117,7 +118,7 @@ void sim_init(Simulation* sim) {
     sim->perception_noise_distance_std_dev_percent = 0.05; // 5% distance error
     sim->perception_noise_speed_std_dev = from_mph(0.5); // 0.5 mph speed error
     sim->perception_noise_dropout_probability = 0.01; // 1% dropout probability
-    sim->perception_noise_blind_spot_dropout_base_probability = 0.1; // 5% blind spot dropout probabilityelative 
+    sim->perception_noise_blind_spot_dropout_base_probability = 0.05; // 5% blind spot dropout probability
     
     #ifdef NO_PERCEPTION_NOISE
     sim->perception_noise_distance_std_dev_percent = 0.0; // 5% distance error
@@ -139,10 +140,7 @@ void sim_init(Simulation* sim) {
     sim_set_npc_rogue_factor(sim, 0.0); // Initialize NPC rogue factor and driving styles
 
     // zero out the traffic violations logs queue
-    for (int i = 0; i < MAX_CARS_IN_SIMULATION; i++) {
-        sim->traffic_violations_logs_queue.enabled[i] = false;  // disable logging for all cars by default
-        traffic_violations_logs_queue_clear_for_car(&sim->traffic_violations_logs_queue, i);
-    }
+    memset(&sim->traffic_violations_logs_queue, 0, sizeof(sim->traffic_violations_logs_queue));
 }
 
 Car* sim_get_new_car(Simulation* self) {

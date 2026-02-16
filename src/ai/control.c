@@ -20,12 +20,13 @@ MetersPerSecondSquared control_speed_compute_pd_accel(ControlError error, double
 }
 
 
-MetersPerSecondSquared control_compute_const_accel(ControlError error) {
-    // if (error.position * error.speed > 0) {
-    //     fprintf(stderr, "Error: Moving away from equilibrium (Δv ⋅ Δx ≥ 0)\n");
-    //     exit(EXIT_FAILURE);
-    // }
-    return error.speed * error.speed / (2 * error.position + 1e-9); // Avoid division by zero
+MetersPerSecondSquared control_compute_const_accel(ControlError error, MetersPerSecond speed_target) {
+    // Computes the constant acceleration needed to reach speed_target at position_target.
+    // From kinematics: v_target^2 = v_current^2 + 2*a*dx
+    // With v_e = v_current - v_target, x_e = x_current - x_target:
+    //   a = v_e * (v_e + 2*v_target) / (2 * x_e)
+    // When speed_target = 0, this reduces to v_e^2 / (2*x_e).
+    return error.speed * (error.speed + 2.0 * speed_target) / (2 * error.position + 1e-9);
 }
 
 
@@ -111,7 +112,7 @@ MetersPerSecondSquared car_compute_acceleration_chase_target(const Car* car, Met
     if (position_current <= position_target) { // target in front of us
         LOG_TRACE("Target in front of us");
         if (speed_current >= 0 ) {    // we are travelling forward            // already catching up. we need to slow down at some point
-            MetersPerSecondSquared const_accel = control_compute_const_accel(error);
+            MetersPerSecondSquared const_accel = control_compute_const_accel(error, speed_target);
             if (const_accel < -preferred.max_deceleration) {    // can't brake in time with preferred profile. So, we brake max.
                 LOG_TRACE("Can't brake in time with preferred profile. So, we brake max.");
                 accel = fmax(const_accel, -capable.max_deceleration);
@@ -143,7 +144,7 @@ MetersPerSecondSquared car_compute_acceleration_chase_target(const Car* car, Met
             if (speed_current > 0) {    // and we are moving forward (and yet to crash)
                 LOG_TRACE("And we are moving forward.");
                 if (speed_current > speed_target) { // and moving forward at a faster pace than the target speed. Gap decreasing from the final crash point and increasing from where we should be.
-                    MetersPerSecondSquared const_acc_to_prevent_crash = control_compute_const_accel((ControlError){position_current - (position_target + position_target_overshoot_buffer), speed_current});
+                    MetersPerSecondSquared const_acc_to_prevent_crash = control_compute_const_accel((ControlError){position_current - (position_target + position_target_overshoot_buffer), speed_current}, 0);
                     if (const_acc_to_prevent_crash < -preferred.max_deceleration) { // our preferred profile can't avoid the crash
                         LOG_TRACE("Our preferred profile can't avoid the crash");
                         accel = fmax(const_acc_to_prevent_crash, -capable.max_deceleration);
@@ -157,7 +158,7 @@ MetersPerSecondSquared car_compute_acceleration_chase_target(const Car* car, Met
                     }
                 } else {    // we are still moving forward but gap decreasing as our target (probably d distance behind the leading vehile when we are trying to tail) chases us. Just brake smoothly, unless chasing us too fast... like the next car suddenly sped up.
                     LOG_TRACE("We are still moving forward but gap decreasing as our target chases us.");
-                    MetersPerSecondSquared const_acc = control_compute_const_accel(error);
+                    MetersPerSecondSquared const_acc = control_compute_const_accel(error, speed_target);
                     if (const_acc > preferred.max_deceleration) {   // target chasing us too fast.
                         LOG_TRACE("Target chasing us too fast.");
                         accel = fmin(const_acc, capable.max_deceleration);
@@ -170,7 +171,7 @@ MetersPerSecondSquared car_compute_acceleration_chase_target(const Car* car, Met
                 LOG_TRACE("We are in reverse gear. We want to get back to the target as soon as possible.");
                 if (speed_current < speed_target) { // we are reversing fast enough. Need to break at some point.
                     LOG_TRACE("We are reversing fast enough. Need to break at some point.");
-                    MetersPerSecondSquared const_acc = control_compute_const_accel(error);
+                    MetersPerSecondSquared const_acc = control_compute_const_accel(error, speed_target);
                     if (const_acc > preferred.max_deceleration) {   // can't brake slowly
                         LOG_TRACE("Can't brake slowly");
                         accel = fmin(const_acc, capable.max_deceleration);

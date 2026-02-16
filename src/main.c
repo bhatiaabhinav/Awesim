@@ -39,6 +39,7 @@ int main(int argc, char* argv[]) {
     // Make a file to store map information
     sim_get_driving_assistant(sim, 0)->smart_das_driving_style = SMART_DAS_DRIVING_STYLE_NORMAL;
     sim->agent_goal_lane_id = 84;
+    sim->traffic_violations_logs_queue.enabled[0] = true; // Enable traffic violation logging for the agent car (car ID 0)
     FILE* map_file = fopen("map_info.txt", "w");
     if (map_file) {
         map_print(sim_get_map(sim), map_file); // Print the map information to the file

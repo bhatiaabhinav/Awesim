@@ -221,6 +221,13 @@ struct SituationalAwareness {
     bool reversing;                         // Is the car reversing (speed < -STOP_SPEED_THRESHOLD m/s)?
     bool going_forward;                     // Is the car going forward (speed > STOP_SPEED_THRESHOLD m/s)?
     bool almost_stopped;                    // Is the car almost stopped (|speed| < ALMOST_STOP_SPEED_THRESHOLD m/s)?
+    bool in_stop_zone;                      // Is the car within the stop line zone at an intersection (distance to end of lane from leading edge within STOP_LINE_BUFFER_METERS +/- STOP_LINE_BUFFER_TOLERANCE_METERS)?
+    bool past_stop_zone;                    // Has the car passed the stop line zone at an intersection (distance to end of lane from leading edge < STOP_LINE_BUFFER_METERS - STOP_LINE_BUFFER_TOLERANCE_METERS)?
+    bool did_stop_in_stop_zone;             // Did the car come to a stop within the stop line zone at an intersection (was in stop zone and speed dropped below STOP_SPEED_THRESHOLD)?
+    bool did_almost_stop_in_stop_zone;        // Did the car come to an almost stop within the stop line zone at an intersection (was in stop zone and speed dropped below ALMOST_STOP_SPEED_THRESHOLD)?
+    bool did_rolling_stop_in_stop_zone;        // Did the car perform a rolling stop within the stop line zone at an intersection (was in stop zone and speed dropped below CREEP_SPEED)?
+    bool past_stop_line;                    // Has the car passed the stop line at an intersection (distance to end of lane from leading edge < STOP_LINE_BUFFER_METERS)?
+    bool did_stop_post_stop_line_before_lane_end;             // Did the car come to a stop shortly after passing the stop line zone at an intersection and before the leading edge reached the end of the lane?
 
     // Intent and Feasibility
     bool is_turn_possible[3];               // does this lane have a left, straight, right connection?  
@@ -373,7 +380,7 @@ MetersPerSecondSquared control_speed_compute_pd_accel(ControlError error, double
 //     - Δv > 0 and Δx < 0 (approaching from the left)
 //     - Δv < 0 and Δx > 0 (approaching from the right)
 // - If this condition is not met, the function throws error.
-MetersPerSecondSquared control_compute_const_accel(ControlError error);
+MetersPerSecondSquared control_compute_const_accel(ControlError error, MetersPerSecond speed_target);
 
 
 

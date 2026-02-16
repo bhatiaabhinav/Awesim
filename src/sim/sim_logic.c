@@ -78,6 +78,8 @@ static void car_handle_movement_or_lane_change(Simulation* sim, Car* car, Lane* 
     lane_remove_car(current_lane, car, sim);
     lane_add_car(new_lane, car, sim);
     car_set_lane(car, new_lane);
+    car->lowest_speed_in_stop_zone = INFINITY; // Reset stop zone tracking on lane change
+    car->lowest_speed_post_stop_line_before_lane_end = INFINITY; // Reset post stop line tracking on lane change
 }
 
 static void sim_update_car(Simulation* self, CarId car_id, Seconds dt) {
@@ -100,6 +102,11 @@ static void sim_update_car(Simulation* self, CarId car_id, Seconds dt) {
     MetersPerSecond v = car_get_speed(car);
     bool lane_changed = false;
     bool turned = false;
+    bool lane_changed_left = false;
+    bool lane_changed_right = false;
+    bool turned_left = false;
+    bool turned_right = false;
+    Lane* original_lane = lane;
     #ifdef BENCHMARK_SIM_UPDATE_CAR
     double _buc_t1 = _bench_get_time_us();
     #endif
@@ -134,6 +141,7 @@ static void sim_update_car(Simulation* self, CarId car_id, Seconds dt) {
         lane = adjacent_left;
         lane_change_requested = INDICATOR_NONE; // Reset request after lane change
         lane_changed = true;
+        lane_changed_left = true;
         s = progress * lane->length; // Update s after changing lane. Progress is constant across neighbor lanes, but s can be different for curved roads.
         LOG_TRACE("Car %d changed to left lane %d", car->id, lane->id);
     } else if (lane_change_requested == INDICATOR_RIGHT && adjacent_right) {
@@ -141,6 +149,7 @@ static void sim_update_car(Simulation* self, CarId car_id, Seconds dt) {
         lane = adjacent_right;
         lane_change_requested = INDICATOR_NONE; // Reset request after lane change
         lane_changed = true;
+        lane_changed_right = true;
         s = progress * lane->length; // Update s after changing lane. Progress is constant across neighbor lanes, but s can be different for curved roads.
         LOG_TRACE("Car %d changed to right lane %d", car->id, lane->id);
     } else {
@@ -220,6 +229,8 @@ static void sim_update_car(Simulation* self, CarId car_id, Seconds dt) {
     // ----------------------------------------------
     while (s > lane->length) {
         LOG_TRACE("Car %d: Progress %.2f (s = %.2f) exceeds lane length %.2f. Handling turn. Connections: left = %d, straight = %d, right = %d", car->id, progress, s, lane->length, lane->connections[0], lane->connections[1], lane->connections[2]);
+        Lane* pre_transition_lane = lane;
+        CarIndicator this_turn_direction = INDICATOR_NONE; // Track which direction was taken in this iteration
         Lane* connection_left = lane_get_connection_left(lane, map);
         Lane* connection_straight = lane_get_connection_straight(lane, map);
         Lane* connection_right = lane_get_connection_right(lane, map);
@@ -228,12 +239,16 @@ static void sim_update_car(Simulation* self, CarId car_id, Seconds dt) {
             lane = connection_left;
             turn_requested = INDICATOR_NONE; // Reset request after turn
             turned = true;
+            turned_left = true;
+            this_turn_direction = INDICATOR_LEFT;
             LOG_TRACE("Car %d turned left into lane %d.", car->id, lane->id);
         } else if (turn_requested == INDICATOR_RIGHT && connection_right) {
             s -= lane->length;
             lane = connection_right;
             turn_requested = INDICATOR_NONE; // Reset request after turn
             turned = true;
+            turned_right = true;
+            this_turn_direction = INDICATOR_RIGHT;
             LOG_TRACE("Car %d turned right into lane %d.", car->id, lane->id);
         } else {
             if (connection_straight) {
@@ -243,10 +258,16 @@ static void sim_update_car(Simulation* self, CarId car_id, Seconds dt) {
             } else if (connection_right) {
                 s -= lane->length;
                 lane = connection_right;
+                turned = true;
+                turned_right = true;
+                this_turn_direction = INDICATOR_RIGHT;
                 LOG_TRACE("Car %d had to turn right into lane %d as no straight connection was available.", car->id, lane->id);
             } else if (connection_left) {
                 s -= lane->length;
                 lane = connection_left;
+                turned = true;
+                turned_left = true;
+                this_turn_direction = INDICATOR_LEFT;
                 LOG_TRACE("Car %d had to turn left into lane %d as no straight or right connection was available.", car->id, lane->id);
             } else {
                 LOG_TRACE("Car %d has no available connections from lane %d. It has reached a dead end.", car->id, lane->id);
@@ -254,6 +275,38 @@ static void sim_update_car(Simulation* self, CarId car_id, Seconds dt) {
                 net_forward_movement_meters -= (s - lane->length);
                 s = lane->length; // no connections, so clamp s to lane length.
                 v = 0; // and stop the car.
+            }
+        }
+        // Detect violations when entering an intersection lane from a road lane
+        if (self->traffic_violations_logs_queue.enabled[car_id] && !pre_transition_lane->is_at_intersection && lane->is_at_intersection) {
+            SituationalAwareness* sa = sim_get_situational_awareness(self, car_id);
+            // Red light violation: was the light red for the direction taken?
+            TrafficLight light = sa->light_for_turn[this_turn_direction];
+            if (light == TRAFFIC_LIGHT_RED) {
+                traffic_violation_log(&self->traffic_violations_logs_queue, car_id, TRAFFIC_VIOLATION_RED_LIGHT_RUN, self->time, fabs(v));
+            }
+            // Red yield fail-to-stop: entered intersection on a red yield without having stopped first
+            if (light == TRAFFIC_LIGHT_RED_YIELD && !sa->did_stop_in_stop_zone && !sa->did_stop_post_stop_line_before_lane_end) {
+                traffic_violation_log(&self->traffic_violations_logs_queue, car_id, TRAFFIC_VIOLATION_RED_YIELD_FAIL_TO_STOP, self->time, car->lowest_speed_in_stop_zone);
+            }
+            // Stop sign violation: at a 4-way stop, past the stop zone without having fully stopped
+            Intersection* ixn = lane_get_intersection(lane, map);
+            if (ixn && ixn->state == FOUR_WAY_STOP && !sa->did_stop_in_stop_zone) {
+                traffic_violation_log(&self->traffic_violations_logs_queue, car_id, TRAFFIC_VIOLATION_STOP_SIGN_FAIL_TO_STOP, self->time, car->lowest_speed_in_stop_zone);
+            }
+        }
+        // Track intersection passage: count when the car exits an intersection lane onto a non-intersection lane
+        if (pre_transition_lane->is_at_intersection && !lane->is_at_intersection) {
+            Intersection* ixn = lane_get_intersection(pre_transition_lane, map);
+            if (ixn) {
+                car->travel_stats.intersections_passed++;
+                if (ixn->state == FOUR_WAY_STOP) {
+                    car->travel_stats.stop_signs_passed++;
+                } else if (ixn->is_T_junction) {
+                    car->travel_stats.t_junctions_passed++;
+                } else {
+                    car->travel_stats.traffic_lights_passed++;
+                }
             }
         }
         progress = s / lane->length;
@@ -283,6 +336,27 @@ static void sim_update_car(Simulation* self, CarId car_id, Seconds dt) {
     car_set_lane_progress(car, progress, s, net_forward_movement_meters);
     car_set_speed(car, v);
     car_set_fuel_level(car, fuel_remaining);
+
+    // Update lowest speed in stop zone tracking
+    {
+        Meters car_half_length = car_get_length(car) * 0.5;
+        Meters dist_to_end = lane->length * (1.0 - progress);
+        Meters dist_from_leading_edge = dist_to_end - car_half_length;
+        Meters stop_zone_near = STOP_LINE_BUFFER_METERS + STOP_LINE_BUFFER_TOLERANCE_METERS;
+        Meters stop_zone_far  = STOP_LINE_BUFFER_METERS - STOP_LINE_BUFFER_TOLERANCE_METERS;
+        if (dist_from_leading_edge <= stop_zone_near && dist_from_leading_edge >= stop_zone_far) {
+            MetersPerSecond abs_v = fabs(v);
+            if (abs_v < car->lowest_speed_in_stop_zone) {
+                car->lowest_speed_in_stop_zone = abs_v;
+            }
+        }
+        if (dist_from_leading_edge < STOP_LINE_BUFFER_METERS && dist_from_leading_edge > 0) {
+            MetersPerSecond abs_v = fabs(v);
+            if (abs_v < car->lowest_speed_post_stop_line_before_lane_end) {
+                car->lowest_speed_post_stop_line_before_lane_end = abs_v;
+            }
+        }
+    }
     #ifdef BENCHMARK_SIM_UPDATE_CAR
     double _buc_c1 = _bench_get_time_us();
     #endif
@@ -311,6 +385,97 @@ static void sim_update_car(Simulation* self, CarId car_id, Seconds dt) {
     #ifdef BENCHMARK_SIM_UPDATE_CAR
     double _buc_c4 = _bench_get_time_us();
     #endif
+
+    // ---- Update travel stats ----
+    {
+        CarTravelStats* stats = &car->travel_stats;
+        Meters ds_abs = fabs(net_forward_movement_meters);
+
+        // Distance and time
+        stats->total_distance_traveled += ds_abs;
+        stats->total_displacement += net_forward_movement_meters;
+        stats->total_time_traveled += dt;
+        stats->average_speed = stats->total_displacement / stats->total_time_traveled;
+
+        // Turns and lane changes
+        if (turned_left)         stats->turns_left_made++;
+        if (turned_right)        stats->turns_right_made++;
+        if (lane_changed_left)   stats->lane_changes_left++;
+        if (lane_changed_right)  stats->lane_changes_right++;
+
+        // Speed-based time classification
+        MetersPerSecond abs_speed = fabs(v);
+        if (abs_speed < STOP_SPEED_THRESHOLD) {
+            stats->total_time_stopped += dt;
+        }
+        if (abs_speed < ALMOST_STOP_SPEED_THRESHOLD) {
+            stats->total_time_almost_stopped += dt;
+        } else {
+            stats->total_time_moving += dt;
+        }
+
+        // Lane position and road type stats (only when on a road, not an intersection)
+        Road* orig_road = lane_get_road(original_lane, map);
+        if (orig_road) {
+            int num_road_lanes = orig_road->num_lanes;
+            int lane_index = original_lane->index_in_road;
+
+            if (num_road_lanes == 1) {
+                stats->total_distance_on_single_lane_roads += ds_abs;
+                stats->total_time_on_single_lane_roads += dt;
+            } else if (num_road_lanes == 2) {
+                stats->total_distance_on_two_lane_roads += ds_abs;
+                stats->total_time_on_two_lane_roads += dt;
+                if (lane_index == 0) {
+                    stats->total_distance_on_leftmost_lane += ds_abs;
+                    stats->total_time_on_leftmost_lane += dt;
+                } else {
+                    stats->total_distance_on_rightmost_lane += ds_abs;
+                    stats->total_time_on_rightmost_lane += dt;
+                }
+            } else if (num_road_lanes >= 3) {
+                stats->total_distance_on_three_or_more_lane_roads += ds_abs;
+                stats->total_time_on_three_or_more_lane_roads += dt;
+                if (lane_index == 0) {
+                    stats->total_distance_on_leftmost_lane += ds_abs;
+                    stats->total_time_on_leftmost_lane += dt;
+                } else if (lane_index == num_road_lanes - 1) {
+                    stats->total_distance_on_rightmost_lane += ds_abs;
+                    stats->total_time_on_rightmost_lane += dt;
+                } else {
+                    stats->total_distance_on_middle_lane += ds_abs;
+                    stats->total_time_on_middle_lane += dt;
+                }
+            }
+        }
+    }
+
+    // ---- Detect speeding and tailgating violations ----
+    if (self->traffic_violations_logs_queue.enabled[car_id]) {
+        MetersPerSecond abs_speed = fabs(v);
+        MetersPerSecond speed_limit = lane->speed_limit;
+        if (abs_speed > speed_limit + OVERSPEEDING_THRESHOLD_MPS) {
+            // Probabilistic detection: probability per second * dt
+            if (rand_0_to_1() < OVERSPEEDING_DETECTION_PROBABILITY * dt) {
+                traffic_violation_log(&self->traffic_violations_logs_queue, car_id, TRAFFIC_VIOLATION_OVERSPEEDING, self->time, abs_speed - speed_limit);
+            }
+        }
+
+        // Tailgating: too close to lead vehicle at speed, and not braking
+        SituationalAwareness* sa = sim_get_situational_awareness(self, car_id);
+        if (abs_speed > TAILGATING_MIN_SPEED_MPS && sa->nearby_vehicles.lead && a >= 0) {
+            Meters distance_to_lead;
+            perceive_lead_vehicle(car, self, sa, &distance_to_lead, NULL, NULL);
+            Meters bumper_to_bumper = distance_to_lead - (car_get_length(car) + car_get_length(sa->nearby_vehicles.lead)) * 0.5;
+            Seconds time_headway = bumper_to_bumper / abs_speed;
+            if (time_headway < TAILGATING_TIME_HEADWAY_THRESHOLD) {
+                if (rand_0_to_1() < TAILGATING_DETECTION_PROBABILITY * dt) {
+                    traffic_violation_log(&self->traffic_violations_logs_queue, car_id, TRAFFIC_VIOLATION_TAILGATING, self->time, time_headway);
+                }
+            }
+        }
+    }
+
     Road* road = lane_get_road(lane, map);
     Intersection* intersection = lane_get_intersection(lane, map);
     const char* road_name = road ? road->name : intersection ? intersection->name : "Unknown";

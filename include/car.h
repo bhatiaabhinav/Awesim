@@ -69,7 +69,9 @@ CarPersonality preferences_sample_random(void);
 
 struct CarTravelStats {
     Meters total_distance_traveled;
+    Meters total_displacement;
     Seconds total_time_traveled;
+    MetersPerSecond average_speed;
     int turns_left_made;
     int turns_right_made;
     int intersections_passed;
@@ -144,6 +146,10 @@ struct Car {
     // history:
     LaneId prev_lane_id; // Previous lane ID, useful to detect lane changes. This is the lane that the car was at the previous simulation timestep.
     Meters recent_forward_movement;
+
+    // stop zone tracking (reset on lane change, updated by sim_logic):
+    MetersPerSecond lowest_speed_in_stop_zone; // Lowest speed recorded while the car was in the stop zone. Set to INFINITY when reset (on lane change or init).
+    MetersPerSecond lowest_speed_post_stop_line_before_lane_end; // Lowest speed recorded after passing the stop line until the end of the lane. Set to INFINITY when reset (on lane change or init).
     
     // stats:
     CarTravelStats travel_stats;
@@ -192,8 +198,6 @@ bool car_get_auto_turn_off_indicators(const Car* self);
 
 // Returns the recent forward movement of the car in the current simulation timestep.
 Meters car_get_recent_forward_movement(const Car* self);
-// Returns the total distance traveled by the car since the start of the simulation.
-Meters car_get_total_distance_traveled(const Car* self);
 // Returns the previous lane ID of the car.
 LaneId car_get_prev_lane_id(const Car* self);
 

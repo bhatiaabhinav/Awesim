@@ -16,6 +16,7 @@
 #define ID_NULL -1
 #define LANE_LENGTH_EPSILON 0.1
 #define STOP_LINE_BUFFER_METERS 1.524       // Stop line distance from end of lane in meters
+#define STOP_LINE_BUFFER_TOLERANCE_METERS 0.3048       // Stop line buffer tolerance in meters. stop line +/- this value is considered the "stop line area" for determining whether a car has crossed the stop line or not, for traffic violation purposes. This is to account for small perception errors and to avoid unfairly penalizing cars for minor overshooting of the stop line due to inertia or perception noise.
 #define STOP_SPEED_THRESHOLD 1e-3           // 1 mm/s considered as stopped
 #define ALMOST_STOP_SPEED_THRESHOLD 0.044704 // 0.1 mph in m/s considered as almost stopped
 #define CREEP_SPEED 2.2352                // 5 mph in m/s
@@ -58,4 +59,9 @@
 #define TRAFFIC_VIOLATIONS_LOG_QUEUE_SIZE 10
 #define COLLISIONS_MAX_PER_CAR 2
 
+#define OVERSPEEDING_DETECTION_PROBABILITY 0.05 // Probability of getting caught for speeding in a given second. Will be mulitplied by dt to determine probability of getting caught in a given simulation step. This is a very rough parameter to simulate the deterrence effect of speeding tickets on speeding behavior, and can be tuned to achieve realistic law enforcement levels.
+#define OVERSPEEDING_THRESHOLD_MPS 2.2352 // 5 mph in m/s. Speeding is defined as exceeding the speed limit by more than this threshold.
 
+#define TAILGATING_MIN_SPEED_MPS 4.4704
+#define TAILGATING_TIME_HEADWAY_THRESHOLD 1.5 // in seconds. Tailgating is defined as having less than this time headway to the lead car while traveling above TAILGATING_MIN_SPEED_MPS and not braking.
+#define TAILGATING_DETECTION_PROBABILITY 0.05 // Probability of getting caught for tailgating in a given second while tailgating. This is a rough parameter to simulate the deterrence effect of tailgating tickets on tailgating behavior, and can be tuned to achieve realistic law enforcement levels.

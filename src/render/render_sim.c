@@ -451,4 +451,77 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, bool draw_lanes, bool d
         render_text(renderer, aeb_str, 10, 120 + 9 * hud_font_size, 255, 0, 0, alpha,
                     hud_font_size, ALIGN_TOP_LEFT, false, NULL);
     }
+
+
+    // Car travel stats on right edge
+    if (car0) {
+        const CarTravelStats* ts = &car0->travel_stats;
+        int small_font = hud_font_size > 2 ? hud_font_size - 1 : hud_font_size;
+        int lh = small_font + 5; // line height
+        int rx = WINDOW_SIZE_WIDTH - 10;
+        int ry = 50 + 2 * hud_font_size; // start below time/weather
+        Uint8 cr = 200, cg = 200, cb = 200, ca = 220; // light gray
+        char buf[80];
+
+        snprintf(buf, sizeof(buf), "Dist: %.2f mi  Disp: %.2f mi", to_miles(ts->total_distance_traveled), to_miles(ts->total_displacement));
+        render_text(renderer, buf, rx, ry, cr, cg, cb, ca, small_font, ALIGN_TOP_RIGHT, false, NULL);
+        ry += lh;
+
+        snprintf(buf, sizeof(buf), "Time: %.0fs  AvgSpd: %.1f mph", ts->total_time_traveled, to_mph(ts->average_speed));
+        render_text(renderer, buf, rx, ry, cr, cg, cb, ca, small_font, ALIGN_TOP_RIGHT, false, NULL);
+        ry += lh;
+
+        snprintf(buf, sizeof(buf), "Turns L:%d R:%d  LnChg L:%d R:%d", ts->turns_left_made, ts->turns_right_made, ts->lane_changes_left, ts->lane_changes_right);
+        render_text(renderer, buf, rx, ry, cr, cg, cb, ca, small_font, ALIGN_TOP_RIGHT, false, NULL);
+        ry += lh;
+
+        snprintf(buf, sizeof(buf), "Ixns:%d  Lights:%d  Stops:%d  T:%d", ts->intersections_passed, ts->traffic_lights_passed, ts->stop_signs_passed, ts->t_junctions_passed);
+        render_text(renderer, buf, rx, ry, cr, cg, cb, ca, small_font, ALIGN_TOP_RIGHT, false, NULL);
+        ry += lh;
+
+        snprintf(buf, sizeof(buf), "Stopped:%.0fs  AlmStop:%.0fs  Moving:%.0fs", ts->total_time_stopped, ts->total_time_almost_stopped, ts->total_time_moving);
+        render_text(renderer, buf, rx, ry, cr, cg, cb, ca, small_font, ALIGN_TOP_RIGHT, false, NULL);
+        ry += lh;
+
+        snprintf(buf, sizeof(buf), "1Ln:%.1fmi  2Ln:%.1fmi  3+Ln:%.1fmi", to_miles(ts->total_distance_on_single_lane_roads), to_miles(ts->total_distance_on_two_lane_roads), to_miles(ts->total_distance_on_three_or_more_lane_roads));
+        render_text(renderer, buf, rx, ry, cr, cg, cb, ca, small_font, ALIGN_TOP_RIGHT, false, NULL);
+        ry += lh;
+
+        snprintf(buf, sizeof(buf), "LftLn:%.1fmi  MidLn:%.1fmi  RtLn:%.1fmi", to_miles(ts->total_distance_on_leftmost_lane), to_miles(ts->total_distance_on_middle_lane), to_miles(ts->total_distance_on_rightmost_lane));
+        render_text(renderer, buf, rx, ry, cr, cg, cb, ca, small_font, ALIGN_TOP_RIGHT, false, NULL);
+        ry += lh;
+
+        int v_red   = traffic_violation_type_get_total_count(&sim->traffic_violations_logs_queue, car0->id, TRAFFIC_VIOLATION_RED_LIGHT_RUN);
+        int v_ryld  = traffic_violation_type_get_total_count(&sim->traffic_violations_logs_queue, car0->id, TRAFFIC_VIOLATION_RED_YIELD_FAIL_TO_STOP);
+        int v_tail  = traffic_violation_type_get_total_count(&sim->traffic_violations_logs_queue, car0->id, TRAFFIC_VIOLATION_TAILGATING);
+        int v_stop  = traffic_violation_type_get_total_count(&sim->traffic_violations_logs_queue, car0->id, TRAFFIC_VIOLATION_STOP_SIGN_FAIL_TO_STOP);
+        int v_speed = traffic_violation_type_get_total_count(&sim->traffic_violations_logs_queue, car0->id, TRAFFIC_VIOLATION_OVERSPEEDING);
+        int v_total = v_red + v_ryld + v_tail + v_stop + v_speed;
+        snprintf(buf, sizeof(buf), "Viol:%d Red:%d RY:%d Tail:%d Stop:%d Spd:%d", v_total, v_red, v_ryld, v_tail, v_stop, v_speed);
+        render_text(renderer, buf, rx, ry, 255, 100, 100, ca, small_font, ALIGN_TOP_RIGHT, false, NULL);
+        ry += lh;
+
+        // Last 10 violations from the queue
+        int num_in_queue = sim->traffic_violations_logs_queue.queue_num_items[car0->id];
+        int show = num_in_queue < TRAFFIC_VIOLATIONS_LOG_QUEUE_SIZE ? num_in_queue : TRAFFIC_VIOLATIONS_LOG_QUEUE_SIZE;
+        if (show > 10) show = 10;
+        static const char* vtype_labels[] = { "RED", "RY", "TAIL", "STOP", "SPD" };
+        for (int vi = 0; vi < show; vi++) {
+            TrafficViolation tv = traffic_violation_get(&sim->traffic_violations_logs_queue, car0->id, vi);
+            const char* label = (tv.type < TRAFFIC_VIOLATION_NUM_TYPES) ? vtype_labels[tv.type] : "?";
+            if (tv.type == TRAFFIC_VIOLATION_RED_LIGHT_RUN) {
+                snprintf(buf, sizeof(buf), "#%d %s @%.1fs spd=%.1fmph", vi + 1, label, tv.time, to_mph(tv.detail));
+            } else if (tv.type == TRAFFIC_VIOLATION_RED_YIELD_FAIL_TO_STOP) {
+                snprintf(buf, sizeof(buf), "#%d %s @%.1fs lowSpd=%.2fmph", vi + 1, label, tv.time, to_mph(tv.detail));
+            } else if (tv.type == TRAFFIC_VIOLATION_TAILGATING) {
+                snprintf(buf, sizeof(buf), "#%d %s @%.1fs thw=%.2fs", vi + 1, label, tv.time, tv.detail);
+            } else if (tv.type == TRAFFIC_VIOLATION_STOP_SIGN_FAIL_TO_STOP) {
+                snprintf(buf, sizeof(buf), "#%d %s @%.1fs lowSpd=%.2fmph", vi + 1, label, tv.time, to_mph(tv.detail));
+            } else {
+                snprintf(buf, sizeof(buf), "#%d %s @%.1fs over=%.1fmph", vi + 1, label, tv.time, to_mph(tv.detail));
+            }
+            render_text(renderer, buf, rx, ry, 255, 100, 100, ca, small_font, ALIGN_TOP_RIGHT, false, NULL);
+            ry += lh;
+        }
+    }
 }

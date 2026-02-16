@@ -385,7 +385,7 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
                 break;
             case TRAFFIC_LIGHT_RED_YIELD: {
                 // e.g., free right. first stop at stop line, then yield once you are beyond it
-                bool yield_mode = distance_to_stop_line <= meters(0.1); // within 10 cm of stop line
+                bool yield_mode = situation->did_stop_in_stop_zone || situation->past_stop_zone;
                 if (style == SMART_DAS_DRIVING_STYLE_DEFENSIVE) {
                     yield_mode = false; // defensive treats red-yield as red
                 }
@@ -409,9 +409,11 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
                 break;
             }
             case TRAFFIC_LIGHT_STOP_FCFS: {
+                const bool likes_to_full_stop_for_fcfs = (style == SMART_DAS_DRIVING_STYLE_NORMAL || style == SMART_DAS_DRIVING_STYLE_DEFENSIVE);
+                const bool likes_to_rolling_stop_for_fcfs = (style == SMART_DAS_DRIVING_STYLE_RECKLESS || style == SMART_DAS_DRIVING_STYLE_AGGRESSIVE);
                 // first come first serve stop sign
                 // first, stop at stop line, then proceed when it's my turn
-                bool fcfs_yield_mode = distance_to_stop_line <= meters(0.1); // within 10 cm of stop line
+                bool fcfs_yield_mode = (likes_to_full_stop_for_fcfs && situation->did_stop_in_stop_zone) || (likes_to_rolling_stop_for_fcfs && situation->did_rolling_stop_in_stop_zone) || situation->past_stop_zone;
                 bool all_clear = !intersection_is_any_car_on_intersection(situation->intersection, sim);
                 if (fcfs_yield_mode) {
                     should_brake_for_rolling_stop = false;
@@ -428,10 +430,10 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
                     }
                 } else {
                     // come to full stop or rolling stop at stop line
-                    should_brake_for_full_stop = style == SMART_DAS_DRIVING_STYLE_NORMAL || style == SMART_DAS_DRIVING_STYLE_DEFENSIVE;
-                    should_brake_for_rolling_stop = style == SMART_DAS_DRIVING_STYLE_RECKLESS || style == SMART_DAS_DRIVING_STYLE_AGGRESSIVE;
+                    should_brake_for_full_stop = likes_to_full_stop_for_fcfs;
+                    should_brake_for_rolling_stop = likes_to_rolling_stop_for_fcfs;
                     // for reckless, if we are approaching faster than other cars, do not even do rolling stop, just go through
-                    if (style == SMART_DAS_DRIVING_STYLE_RECKLESS && should_brake_for_rolling_stop) {
+                    if (style == SMART_DAS_DRIVING_STYLE_RECKLESS) {
                         bool is_approaching_faster_than_others = true;
                         if (!all_clear) {
                             // someone is already on intersection
@@ -501,7 +503,7 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
             #endif
             bool should_brake = should_brake_for_full_stop || should_brake_for_rolling_stop || should_brake_for_yield;
 
-            if (!should_brake && _defensive_even_if_right_of_way[style] && defensive_yield_despite_right_of_way(car, sim, situation, das->turn_intent, yield_thw, dt)) {
+            if (!should_brake && _defensive_even_if_right_of_way[style] && defensive_yield_despite_right_of_way(car, sim, situation, das->turn_intent, yield_thw / 2, dt)) {
                 // even if we have the right of way, if we are defensive and there is something to yield to with a short time headway, we should yield
                 should_brake_for_yield = true;
                 should_speed_up_to_make_light = false; // if we were going to speed up for yellow, now we should not do that because we are going to yield instead
@@ -545,7 +547,7 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
                 // Brake smoothly to target stop at the end of the lane
                 Meters position_target = car_position + fmax(position_target_delta, meters(0)); // the fmax is needed to prevent reversing if the car has already crossed the stop line (could happen if light turned red while crossing)
                 // compute speed at target. If full stop or yield, target speed is 0. If rolling stop, target speed is CREEP_SPEED.
-                MetersPerSecond speed_at_target = (should_brake_for_rolling_stop) ? CREEP_SPEED : 0;
+                MetersPerSecond speed_at_target = (should_brake_for_rolling_stop) ? CREEP_SPEED - from_mph(0.1) : 0;
                 // compute speed limit. Post stop line, limit speed to CREEP_SPEED.
                 MetersPerSecond speed_limit = distance_to_stop_line > 0 ? das->speed_target : fmin(CREEP_SPEED, das->speed_target);
                 MetersPerSecondSquared accel_to_stop = car_compute_acceleration_chase_target(car, position_target, speed_at_target, fmax(situation->distance_to_end_of_lane_from_leading_edge - position_target, meters(0)), speed_limit, das->use_preferred_accel_profile);
@@ -726,9 +728,10 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
     if (next_lane) {
         MetersPerSecond next_speed_target = determine_preferred_speed_limit(sim_get_map(sim), next_lane, das->smart_das_driving_style);
         if (next_speed_target < sa->speed && !(sa->is_an_intersection_upcoming && das->turn_intent == INDICATOR_NONE)) {
-            Meters position_target = sa->lane_progress_m + sa->distance_to_end_of_lane;
+            //printf("Car %d approaching lane with lower speed limit (%.2f mph), adjusting speed from %.2f mph\n", car->id, next_speed_target * 3600.0 / 1609.34, sa->speed * 3600.0 / 1609.34);
+            Meters position_target = sa->lane_progress_m + sa->distance_to_end_of_lane_from_leading_edge;
             MetersPerSecond next_speed_target = determine_preferred_speed_limit(sim_get_map(sim), next_lane, das->smart_das_driving_style);
-            MetersPerSecondSquared accel_approach_end_of_lane = car_compute_acceleration_chase_target(car, position_target, next_speed_target, meters(1), sa->lane->speed_limit, das->use_preferred_accel_profile);
+            MetersPerSecondSquared accel_approach_end_of_lane = car_compute_acceleration_chase_target(car, position_target, next_speed_target, 0, sa->lane->speed_limit, das->use_preferred_accel_profile);
             accel = fmin(accel, accel_approach_end_of_lane);
         }
     }

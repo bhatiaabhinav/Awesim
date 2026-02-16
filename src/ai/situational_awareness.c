@@ -202,6 +202,7 @@ void situational_awareness_build(Simulation* sim, CarId car_id) {
     situation->going_forward = (car_speed > STOP_SPEED_THRESHOLD);
     situation->almost_stopped = (fabs(car_speed) < ALMOST_STOP_SPEED_THRESHOLD);
     situation->speed = car_speed;
+
     Meters lane_length = lane_get_length(lane);
     Direction lane_dir = lane->direction;
     Meters distance_to_end_of_lane = lane_length - lane_progress_m;
@@ -220,6 +221,63 @@ void situational_awareness_build(Simulation* sim, CarId car_id) {
         situation->is_an_intersection_upcoming = intersection_upcoming != NULL;
         situation->is_stopped_at_intersection = intersection_upcoming && (fabs(to_mph(car_get_speed(car))) < 0.1) && (distance_to_end_of_lane_from_leading_edge < 50.0);
     }
+
+    // Stop zone detection
+    if (situation->is_an_intersection_upcoming) {
+        Meters stop_zone_near = STOP_LINE_BUFFER_METERS + STOP_LINE_BUFFER_TOLERANCE_METERS;
+        Meters stop_zone_far  = STOP_LINE_BUFFER_METERS - STOP_LINE_BUFFER_TOLERANCE_METERS;
+
+        // Check if currently in the stop zone
+        if (distance_to_end_of_lane_from_leading_edge <= stop_zone_near && distance_to_end_of_lane_from_leading_edge >= stop_zone_far) {
+            situation->in_stop_zone = true;
+        }
+
+        // Check if past the stop zone
+        if (distance_to_end_of_lane_from_leading_edge < stop_zone_far) {
+            situation->past_stop_zone = true;
+        }
+
+        if (distance_to_end_of_lane_from_leading_edge < STOP_LINE_BUFFER_METERS) {
+            situation->past_stop_line = true;
+        }
+
+        // Use persistent lowest_speed_in_stop_zone from car (tracked by sim_logic, reset on lane change)
+        MetersPerSecond lowest = car->lowest_speed_in_stop_zone;
+            // Car has been in the stop zone at some point on this lane
+        if(lowest < STOP_SPEED_THRESHOLD) {
+            if (!situation->did_stop_in_stop_zone) {
+                //LOG_DEBUG("Car %d came to a stop in the stop zone (lowest speed: %.2f m/s (%.2f mph))", car_id, lowest, to_mph(lowest));
+            }
+            situation->did_stop_in_stop_zone = true;
+        } else {
+            situation->did_stop_in_stop_zone = false;
+        }
+        if (lowest < ALMOST_STOP_SPEED_THRESHOLD) {
+            if (!situation->did_almost_stop_in_stop_zone) {
+                //LOG_DEBUG("Car %d almost stopped in the stop zone (lowest speed: %.2f m/s (%.2f mph))", car_id, lowest, to_mph(lowest));
+            }
+            situation->did_almost_stop_in_stop_zone = true;
+        }
+        if (lowest < CREEP_SPEED) {
+            if (!situation->did_rolling_stop_in_stop_zone) {
+                //LOG_DEBUG("Car %d did a rolling stop in the stop zone (lowest speed: %.2f m/s (%.2f mph))", car_id, lowest, to_mph(lowest));
+            }
+            situation->did_rolling_stop_in_stop_zone = true;
+        }
+        if (car->lowest_speed_post_stop_line_before_lane_end < STOP_SPEED_THRESHOLD) {
+            situation->did_stop_post_stop_line_before_lane_end = true;
+        } else {
+            situation->did_stop_post_stop_line_before_lane_end = false;
+        }
+    } else {
+        situation->in_stop_zone = false;
+        situation->past_stop_zone = false;
+        situation->did_stop_in_stop_zone = false;
+        situation->did_almost_stop_in_stop_zone = false;
+        situation->did_rolling_stop_in_stop_zone = false;
+        situation->did_stop_post_stop_line_before_lane_end = false;
+    }
+
     situation->road = road;
     situation->lane = lane;
     Lane* adjacent_left = lane_get_adjacent_left(lane, map);

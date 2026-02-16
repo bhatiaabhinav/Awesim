@@ -64,31 +64,36 @@ extern const char* weather_strings[];
 
 
 typedef enum {
-    TRAFFIC_VIOLATION_RED_LIGHT,    // while entering the lane on the intersection, was the lane guarded by a red light? If so, red light violation.
-    TRAFFIC_VIOLATION_STOP_SIGN,    // what was the speed of the car when it touched/crossed the stop line at the end of the lane? If it was above STOP_SPEED_THRESHOLD, then it is a stop sign violation.
-    TRAFFIC_VIOLATION_SPEEDING,     // was the car's speed above the lane's speed limit by more than a small epsilon?
+    TRAFFIC_VIOLATION_RED_LIGHT_RUN,    // while entering the lane on the intersection, was the lane guarded by a red light? If so, red light violation
+    TRAFFIC_VIOLATION_RED_YIELD_FAIL_TO_STOP, // while entering the lane on the intersection, was the lane guarded by a red yield sign and did the car fail to stop completely in the stop zone or shortly after (before the leading edge reached the end of the lane)?
+    TRAFFIC_VIOLATION_TAILGATING,     // was the car tailgating the lead car (i.e. was the distance to the lead car less than TAILGATING_TIME_HEADWAY_THRESHOLD second headway) while the car's speed was above TAILGATING_MIN_SPEED_MPS and it was not in the process of braking? Detected with probability = TAILGATING_DETECTION_PROBABILITY * dt. 
+    TRAFFIC_VIOLATION_STOP_SIGN_FAIL_TO_STOP,    // did the car fail to come to a full stop in the stop sign zone? If so, stop sign violation. The detail field can be used to store the exact lowest speed in the stop sign zone. See car->lowest_speed_in_stop_zone, or situational_awareness->did_stop_in_stop_zone.
+    TRAFFIC_VIOLATION_OVERSPEEDING,     // was the car's speed above the lane's speed limit by more than OVERSPEEDING_THRESHOLD. Detected with probability = OVERSPEEDING_DETECTION_PROBABILITY * dt.
+    TRAFFIC_VIOLATION_NUM_TYPES
 } TrafficViolationType;
 
 typedef struct TrafficViolation {
     CarId car_id;
     TrafficViolationType type;
     Seconds time;
-    double detail;
+    double detail;  // for red light, exact speed. For stop sign, lowest speed in the stop zone. For overspeeding, how much the speed exceeded the limit. For tailgating, the time headway to the lead car. For red yield sign violation, the lowest speed in the stop zone.
 } TrafficViolation;
 
 typedef struct TrafficViolationsLogsQueue {
     bool enabled[MAX_CARS_IN_SIMULATION];                   // Whether logging is enabled for each car ID. If false, no violations will be logged for that car.
     TrafficViolation queue[MAX_CARS_IN_SIMULATION][TRAFFIC_VIOLATIONS_LOG_QUEUE_SIZE];     // For each car ID, a circular buffer queue of the most recent traffic violations involving that car.
     int next_index[MAX_CARS_IN_SIMULATION];                // For each car ID, the next index in the circular buffer queue to write to. After writing, this index is incremented and wrapped around using modulo with TRAFFIC_VIOLATIONS_LOG_QUEUE_SIZE.
-    int num_violations[MAX_CARS_IN_SIMULATION];              // For each car ID, the total number of violations that have been logged for that car, which may be greater than TRAFFIC_VIOLATIONS_LOG_QUEUE_SIZE if the car has been involved in many violations and the circular buffer has wrapped around multiple times.
+    int num_violations_each_type[MAX_CARS_IN_SIMULATION][TRAFFIC_VIOLATION_NUM_TYPES];              // For each car ID, the total number of violations that have been logged for that car since the beginning of the sim, for each type of violation. These may exceed TRAFFIC_VIOLATIONS_LOG_QUEUE_SIZE. Queue clearing functions do not reset this value.
     int queue_num_items[MAX_CARS_IN_SIMULATION];          // For each car ID, the current number of violations stored in the queue, which is at most TRAFFIC_VIOLATIONS_LOG_QUEUE_SIZE.
 } TrafficViolationsLogsQueue;
 
-TrafficViolation traffic_violation_get_for_car(TrafficViolationsLogsQueue* queue, CarId car_id, int violation_index_from_most_recent);
+void traffic_violations_set_enabled(TrafficViolationsLogsQueue* queue, CarId car_id, bool enabled);
+TrafficViolation traffic_violation_get(TrafficViolationsLogsQueue* queue, CarId car_id, int violation_index_from_most_recent);
 void traffic_violation_log(TrafficViolationsLogsQueue* queue, CarId car_id, TrafficViolationType type, Seconds time, double detail);
+int traffic_violation_get_total_count(TrafficViolationsLogsQueue* queue, CarId car_id);
+int traffic_violation_type_get_total_count(TrafficViolationsLogsQueue* queue, CarId car_id, TrafficViolationType type);
 
-void traffic_violations_logs_queue_clear_for_car(TrafficViolationsLogsQueue* queue, CarId car_id);
-void traffic_violations_logs_queue_clear_all(TrafficViolationsLogsQueue* queue);
+void traffic_violations_logs_queue_clear(TrafficViolationsLogsQueue* queue, CarId car_id);
 
 
 // Main simulation structure
