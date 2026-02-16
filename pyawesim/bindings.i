@@ -43,22 +43,22 @@
 // Include necessary system headers and your project headers (verbatim in wrapper C code)
 %{
 #include "../include/utils.h"
+#include "../include/constants.h"
 #include "../include/map.h"
 #include "../include/car.h"
 #include "../include/ai.h"
 #include "../include/sim.h"
-#include "../include/bad.h"
 #include "../include/awesim.h"
 %}
 
 %include <stdint.i>  // SWIG typemap for uint32_t
 // Parse and wrap the headers
 %include "../include/utils.h"
+%include "../include/constants.h"
 %include "../include/map.h"
 %include "../include/car.h"
 %include "../include/ai.h"
 %include "../include/sim.h"
-%include "../include/bad.h"
 %include "../include/awesim.h"
 
 %extend RGBCamera {

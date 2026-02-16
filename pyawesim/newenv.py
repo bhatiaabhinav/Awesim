@@ -42,6 +42,7 @@ class AwesimCityEnv(gym.Env):
         sim_duration: float = 3600.0,
         min_goal_manhat: Optional[Union[int, str]] = 500,  # travel at least this manhattan distance to goal lane from starting lane. The starting and goal lanes are always single lane roads.
         num_cars: int = 256,
+        randomize_num_cars: bool = True,
         success_reward: float = 1.0,
         fail_reward: float = -1.0,
         crash_causes_fail: bool = True,
@@ -71,6 +72,7 @@ class AwesimCityEnv(gym.Env):
         self.delta_t = delta_t
         self.min_goal_manhat = min_goal_manhat
         self.num_cars = num_cars
+        self.randomize_num_cars = randomize_num_cars
         self.decision_interval = decision_interval
         self.sim_duration = sim_duration
         self.success_reward = success_reward
@@ -585,7 +587,10 @@ class AwesimCityEnv(gym.Env):
         super().reset(seed=seed, options=options)
         A.sim_disconnect_from_render_server(self.sim)
 
-        num_cars = max(np.random.randint(self.num_cars // 4, self.num_cars + 1), 16)    # randomize number of cars a bit. At least 16 cars.
+        if self.randomize_num_cars:
+            num_cars = max(np.random.randint(self.num_cars // 4, self.num_cars + 1), 16)    # randomize number of cars a bit. At least 16 cars.
+        else:
+            num_cars = self.num_cars
         if self.num_cars == 1:
             num_cars = 1    # for debugging
         A.awesim_setup(self.sim, self.city_width, num_cars, 0.02, A.Monday_8_AM, A.WEATHER_SUNNY, self.deprecated_map)
@@ -615,8 +620,10 @@ class AwesimCityEnv(gym.Env):
         A.driving_assistant_configure_smart_das_driving_style(self.das, self.agent, self.sim, A.SMART_DAS_DRIVING_STYLE_NORMAL)
         A.driving_assistant_configure_aeb_assistance(self.das, self.agent, self.sim, True)
         A.driving_assistant_smart_update_das_variables(self.das, self.agent, self.sim, self.situation)
+        A.traffic_violations_set_enabled(self.sim.traffic_violations_logs_queue, self.agent.id, True)
 
         self.sample_random_goal()
+        self.path_planner.use_live_traffic_info = True
         A.path_planner_compute_shortest_path(self.path_planner, self.situation.lane, self.situation.lane_progress_m, self.goal_lane, 0.5 * self.goal_lane.length)
         self.prev_opt_distance_to_goal = self._get_path_planner_opt_dist_to_goal()
         self.sim.agent_goal_lane_id = self.goal_lane.id
@@ -629,6 +636,10 @@ class AwesimCityEnv(gym.Env):
         A.car_set_fuel_tank_capacity(self.agent, A.from_gallons(self.init_fuel_gallons))    # unnecessary but just in case as default tank capacity is Inf for all cars in awesim
 
         self.steps = 0
+        self.num_reckless_seconds = 0
+        self.num_aggressive_seconds = 0
+        self.num_normal_seconds = 0
+        self.num_defensive_seconds = 0
         self.fuel_drive_beginning = A.car_get_fuel_level(self.agent)
 
         return self._get_observation(), {}
@@ -639,6 +650,7 @@ class AwesimCityEnv(gym.Env):
         sit = self.situation
 
         # action = self.action_space.n - 1    # for debugging: always indicate nav
+        cancel_indicate = False
 
         if action < 0 or action >= len(self.action_meanings):
             raise ValueError(f"Invalid action {action}. Must be in [0, {len(self.action_meanings) - 1}].")
@@ -752,6 +764,28 @@ class AwesimCityEnv(gym.Env):
             if timeout:
                 print("Timed out!")
 
+        # stats:
+        cur_style = A.driving_assistant_get_smart_das_driving_style(self.das)
+        if (cur_style == A.SMART_DAS_DRIVING_STYLE_RECKLESS):
+            self.num_reckless_seconds += elapsed_time
+        elif (cur_style == A.SMART_DAS_DRIVING_STYLE_AGGRESSIVE):
+            self.num_aggressive_seconds += elapsed_time
+        elif (cur_style == A.SMART_DAS_DRIVING_STYLE_NORMAL):
+            self.num_normal_seconds += elapsed_time
+        elif (cur_style == A.SMART_DAS_DRIVING_STYLE_DEFENSIVE):
+            self.num_defensive_seconds += elapsed_time
+        sim_time = A.sim_get_time(self.sim)
+        num_turns = self.agent.travel_stats.turns_right_made + self.agent.travel_stats.turns_left_made
+        lane_changes = self.agent.travel_stats.lane_changes_left + self.agent.travel_stats.lane_changes_right
+        violations_total = A.traffic_violation_get_total_count(self.sim.traffic_violations_logs_queue, self.agent.id)
+        violations_overspeeding = A.traffic_violation_type_get_total_count(self.sim.traffic_violations_logs_queue, self.agent.id, A.TRAFFIC_VIOLATION_OVERSPEEDING)
+        violations_red = A.traffic_violation_type_get_total_count(self.sim.traffic_violations_logs_queue, self.agent.id, A.TRAFFIC_VIOLATION_RED_LIGHT_RUN)
+        violations_stop_sign = A.traffic_violation_type_get_total_count(self.sim.traffic_violations_logs_queue, self.agent.id, A.TRAFFIC_VIOLATION_STOP_SIGN_FAIL_TO_STOP)
+        violation_red_yield = A.traffic_violation_type_get_total_count(self.sim.traffic_violations_logs_queue, self.agent.id, A.TRAFFIC_VIOLATION_RED_YIELD_FAIL_TO_STOP)
+        violation_tailgating = A.traffic_violation_type_get_total_count(self.sim.traffic_violations_logs_queue, self.agent.id, A.TRAFFIC_VIOLATION_TAILGATING)
+        distance_traveled = self.agent.travel_stats.total_distance_traveled + 1e-6  # avoid division by zero
+        intersections_passed = self.agent.travel_stats.intersections_passed
+
         A.situational_awareness_build(self.sim, self.agent.id)
         A.path_planner_compute_shortest_path(self.path_planner, self.situation.lane, self.situation.lane_progress_m, self.goal_lane, 0.5 * self.goal_lane.length)
         obs = self._get_observation()
@@ -772,14 +806,36 @@ class AwesimCityEnv(gym.Env):
             "timeout": timeout,
             "cost": cost,
             "opt_dist_to_goal_m": self.prev_opt_distance_to_goal if self.goal_lane is not None else np.nan,
-            "action_no_rules": self.action_meanings[action] == "set_style_no_rules",
-            "action_reckless": self.action_meanings[action] == "set_style_reckless",
-            "action_aggressive": self.action_meanings[action] == "set_style_aggressive",
-            "action_normal": self.action_meanings[action] == "set_style_normal",
-            "action_defensive": self.action_meanings[action] == "set_style_defensive",
-            "action_indicate_left": self.action_meanings[action] == "indicate_left",
-            "action_indicate_right": self.action_meanings[action] == "indicate_right",
-            "action_indicate_nav": self.action_meanings[action] == "indicate_nav",
+            "style/reckless_ratio": self.num_reckless_seconds / sim_time,
+            "style/aggressive_ratio": self.num_aggressive_seconds / sim_time,
+            "style/normal_ratio": self.num_normal_seconds / sim_time,
+            "style/defensive_ratio": self.num_defensive_seconds / sim_time,
+            "turns/right_ratio": self.agent.travel_stats.turns_right_made / num_turns if num_turns > 0 else 0.0,
+            "turns/left_ratio": self.agent.travel_stats.turns_left_made / num_turns if num_turns > 0 else 0.0,
+            "turns/per_minute": num_turns * 60 / sim_time,
+            "lane_changes/left_ratio": self.agent.travel_stats.lane_changes_left / lane_changes if lane_changes > 0 else 0.0,
+            "lane_changes/right_ratio": self.agent.travel_stats.lane_changes_right / lane_changes if lane_changes > 0 else 0.0,
+            "lane_changes/per_minute": lane_changes * 60 / sim_time,
+            "violations/total": violations_total,
+            "violations/overspeeding": violations_overspeeding,
+            "violations/red": violations_red,
+            "violations/stop_sign": violations_stop_sign,
+            "violations/stop_for_red_yield": violation_red_yield,
+            "violations/tailgating": violation_tailgating,
+            "average_speed_mph": A.to_mph(self.agent.travel_stats.average_speed),
+            "motion/time_stopped_ratio": self.agent.travel_stats.total_time_stopped / sim_time,
+            "motion/time_almost_stopped_ratio": self.agent.travel_stats.total_time_almost_stopped / sim_time,
+            "motion/time_driving_ratio": self.agent.travel_stats.total_time_moving / sim_time,
+            "path/traffic_lights_ratio": self.agent.travel_stats.traffic_lights_passed / intersections_passed if intersections_passed > 0 else 0.0,
+            "path/stop_signs_ratio": self.agent.travel_stats.stop_signs_passed / intersections_passed if intersections_passed > 0 else 0.0,
+            "path/intersections": self.agent.travel_stats.intersections_passed,
+            "path/t-junctions_ratio": self.agent.travel_stats.t_junctions_passed / intersections_passed if intersections_passed > 0 else 0.0,
+            "path/single_lane_roads": self.agent.travel_stats.total_distance_on_single_lane_roads / distance_traveled,
+            "path/two_lane_roads": self.agent.travel_stats.total_distance_on_two_lane_roads / distance_traveled,
+            "path/multi_lane_roads": self.agent.travel_stats.total_distance_on_three_or_more_lane_roads / distance_traveled,
+            "path/rightmost_lane": self.agent.travel_stats.total_distance_on_rightmost_lane / distance_traveled,
+            "path/leftmost_lane": self.agent.travel_stats.total_distance_on_leftmost_lane / distance_traveled,
+            "path/middle_lane": self.agent.travel_stats.total_distance_on_middle_lane / distance_traveled,
         }
         self.steps += 1
         self.synchronized_sim_speedup = self.sim.simulation_speedup  # record this so that we preserve it across resets if it was modified through GUI during the episode

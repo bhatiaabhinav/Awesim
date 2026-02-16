@@ -11,8 +11,7 @@ c_sources = (
     glob.glob('../src/awesim/*.c') +
     glob.glob('../src/car/*.c') +
     glob.glob('../src/ai/*.c') +
-    glob.glob('../src/logging/*.c') +
-    glob.glob('../src/bad/*.c')
+    glob.glob('../src/logging/*.c')
 )
 
 # The SWIG-generated wrapper

@@ -191,7 +191,8 @@ ENV_CONFIG = {
     "perception_noise": True,          # whether to add noise to the perception inputs
     "observation_radius": 200.0,      # in meters, radius around agent for which NPCs are observed
     "city_width": 1500,                 # in meters
-    "num_cars": 256,                    # number of other cars in the environment
+    "num_cars": 512,                    # number of other cars in the environment
+    "randomize_num_cars": False,         # whether to randomize the number of cars in each episode (up to num_cars)
     "decision_interval": 1.0,           # in seconds, how often the agent can take an action (reconfigure the driving assist), or how often the acceleration is applied in non-DAS mode
     "sim_duration": 60 * 60,            # 60 minutes max duration after which the episode ends and wage for entire 8-hour workday is lost
     "min_goal_manhat": 500,              # minimum manhattan distance to goal at start of episode
@@ -210,16 +211,16 @@ VEC_ENV_CONFIG = {
 PPO_CONFIG = {
     "iters": 10000,
     "nsteps": 256,
-    "actor_lr": 0.0001,
-    "critic_lr": 0.0001,
-    "decay_lr": False,
+    "actor_lr": 0.0003,
+    "critic_lr": 0.0003,
+    "decay_lr": True,
     "decay_entropy_coef": True,
     "entropy_coef": 0.01,
     "batch_size": 128,
     "nepochs": 4,
     "target_kl": 0.01,
     "lam": 0.3,
-    "gamma": 0.999,
+    "gamma": 0.99,
     "clipnorm": 0.5,
     "clip_ratio": 0.2,
     "adam_weight_decay": 0.00,
@@ -231,6 +232,7 @@ PPO_CONFIG = {
     "lagrange_max": 100.0,
     "training_device": "cuda" if torch.cuda.is_available() else "cpu",
     "inference_device": "cuda" if torch.cuda.is_available() else "cpu",
+    "stats_window": 1000,
     "verbose": False
 }
 NET_CONFIG = {
@@ -299,7 +301,7 @@ def train_model(load_actor=None, load_critic=None) -> Tuple[ActorBase, Critic, P
         print(f"Loading critic model from {load_critic}")
         critic.load_state_dict(torch.load(load_critic, map_location=torch.device(PPO_CONFIG["training_device"])))
 
-    ppo = PPO(vec_env, actor, critic, cost_critic=cost_critic, **PPO_CONFIG, custom_info_keys_to_log_at_episode_end=['crashed', 'reached_goal', 'reached_in_time', 'reached_but_late', 'out_of_fuel', 'timeout', 'total_fuel_consumed', 'crashed_forward', 'crashed_backward', 'progress_m_during_crash', 'progress_m_during_front_crash', 'progress_m_during_back_crash', 'crashed_on_intersection', 'aeb_in_progress_during_crash', 'opt_dist_to_goal_m', 'action_no_rules', 'action_reckless', 'action_aggressive', 'action_normal', 'action_defensive', 'action_indicate_left', 'action_indicate_right', 'action_indicate_nav'])  # type: ignore
+    ppo = PPO(vec_env, actor, critic, cost_critic=cost_critic, **PPO_CONFIG, custom_info_keys_to_log_at_episode_end=['crashed', 'reached_goal', 'out_of_fuel', 'timeout', 'total_fuel_consumed', 'crashed_forward', 'crashed_backward', 'progress_m_during_crash', 'progress_m_during_front_crash', 'progress_m_during_back_crash', 'crashed_on_intersection', 'aeb_in_progress_during_crash', 'opt_dist_to_goal_m', 'style/reckless_ratio', 'style/aggressive_ratio', 'style/normal_ratio', 'style/defensive_ratio', 'turns/right_ratio', 'turns/left_ratio', 'turns/per_minute', 'lane_changes/left_ratio', 'lane_changes/right_ratio', 'lane_changes/per_minute', 'violations/total', 'violations/overspeeding', 'violations/red', 'violations/stop_sign', 'violations/stop_for_red_yield', 'violations/tailgating', 'average_speed_mph', 'motion/time_stopped_ratio', 'motion/time_almost_stopped_ratio', 'motion/time_driving_ratio', 'path/traffic_lights_ratio', 'path/stop_signs_ratio', 'path/intersections', 'path/t-junctions_ratio', 'path/single_lane_roads', 'path/two_lane_roads', 'path/multi_lane_roads', 'path/rightmost_lane', 'path/leftmost_lane', 'path/middle_lane'])  # type: ignore
 
     # make dir for saving models
     model_dir = f"./models/{WANDB_CONFIG['experiment_name']}"
@@ -336,8 +338,6 @@ def train_model(load_actor=None, load_critic=None) -> Tuple[ActorBase, Critic, P
                 "rollout/crash_rate": ppo.stats['info_key_means']['crashed'][-1],
                 "rollout/reached_goal_rate": ppo.stats['info_key_means']['reached_goal'][-1],
                 "rollout/out_of_fuel_rate": ppo.stats['info_key_means']['out_of_fuel'][-1],
-                "rollout/reached_in_time_rate": ppo.stats['info_key_means']['reached_in_time'][-1],
-                "rollout/reached_but_late_rate": ppo.stats['info_key_means']['reached_but_late'][-1],
                 "rollout/timeout_rate": ppo.stats['info_key_means']['timeout'][-1],
                 "rollout/mean_fuel_consumed": ppo.stats['info_key_means']['total_fuel_consumed'][-1],
                 "rollout/crashed_forward_rate": ppo.stats['info_key_means']['crashed_forward'][-1],
@@ -348,14 +348,36 @@ def train_model(load_actor=None, load_critic=None) -> Tuple[ActorBase, Critic, P
                 "rollout/crashed_on_intersection_rate": ppo.stats['info_key_means']['crashed_on_intersection'][-1],
                 "rollout/aeb_in_progress_during_crash_rate": ppo.stats['info_key_means']['aeb_in_progress_during_crash'][-1],
                 "rollout/opt_dist_to_goal_m_mean": ppo.stats['info_key_means']['opt_dist_to_goal_m'][-1],
-                "rollout/action_no_rules_rate": ppo.stats['info_key_means']['action_no_rules'][-1],
-                "rollout/action_reckless_rate": ppo.stats['info_key_means']['action_reckless'][-1],
-                "rollout/action_aggressive_rate": ppo.stats['info_key_means']['action_aggressive'][-1],
-                "rollout/action_normal_rate": ppo.stats['info_key_means']['action_normal'][-1],
-                "rollout/action_defensive_rate": ppo.stats['info_key_means']['action_defensive'][-1],
-                "rollout/action_indicate_left_rate": ppo.stats['info_key_means']['action_indicate_left'][-1],
-                "rollout/action_indicate_right_rate": ppo.stats['info_key_means']['action_indicate_right'][-1],
-                "rollout/action_indicate_nav_rate": ppo.stats['info_key_means']['action_indicate_nav'][-1],
+                "rollout/style/reckless_ratio": ppo.stats['info_key_means']['style/reckless_ratio'][-1],
+                "rollout/style/aggressive_ratio": ppo.stats['info_key_means']['style/aggressive_ratio'][-1],
+                "rollout/style/normal_ratio": ppo.stats['info_key_means']['style/normal_ratio'][-1],
+                "rollout/style/defensive_ratio": ppo.stats['info_key_means']['style/defensive_ratio'][-1],
+                "rollout/turns/right_ratio": ppo.stats['info_key_means']['turns/right_ratio'][-1],
+                "rollout/turns/left_ratio": ppo.stats['info_key_means']['turns/left_ratio'][-1],
+                "rollout/turns/per_minute": ppo.stats['info_key_means']['turns/per_minute'][-1],
+                "rollout/lane_changes/left_ratio": ppo.stats['info_key_means']['lane_changes/left_ratio'][-1],
+                "rollout/lane_changes/right_ratio": ppo.stats['info_key_means']['lane_changes/right_ratio'][-1],
+                "rollout/lane_changes/per_minute": ppo.stats['info_key_means']['lane_changes/per_minute'][-1],
+                "rollout/violations/total": ppo.stats['info_key_means']['violations/total'][-1],
+                "rollout/violations/overspeeding": ppo.stats['info_key_means']['violations/overspeeding'][-1],
+                "rollout/violations/red": ppo.stats['info_key_means']['violations/red'][-1],
+                "rollout/violations/stop_sign": ppo.stats['info_key_means']['violations/stop_sign'][-1],
+                "rollout/violations/stop_for_red_yield": ppo.stats['info_key_means']['violations/stop_for_red_yield'][-1],
+                "rollout/violations/tailgating": ppo.stats['info_key_means']['violations/tailgating'][-1],
+                "rollout/average_speed_mph": ppo.stats['info_key_means']['average_speed_mph'][-1],
+                "rollout/motion/time_stopped_ratio": ppo.stats['info_key_means']['motion/time_stopped_ratio'][-1],
+                "rollout/motion/time_almost_stopped_ratio": ppo.stats['info_key_means']['motion/time_almost_stopped_ratio'][-1],
+                "rollout/motion/time_driving_ratio": ppo.stats['info_key_means']['motion/time_driving_ratio'][-1],
+                "rollout/path/traffic_lights_ratio": ppo.stats['info_key_means']['path/traffic_lights_ratio'][-1],
+                "rollout/path/stop_signs_ratio": ppo.stats['info_key_means']['path/stop_signs_ratio'][-1],
+                "rollout/path/intersections": ppo.stats['info_key_means']['path/intersections'][-1],
+                "rollout/path/t-junctions_ratio": ppo.stats['info_key_means']['path/t-junctions_ratio'][-1],
+                "rollout/path/single_lane_roads": ppo.stats['info_key_means']['path/single_lane_roads'][-1],
+                "rollout/path/two_lane_roads": ppo.stats['info_key_means']['path/two_lane_roads'][-1],
+                "rollout/path/multi_lane_roads": ppo.stats['info_key_means']['path/multi_lane_roads'][-1],
+                "rollout/path/rightmost_lane": ppo.stats['info_key_means']['path/rightmost_lane'][-1],
+                "rollout/path/leftmost_lane": ppo.stats['info_key_means']['path/leftmost_lane'][-1],
+                "rollout/path/middle_lane": ppo.stats['info_key_means']['path/middle_lane'][-1],
                 "train/loss": ppo.stats["losses"][-1],
                 "train/value_loss": ppo.stats["critic_losses"][-1],
                 "train/cost_value_loss": ppo.stats["cost_losses"][-1],

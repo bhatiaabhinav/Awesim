@@ -578,6 +578,7 @@ class PPO:
                  base_seed: int = 42,  # base seed for envs, the envs will be seeded: base_seed, base_seed+1, base_seed+2, ... etc.
                  inference_device: str = 'cpu',
                  training_device: str = 'cpu',
+                 stats_window : int = 100,
                  verbose: bool = True,
                  custom_info_keys_to_log_at_episode_end: List[str] = [],):  # keys in info dict to log at episode end
         """
@@ -678,6 +679,7 @@ class PPO:
         self.moving_cost_estimate_step_size = moving_cost_estimate_step_size
         self.lagrange = 0.0  # Lagrange multiplier
         self.moving_average_cost = 0.0  # moving average estimate of cost per episode, discounted or undiscounted depending on constrain_undiscounted_cost
+        self.stats_window = stats_window
         self.verbose = verbose
 
         # stats
@@ -708,15 +710,15 @@ class PPO:
             'lengths': [],              # length of each trajectory collected so far
             'total_costs': [],          # total cost of each trajectory collected so far (if env provides this info)
             'successes': [],            # success of each trajectory collected so far (if env provides this info)
-            'mean_returns': [],         # mean return of latest 100 trajectories after each iteration
-            'mean_discounted_returns': [],  # mean discounted return of latest 100 trajectories after each iteration
-            'mean_discounted_costs': [],    # mean discounted cost of latest 100 trajectories after each iteration
-            'mean_lengths': [],         # mean length of latest 100 trajectories after each iteration
-            'mean_total_costs': [],     # mean total cost of latest 100 trajectories after each iteration (if env provides this info)
-            'mean_successes': [],       # mean success of latest 100 trajectories after each iteration (if env provides this info)
+            'mean_returns': [],         # mean return of latest stats_window trajectories after each iteration
+            'mean_discounted_returns': [],  # mean discounted return of latest stats_window trajectories after each iteration
+            'mean_discounted_costs': [],    # mean discounted cost of latest stats_window trajectories after each iteration
+            'mean_lengths': [],         # mean length of latest stats_window trajectories after each iteration
+            'mean_total_costs': [],     # mean total cost of latest stats_window trajectories after each iteration (if env provides this info)
+            'mean_successes': [],       # mean success of latest stats_window trajectories after each iteration (if env provides this info)
         }
         self.stats['info_keys'] = {key: [] for key in (self.custom_info_keys_to_log_at_episode_end)}
-        self.stats['info_key_means'] = {key: [] for key in (self.custom_info_keys_to_log_at_episode_end)}  # mean of latest 100 episodes after each iteration
+        self.stats['info_key_means'] = {key: [] for key in (self.custom_info_keys_to_log_at_episode_end)}  # mean of latest stats_window episodes after each iteration
 
         state_shape: Tuple[int, ...] = envs.single_observation_space.shape  # type: ignore
         if envs.single_observation_space.dtype == np.uint8:
@@ -885,14 +887,14 @@ class PPO:
         self.stats['total_timesteps'] += self.nsteps * self.envs.num_envs
         self.stats['timestepss'].append(self.stats['total_timesteps'])
         self.stats['episodess'].append(self.stats['total_episodes'])
-        # Rolling window stats (last 100 episodes): mean return/length/cost/success.
+        # Rolling window stats (last stats_window episodes): mean return/length/cost/success.
         # Also track custom info keys from env for handy metrics.
-        mean_return = np.mean(self.stats['returns'][-100:]) if len(self.stats['returns']) > 0 else 0.0
-        mean_discounted_return = np.mean(self.stats['discounted_returns'][-100:]) if len(self.stats['discounted_returns']) > 0 else 0.0
-        mean_discounted_cost = np.mean(self.stats['discounted_costs'][-100:]) if len(self.stats['discounted_costs']) > 0 else 0.0
-        mean_length = np.mean(self.stats['lengths'][-100:]) if len(self.stats['lengths']) > 0 else 0.0
-        mean_total_cost = np.mean(self.stats['total_costs'][-100:]) if len(self.stats['total_costs']) > 0 else 0.0
-        mean_success = np.mean(self.stats['successes'][-100:]) if len(self.stats['successes']) > 0 else 0.0
+        mean_return = np.mean(self.stats['returns'][-self.stats_window:]) if len(self.stats['returns']) > 0 else 0.0
+        mean_discounted_return = np.mean(self.stats['discounted_returns'][-self.stats_window:]) if len(self.stats['discounted_returns']) > 0 else 0.0
+        mean_discounted_cost = np.mean(self.stats['discounted_costs'][-self.stats_window:]) if len(self.stats['discounted_costs']) > 0 else 0.0
+        mean_length = np.mean(self.stats['lengths'][-self.stats_window:]) if len(self.stats['lengths']) > 0 else 0.0
+        mean_total_cost = np.mean(self.stats['total_costs'][-self.stats_window:]) if len(self.stats['total_costs']) > 0 else 0.0
+        mean_success = np.mean(self.stats['successes'][-self.stats_window:]) if len(self.stats['successes']) > 0 else 0.0
         self.stats['mean_returns'].append(mean_return)
         self.stats['mean_discounted_returns'].append(mean_discounted_return)
         self.stats['mean_discounted_costs'].append(mean_discounted_cost)
@@ -900,7 +902,7 @@ class PPO:
         self.stats['mean_total_costs'].append(mean_total_cost)
         self.stats['mean_successes'].append(mean_success)
         for key in self.custom_info_keys_to_log_at_episode_end:
-            key_mean = np.nanmean(self.stats['info_keys'][key][-100:]) if len(self.stats['info_keys'][key]) > 0 else 0.0
+            key_mean = np.nanmean(self.stats['info_keys'][key][-self.stats_window:]) if len(self.stats['info_keys'][key]) > 0 else 0.0
             self.stats['info_key_means'][key].append(key_mean)
 
     def compute_values_advantages(self) -> None:
@@ -1139,11 +1141,11 @@ class PPO:
                 f"Iteration {self.stats['iterations']}/{self.iters} complete.\n"
                 f"  Total timesteps: {self.stats['total_timesteps']}\n"
                 f"  Total episodes: {self.stats['total_episodes']}\n"
-                f"  Mean (100-window) return: {self.stats['mean_returns'][-1]:.6f}\n"
-                f"  Mean (100-window) total cost: {self.stats['mean_total_costs'][-1]:.6f}\n"
-                f"  Mean (100-window) discounted cost: {self.stats['mean_discounted_costs'][-1]:.6f}\n"
-                f"  Mean (100-window) length: {self.stats['mean_lengths'][-1]:.6f}\n"
-                f"  Mean (100-window) success: {self.stats['mean_successes'][-1]:.6f}\n"
+                f"  Mean ({self.stats_window}-window) return: {self.stats['mean_returns'][-1]:.6f}\n"
+                f"  Mean ({self.stats_window}-window) total cost: {self.stats['mean_total_costs'][-1]:.6f}\n"
+                f"  Mean ({self.stats_window}-window) discounted cost: {self.stats['mean_discounted_costs'][-1]:.6f}\n"
+                f"  Mean ({self.stats_window}-window) length: {self.stats['mean_lengths'][-1]:.6f}\n"
+                f"  Mean ({self.stats_window}-window) success: {self.stats['mean_successes'][-1]:.6f}\n"
                 f"  Exp. Moving average cost ({'undiscounted' if self.constrain_undiscounted_cost else 'discounted'}) (alpha = {self.moving_cost_estimate_step_size}): {self.moving_average_cost:.6f}\n"
                 f"  Lagrange multiplier: {self.stats['lagranges'][-1]:.6f}\n"
                 f"  Total loss: {self.stats['losses'][-1]:.6f}\n"
@@ -1157,7 +1159,7 @@ class PPO:
                 f"  Learning rates - actor: {self.stats['actor_lrs'][-1]:.6f}, critic: {self.stats['critic_lrs'][-1]:.6f}\n"
                 f"  Entropy coef: {self.stats['entropy_coefs'][-1]:.6f}\n"
                 f"  Clip ratio: {self.stats['clip_ratios'][-1]:.6f}\n"
-                + ''.join([f"  Mean (100-window) {key}: {self.stats['info_key_means'][key][-1]:.6f}\n" for key in self.custom_info_keys_to_log_at_episode_end]), flush=True)
+                + ''.join([f"  Mean ({self.stats_window}-window) {key}: {self.stats['info_key_means'][key][-1]:.6f}\n" for key in self.custom_info_keys_to_log_at_episode_end]), flush=True)
             if self.stats['iterations'] >= self.iters:
                 print("Training complete.")
                 break
@@ -1265,7 +1267,7 @@ if __name__ == "__main__":
             actor.evaluate_policy(env, 1, deterministic=False)      # for video recording. Keeping deterministic=False to see the exact policy as in training
             plt.clf()
             plt.plot(np.arange(ppo.stats['iterations']) + 1, ppo.stats['mean_returns'])
-            plt.gca().set(xlabel="Iteration", ylabel="Mean Return (100-episode window)", title=f"PPO on {envname}")
+            plt.gca().set(xlabel="Iteration", ylabel=f"Mean Return ({ppo.stats_window}-episode window)", title=f"PPO on {envname}")
             plt.savefig(f"plots/{envname.replace('/', '-')}{suffix}.png")
 
     # Cleanup environments.
