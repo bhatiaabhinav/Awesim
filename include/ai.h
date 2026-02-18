@@ -641,7 +641,7 @@ typedef struct PathPlanner {
     bool consider_speed_limits;                     // Whether to consider speed limits when computing lane costs. Should not be changed after creation.
     bool use_live_traffic_info;                     // Whether to use live traffic flow data instead of speed limits for time-based costs. Requires consider_speed_limits to be true.
     bool avoid_highways;                             // Whether to penalize routes through highways (roads with 3+ lanes). Routes through highways are still possible but strongly discouraged.
-    MetersPerSecond traffic_flow_per_lane[MAX_NUM_LANES]; // Smoothed average speed of traffic on each lane, updated periodically from simulation data.
+    MetersPerSecond traffic_flow_per_edge[MAX_NUM_LANES][MAX_NODES_PER_LANE]; // Smoothed average speed of traffic per graph edge segment. traffic_flow_per_edge[lane_id][k] is the flow speed on the segment from the k-th to the (k+1)-th node on that lane.
     Seconds last_traffic_update_time;                // Sim-time of the last traffic flow update (used to compute correct EMA alpha regardless of call frequency)
 
     LaneId start_lane_id;                           // Starting lane for the path planning
@@ -674,4 +674,5 @@ PathPlanner* path_planner_create(Map* map, bool consider_speed_limits);     // a
 void path_planner_free(PathPlanner* planner);   // does not free the map
 void path_planner_compute_shortest_path(PathPlanner* planner, const Lane* start_lane, Meters start_progress, const Lane* end_lane, Meters end_progress);    // updates the planner with the optimal path information
 NavAction path_planner_get_solution_action(const PathPlanner* planner, bool ignore_trivial, int action_index);   // get the action at action_index in the solution path. If ignore_trivial is true, trivial straight actions are ignored (except the last one if it is straight)
-void path_planner_update_traffic_flow(Simulation* sim, PathPlanner* planner); // Updates the smoothed average traffic flow speed per lane from live simulation data. Call periodically (e.g., every few seconds). Uses exponential moving average with a ~5 minute effective window.
+void path_planner_update_traffic_flow(Simulation* sim, PathPlanner* planner); // Updates the smoothed average traffic flow speed per graph edge from live simulation data. Cars are bucketed into the specific edge segment they occupy. Call periodically (e.g., every few seconds). Uses exponential moving average.
+void path_planner_reset_traffic_stats(PathPlanner* planner); // Resets the traffic flow statistics (traffic_flow_per_edge) to 0. Useful for clearing accumulated history.

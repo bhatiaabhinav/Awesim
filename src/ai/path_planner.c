@@ -15,7 +15,7 @@
 // Traffic flow smoothing: exponential moving average
 // alpha = dt / tau, where tau is the effective time constant.
 // For a ~5 minute window with updates every 1s: tau = 300s, alpha ~ 0.0033
-#define TRAFFIC_FLOW_TAU 120.0                  // EMA time constant in seconds (effective ~2 min window)
+#define TRAFFIC_FLOW_TAU 60.0                  // EMA time constant in seconds (effective ~1 min window)
 #define TRAFFIC_FLOW_MIN_SPEED 0.044704              // Minimum traffic flow speed (m/s) to avoid division by zero in cost
 #define HIGHWAY_AVOIDANCE_PENALTY 10.0          // Cost multiplier for highway lanes (roads with 3+ lanes) when avoid_highways is enabled
 
@@ -218,7 +218,8 @@ void path_planner_build_graph(PathPlanner* planner) {
                 MapNode* v = &planner->map_nodes[v_id];
                 double dist = v->progress - u->progress;
                 if (dist > 0) {
-                    double cost = get_cost_with_traffic(dist, lane_u->speed_limit, planner->consider_speed_limits, planner->use_live_traffic_info, planner->traffic_flow_per_lane[u->lane_id]);
+                    double traffic_flow = planner->traffic_flow_per_edge[u->lane_id][k];
+                    double cost = get_cost_with_traffic(dist, lane_u->speed_limit, planner->consider_speed_limits, planner->use_live_traffic_info, traffic_flow);
                     dg_add_edge_w(planner->decision_graph, u_id, v_id, cost * highway_penalty);
                 }
                 break;
@@ -243,6 +244,8 @@ void path_planner_build_graph(PathPlanner* planner) {
 
         // C. Adjacents (Lane Change)
         for (int k = 0; k < 2; ++k) {
+            if (u->progress < LANE_CHANGE_INTERVAL) continue; // Don't allow lane changes at the very start of the lane. Our NPCs do not do that.
+            if (lane_u->length - u->progress < LANE_CHANGE_INTERVAL) continue; // Don't allow lane changes at the very end of the lane, either, as they are equivalent to lane changes at the very start of the next lane.
             LaneId adj_id = lane_u->adjacents[k];
             if (adj_id != ID_NULL) {
                 if (adj_id == lane_u->merges_into_id || adj_id == lane_u->exit_lane_id) continue;
@@ -340,7 +343,7 @@ PathPlanner* path_planner_create(Map* map, bool consider_speed_limits) {
         planner->consider_speed_limits = consider_speed_limits;
         planner->use_live_traffic_info = false;
         planner->avoid_highways = false;
-        memset(planner->traffic_flow_per_lane, 0, sizeof(planner->traffic_flow_per_lane));
+        memset(planner->traffic_flow_per_edge, 0, sizeof(planner->traffic_flow_per_edge));
         planner->last_traffic_update_time = -1.0;
         planner->start_lane_id = ID_NULL;
         planner->end_lane_id = ID_NULL;
@@ -388,6 +391,52 @@ static double get_cost_with_traffic(double distance, double speed_limit, bool co
         return distance / speed_limit;
     }
     return distance;
+}
+
+// Compute the cost of traversing a sub-range [from_progress, to_progress] on a lane,
+// summing per-edge traffic flow costs across all overlapping edge segments.
+static double get_lane_segment_cost(PathPlanner* planner, LaneId lane_id, Meters from_progress, Meters to_progress) {
+    Lane* lane = map_get_lane(planner->map, lane_id);
+    if (!lane || to_progress <= from_progress) {
+        return get_cost_with_traffic(to_progress - from_progress, lane ? lane->speed_limit : 1.0,
+                                     planner->consider_speed_limits, false, 0.0);
+    }
+
+    if (!planner->use_live_traffic_info) {
+        return get_cost_with_traffic(to_progress - from_progress, lane->speed_limit,
+                                     planner->consider_speed_limits, false, 0.0);
+    }
+
+    // Sum costs across edge segments that overlap [from_progress, to_progress]
+    int node_count = planner->lane_id_to_node_ids_count[lane_id];
+    double total_cost = 0.0;
+    bool found_any = false;
+
+    for (int k = 0; k < node_count - 1; k++) {
+        int u_id = planner->lane_id_to_node_ids_list[lane_id][k];
+        int v_id = planner->lane_id_to_node_ids_list[lane_id][k + 1];
+        double seg_start = planner->map_nodes[u_id].progress;
+        double seg_end   = planner->map_nodes[v_id].progress;
+
+        double overlap_start = seg_start > from_progress ? seg_start : from_progress;
+        double overlap_end   = seg_end   < to_progress   ? seg_end   : to_progress;
+
+        if (overlap_start < overlap_end) {
+            double dist = overlap_end - overlap_start;
+            double flow = planner->traffic_flow_per_edge[lane_id][k];
+            total_cost += get_cost_with_traffic(dist, lane->speed_limit,
+                                                planner->consider_speed_limits,
+                                                planner->use_live_traffic_info, flow);
+            found_any = true;
+        }
+    }
+
+    if (!found_any) {
+        // Fallback: no edge segments cover this range, use speed limit
+        return get_cost_with_traffic(to_progress - from_progress, lane->speed_limit,
+                                     planner->consider_speed_limits, false, 0.0);
+    }
+    return total_cost;
 }
 
 
@@ -459,7 +508,7 @@ void path_planner_compute_shortest_path(PathPlanner* planner, const Lane* start_
     // if we are on the same lane and start_progress <= end_progress, trivial path
     if (start_lane->id == end_lane->id && start_progress <= end_progress) {
         planner->path_exists = true;
-        planner->optimal_cost = get_cost_with_traffic(end_progress - start_progress, start_lane->speed_limit, planner->consider_speed_limits, planner->use_live_traffic_info, planner->traffic_flow_per_lane[start_lane->id]);
+        planner->optimal_cost = get_lane_segment_cost(planner, start_lane->id, start_progress, end_progress);
         planner->num_solution_actions = 1;
         planner->num_solution_actions_non_trivial = 1;
         planner->solution_nodes[0].lane_id = start_lane->id;
@@ -503,13 +552,22 @@ void path_planner_compute_shortest_path(PathPlanner* planner, const Lane* start_
 
     if (node1_idx == -1 || node_end_minus_1_idx == -1) return;
 
-    // 3. Call Dijkstra -> A*
+    // Compute fractional segment costs in the same units as the graph edge costs
+    // (time when consider_speed_limits is on, meters otherwise). Using raw distances
+    // here would cause unit mismatch and wild ETA fluctuations in time-cost mode.
+    double node1_cost = get_lane_segment_cost(planner, start_lane->id, start_progress,
+                                              planner->map_nodes[node1_idx].progress);
+    double node_end_cost = get_lane_segment_cost(planner, end_lane->id,
+                                                 planner->map_nodes[node_end_minus_1_idx].progress,
+                                                 end_progress);
+
+    // 3. Call Dijkstra/A*
     double out_cost = 0.0;
     int path_num_nodes = dg_astar_path(planner->decision_graph, node1_idx, node_end_minus_1_idx, astar_heuristic, planner, planner->solution_intermediate_node_ids, MAX_SOLUTION_CAPACITY - 2, &out_cost);
     
     if (path_num_nodes > 0) {
         planner->path_exists = true;
-        planner->optimal_cost = out_cost + node1_closest_dist + node_end_minus_1_closest_dist;
+        planner->optimal_cost = out_cost + node1_cost + node_end_cost;
         planner->num_solution_actions = path_num_nodes + 2 - 1; // +2 for start and end, -1 for actions
         // Fill solution nodes
         // Start
@@ -537,6 +595,8 @@ void path_planner_compute_shortest_path(PathPlanner* planner, const Lane* start_
         planner->solution_actions_non_trivial[planner->num_solution_actions_non_trivial++] = NAV_STRAIGHT;
     } else if (path_num_nodes == 0) {
         // no path
+        LOG_ERROR("Path Planner: No path found. Start Lane ID: %d, Start Progress: %.2f, End Lane ID: %d, End Progress: %.2f.", 
+              start_lane->id, start_progress, end_lane->id, end_progress);
     } else {
         // error
         LOG_ERROR("Path Planner Dijkstra error: %d. Start Lane ID: %d, Start Progress: %.2f, End Lane ID: %d, End Progress: %.2f.", 
@@ -602,41 +662,79 @@ void path_planner_update_traffic_flow(Simulation* sim, PathPlanner* planner) {
     if (elapsed < 0.0) elapsed = 0.0;
 
     // EMA alpha from elapsed time: alpha = 1 - exp(-elapsed / tau)
-    // This is frame-rate independent and gives the correct ~5 min window.
-    double alpha = (elapsed > 0.0) ? (1.0 - exp(-elapsed / TRAFFIC_FLOW_TAU)) : 0.0;
+    // This is frame-rate independent.
+     double alpha = (elapsed > 0.0) ? (1.0 - exp(-elapsed / TRAFFIC_FLOW_TAU)) : 0.0;
 
-    for (int i = 0; i < map->num_lanes; ++i) {
-        Lane* lane = map_get_lane(map, i);
+    // Update traffic flow per edge segment: for each lane, for each consecutive
+    // pair of graph nodes (which defines an edge), bucket the cars by their
+    // progress into the correct segment and compute average speed.
+    for (int lane_idx = 0; lane_idx < map->num_lanes; ++lane_idx) {
+        Lane* lane = map_get_lane(map, lane_idx);
         if (!lane) continue;
 
+        int node_count = planner->lane_id_to_node_ids_count[lane_idx];
+        if (node_count < 2) continue; // no edge segments on this lane
+
         int num_cars = lane->num_cars;
-        if (num_cars > 0) {
-            // Compute instantaneous average speed of cars on this lane
+        // if (num_cars == 0) continue; // no cars — keep previous estimates
+
+        for (int k = 0; k < node_count - 1; k++) {
+            int u_id = planner->lane_id_to_node_ids_list[lane_idx][k];
+            int v_id = planner->lane_id_to_node_ids_list[lane_idx][k + 1];
+            double seg_start = planner->map_nodes[u_id].progress;
+            double seg_end   = planner->map_nodes[v_id].progress;
+
+            if (planner->traffic_flow_per_edge[lane_idx][k] <= 0.0) {
+                // First observation or first call — initialize with speed limit to avoid zero-cost edges
+                planner->traffic_flow_per_edge[lane_idx][k] = lane->speed_limit;
+            }
+
+            // Accumulate speeds of cars within this segment
             double total_speed = 0.0;
+            int car_count = 0;
+
             for (int c = 0; c < num_cars; ++c) {
                 Car* car = sim_get_car(sim, lane->cars_ids[c]);
-                if (car) {
+                if (!car) continue;
+                Meters car_prog = car_get_lane_progress_meters(car);
+                // Car belongs to this segment if progress is in [seg_start, seg_end)
+                // (last segment uses inclusive end to capture cars at the very end)
+                bool in_segment = (k == node_count - 2)
+                    ? (car_prog >= seg_start && car_prog <= seg_end)
+                    : (car_prog >= seg_start && car_prog <  seg_end);
+                if (in_segment) {
                     total_speed += car_get_speed(car);
+                    car_count++;
                 }
             }
-            double avg_speed = total_speed / (double)num_cars;
+            
+            double avg_speed;
+            if (car_count > 0) {
+                avg_speed = total_speed / (double)car_count;
+            } else {
+                avg_speed = lane->speed_limit; // no cars means free flow at speed limit
+            }
 
             // Exponential moving average update
-            if (planner->traffic_flow_per_lane[i] <= 0.0 || alpha == 0.0) {
-                // First observation or first call — initialize directly
-                planner->traffic_flow_per_lane[i] = avg_speed;
-            } else {
-                planner->traffic_flow_per_lane[i] =
-                    (1.0 - alpha) * planner->traffic_flow_per_lane[i] + alpha * avg_speed;
-            }
+            planner->traffic_flow_per_edge[lane_idx][k] = (1.0 - alpha) * planner->traffic_flow_per_edge[lane_idx][k] + alpha * avg_speed;
         }
-        // If no cars on the lane, keep the previous estimate (or 0 if never observed).
-        // A value of 0 means "no traffic data available" and get_cost_with_traffic
-        // will fall back to the speed limit.
     }
 
     // Rebuild the decision graph so edge weights reflect updated traffic flow
     if (planner->use_live_traffic_info) {
         path_planner_rebuild_graph(planner);
+    }
+}
+
+void path_planner_reset_traffic_stats(PathPlanner* planner) {
+    if (planner) {
+        // Reset the traffic flow stats array to zero
+        memset(planner->traffic_flow_per_edge, 0, sizeof(planner->traffic_flow_per_edge));
+        planner->last_traffic_update_time = -1.0;
+        
+        // If live traffic info is in use, rebuild the graph to clear out old weights
+        if (planner->use_live_traffic_info) {
+             path_planner_rebuild_graph(planner);
+        }
     }
 }

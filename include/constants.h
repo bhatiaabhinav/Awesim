@@ -30,7 +30,7 @@
 
 // use it in the path planner:
 #define MAX_NODES_PER_LANE 100    // Estimate
-#define MAX_SOLUTION_CAPACITY 256
+#define MAX_SOLUTION_CAPACITY 512
 #define MAX_GRAPH_NODES (MAX_NUM_LANES * MAX_NODES_PER_LANE)
 
 

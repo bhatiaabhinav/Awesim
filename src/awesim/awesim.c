@@ -295,9 +295,8 @@ void awesim_map_setup(Map* map, Meters city_width) {
     const Meters lane_width = from_feet(14);
     const MetersPerSecond interstate_speed_limit = from_mph(65);
     const MetersPerSecond interstate_turn_speed_limit = from_mph(60);
-    const MetersPerSecond state_speed_limit = from_mph(55);
-    const MetersPerSecond state_turn_speed_limit = from_mph(50);
-    const MetersPerSecond exit_ramp_speed_limit = from_mph(40);
+    const MetersPerSecond state_speed_limit = from_mph(50);
+    const MetersPerSecond state_turn_speed_limit = from_mph(45);
     const MetersPerSecond local_speed_limit = from_mph(35);
     const MetersPerSecond local_turn_speed_limit = from_mph(30);
     const Meters interstate_turn_radius = 10;
@@ -305,11 +304,10 @@ void awesim_map_setup(Map* map, Meters city_width) {
     const Meters local_turn_radius = 3;
     const Meters intersection_turn_radius = 6;
     const Meters _LANE_LENGTH_EPSILON = LANE_LENGTH_EPSILON - 1e-6; // Slightly less than LANE_LENGTH_EPSILON to avoid floating point issues
-    LOG_DEBUG("Creating map with parameters: city_width=%.2f, interstate_num_lanes=%d, state_num_lanes=%d, lane_width=%.2f, interstate_speed_limit=%.2f, state_speed_limit=%.2f, interstate_turn_speed_limit=%.2f, state_turn_speed_limit=%.2f, exit_ramp_speed_limit=%.2f, local_speed_limit=%.2f, local_turn_speed_limit=%.2f, state_turn_radius=%.2f, local_turn_radius=%.2f",
+    LOG_DEBUG("Creating map with parameters: city_width=%.2f, interstate_num_lanes=%d, state_num_lanes=%d, lane_width=%.2f, interstate_speed_limit=%.2f, state_speed_limit=%.2f, interstate_turn_speed_limit=%.2f, state_turn_speed_limit=%.2f, local_speed_limit=%.2f, local_turn_speed_limit=%.2f, state_turn_radius=%.2f, local_turn_radius=%.2f",
               city_width, interstate_num_lanes, state_num_lanes, lane_width,
               interstate_speed_limit, state_speed_limit,
-              interstate_turn_speed_limit, state_turn_speed_limit,
-              exit_ramp_speed_limit, local_speed_limit,
+              interstate_turn_speed_limit, state_turn_speed_limit, local_speed_limit,
               local_turn_speed_limit, state_turn_radius, local_turn_radius);
 
     
@@ -339,8 +337,8 @@ void awesim_map_setup(Map* map, Meters city_width) {
 
     // Inner loop/grid (local roads)
     create_square_loop_two_way(map, coordinates_create(0, 0), inner_loop_side, inner_loop_num_lanes, lane_width, local_speed_limit, local_turn_speed_limit, local_turn_radius, SKIP_TURN_ALL, outer_loop_side - inner_loop_side + 2 * (inner_loop_num_lanes * lane_width + local_turn_radius + outer_loop_num_lanes * lane_width + intersection_turn_radius + _LANE_LENGTH_EPSILON), "Inner Loop");
-    // Middle loop/grid (state highways)
-    create_square_loop_two_way(map, coordinates_create(0, 0), middle_loop_side, middle_loop_num_lanes, lane_width, state_speed_limit, state_turn_speed_limit, state_turn_radius, SKIP_TURN_ALL, city_width - middle_loop_side + 2 * (middle_loop_num_lanes * lane_width + state_turn_radius + interstate_num_lanes * lane_width + intersection_turn_radius + _LANE_LENGTH_EPSILON), "Middle Loop");
+    // Middle loop/grid (semi-state highways)
+    create_square_loop_two_way(map, coordinates_create(0, 0), middle_loop_side, middle_loop_num_lanes, lane_width, state_speed_limit - from_mph(5), state_turn_speed_limit - from_mph(5), state_turn_radius, SKIP_TURN_ALL, city_width - middle_loop_side + 2 * (middle_loop_num_lanes * lane_width + state_turn_radius + interstate_num_lanes * lane_width + intersection_turn_radius + _LANE_LENGTH_EPSILON), "Middle Loop");
     // Outer loop (local roads)
     create_square_loop_two_way(map, coordinates_create(0, 0), outer_loop_side, outer_loop_num_lanes, lane_width, local_speed_limit, local_turn_speed_limit, local_turn_radius, SKIP_TURN_NONE, 0, "Outer Loop");
     create_all_intersections_from_crossing_roads(map, intersection_turn_radius, true);
@@ -415,30 +413,33 @@ void awesim_setup(Simulation* sim, Meters city_width, int num_cars, Seconds dt, 
         bool lane_too_short = true;
         bool lane_invalid_misc = false;
         while ((would_collide || lane_too_short || lane_invalid_misc) && attempts < max_attempts) {
+            attempts++;
             random_road = map_get_road(map, rand_int_range(0, map->num_roads - 1));
             random_lane = road_get_lane(random_road, map, rand_int_range(0, road_get_num_lanes(random_road) - 1));
-            random_progress = rand_uniform(0.1, 0.9);
-            attempts++;
-            would_collide = placement_would_cause_collision(car, random_lane, sim, random_progress);
-            if (would_collide) LOG_TRACE("Car id %d placement attempt %d on lane %d at position %.2f meters failed due to a potential collision. Retrying with a new lane.", car->id, attempts, random_lane->id, random_progress * random_lane->length);
-            lane_too_short = (car_get_length(car) + meters(2)) > (random_lane->length);
+            lane_too_short = (car_get_length(car) + meters(2)) > (random_lane->length) || random_lane->length < 40;
             if (lane_too_short) {
                 LOG_TRACE("Car id %d placement attempt %d on lane %d at position %.2f meters failed because lane is too short (lane length = %.2f meters, car length = %.2f meters). Retrying with a new lane.", car->id, attempts, random_lane->id, random_progress * random_lane->length, random_lane->length, car_get_length(car));
+                continue;
             }
             lane_invalid_misc = i == 0 && (road_get_num_lanes(random_road) > 1 || random_road->type == TURN); // Agent car must be on a single-lane road and not on a turn
             if (lane_invalid_misc) {
                 LOG_TRACE("Car id %d placement attempt %d on lane %d at position %.2f meters failed because agent car must be on a single-lane road (road has %d lanes). Retrying with a new lane.", car->id, attempts, random_lane->id, random_progress * random_lane->length, road_get_num_lanes(random_road));
+                continue;
             }
+            double random_progress_meters = rand_uniform(10 + car_get_length(car) / 2, random_lane->length - 20 - car_get_length(car) / 2); // Avoid placing too close to start or end of lane
+            random_progress = random_progress_meters / random_lane->length;
+            would_collide = placement_would_cause_collision(car, random_lane, sim, random_progress);
+            if (would_collide) LOG_TRACE("Car id %d placement attempt %d on lane %d at position %.2f meters failed due to a potential collision. Retrying with a new lane.", car->id, attempts, random_lane->id, random_progress * random_lane->length);
         }
-        if (would_collide) {
-            LOG_ERROR("Failed to place car id %d after %d attempts. There may be too many cars and not enough space on the road. Not adding any more cars", car->id, attempts);
+        if (would_collide || lane_too_short || lane_invalid_misc) {
+            LOG_ERROR("Failed to place car id %d after %d attempts. There may be too many cars and not enough space on the road or the map is too small. Not adding any more cars", car->id, attempts);
             sim->num_cars = i; // Set the number of cars to the successfully placed ones
             break;
         } else {
             car_set_lane_progress(car, random_progress, random_progress * random_lane->length, 0.0);
             car_set_lane(car, random_lane);
             lane_add_car(random_lane, car, sim);
-            // car_set_speed(car, random_lane->speed_limit + car->preferences.average_speed_offset);
+            // car_set_speed(car, random_lane->speed_limit * 0.5);
             car_set_speed(car, 0);
             car_update_geometry(sim, car);
             LOG_TRACE("Placed car id %d on lane %d (%s) at position %.2f meters (speed = %.2f mph) after %d attempts", car->id, random_lane->id, road_get_name(random_road), car_get_lane_progress_meters(car), to_mph(car_get_speed(car)), attempts);

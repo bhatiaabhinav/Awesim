@@ -105,7 +105,7 @@ class AwesimCityEnv(gym.Env):
         self.infos_display: A.InfosDisplay = A.infos_display_malloc(cam_resolution[0], cam_resolution[1], len(self._get_info_for_info_display()))
         self.minimap: A.MiniMap = A.minimap_malloc(cam_resolution[0], cam_resolution[1], self.map)
         self.collision_checker: A.Collisions = A.collisions_malloc()
-        self.path_planner: A.PathPlanner = A.path_planner_create(self.map, False)
+        self.path_planner: A.PathPlanner = A.path_planner_create(self.map, True)
         self.sample_random_goal()
         self.feature_dim = self._get_state().shape[1]
 
@@ -170,7 +170,7 @@ class AwesimCityEnv(gym.Env):
         self.start_road: A.Road = A.map_get_road(self.map, agent_lane.road_id)
         if not self._is_start_road_valid(self.start_road):
             raise RuntimeError(f"Current start_road (id {self.start_road.id}) is not valid for sampling a goal.")
-        goal_road = self._sample_goal_road(self.start_road, max_tries=100)
+        goal_road = self._sample_goal_road(self.start_road, max_tries=1000)
         if goal_road is None:
             raise RuntimeError("Failed to sample a valid goal road after maximum attempts.")
     
@@ -624,6 +624,8 @@ class AwesimCityEnv(gym.Env):
 
         self.sample_random_goal()
         self.path_planner.use_live_traffic_info = True
+        A.path_planner_reset_traffic_stats(self.path_planner)
+        A.path_planner_update_traffic_flow(self.sim, self.path_planner)
         A.path_planner_compute_shortest_path(self.path_planner, self.situation.lane, self.situation.lane_progress_m, self.goal_lane, 0.5 * self.goal_lane.length)
         self.prev_opt_distance_to_goal = self._get_path_planner_opt_dist_to_goal()
         self.sim.agent_goal_lane_id = self.goal_lane.id
@@ -716,6 +718,7 @@ class AwesimCityEnv(gym.Env):
             delta_time = min(self.delta_t, self.decision_interval - elapsed_time)    # make sure you don't end up simulating more than decision_interval if it is not a multiple of TERMINATION_CHECK_INTERVAL
             t0 = A.sim_get_time(self.sim)
             A.simulate(self.sim, delta_time)  # Advance simulation
+            A.path_planner_update_traffic_flow(self.sim, self.path_planner)
 
             delta_time = A.sim_get_time(self.sim) - t0  # true delta time (since it is not guaranteed that sim would have simulated exactly for delta_time if it is not a multiple of dt.)
             elapsed_time = A.sim_get_time(self.sim) - sim_time_initial
