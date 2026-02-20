@@ -195,7 +195,7 @@ ENV_CONFIG = {
     "randomize_num_cars": False,         # whether to randomize the number of cars in each episode (up to num_cars)
     "decision_interval": 1.0,           # in seconds, how often the agent can take an action (reconfigure the driving assist), or how often the acceleration is applied in non-DAS mode
     "sim_duration": 60 * 60,            # 60 minutes max duration after which the episode ends and wage for entire 8-hour workday is lost
-    "min_goal_manhat": 500,              # minimum manhattan distance to goal at start of episode
+    "min_goal_manhat": 700,              # minimum manhattan distance to goal at start of episode
     "init_fuel_gallons": 3.0,           # initial fuel in gallons -- 1/4th of a 12-gallon tank car
     "success_reward": 1.0,
     "fail_reward": -1.0,
@@ -227,7 +227,7 @@ PPO_CONFIG = {
     "norm_rewards": True,
     "cmdp_mode": False,
     "constrain_undiscounted_cost": True,
-    "cost_threshold": 5.0,  # max cost per episode
+    "cost_threshold": 1.0,  # max cost per episode
     "lagrange_lr": 0.01,
     "lagrange_max": 100.0,
     "training_device": "cuda" if torch.cuda.is_available() else "cpu",

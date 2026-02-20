@@ -106,6 +106,7 @@ class AwesimCityEnv(gym.Env):
         self.minimap: A.MiniMap = A.minimap_malloc(cam_resolution[0], cam_resolution[1], self.map)
         self.collision_checker: A.Collisions = A.collisions_malloc()
         self.path_planner: A.PathPlanner = A.path_planner_create(self.map, True)
+        self.prev_violations_total = 0
         self.sample_random_goal()
         self.feature_dim = self._get_state().shape[1]
 
@@ -621,6 +622,7 @@ class AwesimCityEnv(gym.Env):
         A.driving_assistant_configure_aeb_assistance(self.das, self.agent, self.sim, True)
         A.driving_assistant_smart_update_das_variables(self.das, self.agent, self.sim, self.situation)
         A.traffic_violations_set_enabled(self.sim.traffic_violations_logs_queue, self.agent.id, True)
+        self.prev_violations_total = A.traffic_violation_get_total_count(self.sim.traffic_violations_logs_queue, self.agent.id)
 
         self.sample_random_goal()
         self.path_planner.use_live_traffic_info = True
@@ -781,6 +783,8 @@ class AwesimCityEnv(gym.Env):
         num_turns = self.agent.travel_stats.turns_right_made + self.agent.travel_stats.turns_left_made
         lane_changes = self.agent.travel_stats.lane_changes_left + self.agent.travel_stats.lane_changes_right
         violations_total = A.traffic_violation_get_total_count(self.sim.traffic_violations_logs_queue, self.agent.id)
+        violations_delta = max(0, violations_total - self.prev_violations_total)
+        cost = 10.0 * float(violations_delta)
         violations_overspeeding = A.traffic_violation_type_get_total_count(self.sim.traffic_violations_logs_queue, self.agent.id, A.TRAFFIC_VIOLATION_OVERSPEEDING)
         violations_red = A.traffic_violation_type_get_total_count(self.sim.traffic_violations_logs_queue, self.agent.id, A.TRAFFIC_VIOLATION_RED_LIGHT_RUN)
         violations_stop_sign = A.traffic_violation_type_get_total_count(self.sim.traffic_violations_logs_queue, self.agent.id, A.TRAFFIC_VIOLATION_STOP_SIGN_FAIL_TO_STOP)
@@ -840,6 +844,7 @@ class AwesimCityEnv(gym.Env):
             "path/leftmost_lane": self.agent.travel_stats.total_distance_on_leftmost_lane / distance_traveled,
             "path/middle_lane": self.agent.travel_stats.total_distance_on_middle_lane / distance_traveled,
         }
+        self.prev_violations_total = violations_total
         self.steps += 1
         self.synchronized_sim_speedup = self.sim.simulation_speedup  # record this so that we preserve it across resets if it was modified through GUI during the episode
 

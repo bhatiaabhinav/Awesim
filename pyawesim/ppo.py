@@ -218,8 +218,8 @@ class ActorBase(nn.Module, abc.ABC):
             action = action.detach().cpu().numpy()
         return action
 
-    def evaluate_policy(self, env: Env, num_episodes=100, deterministic=True, seed=0) -> Tuple[List[float], List[float], List[int], List[bool]]:
-        """Evaluate the policy by rolling out episodes in a single environment. Default seed is 0. Returns lists of episode rewards, episode costs, episode lengths, and episode successes."""
+    def evaluate_policy(self, env: Env, num_episodes=100, deterministic=True, seed=0, cost_gamma: float = 1.0) -> Tuple[List[float], List[float], List[int], List[bool]]:
+        """Evaluate the policy by rolling out episodes in a single environment. Default seed is 0; each episode is seeded with seed + episode_index. Returns lists of episode rewards, episode (cost_gamma-discounted) costs, episode lengths, and episode successes."""
         self.eval()
         deterministic_before = self.deterministic
         self.deterministic = deterministic
@@ -229,7 +229,7 @@ class ActorBase(nn.Module, abc.ABC):
         episode_successes = []
         for episode in range(num_episodes):
             print(f"Evaluating episode {episode + 1}/{num_episodes}", end='\r')
-            obs, _ = env.reset(seed=seed)
+            obs, _ = env.reset(seed=seed + episode)
             done = False
             total_reward = 0.0
             total_cost = 0.0
@@ -240,7 +240,7 @@ class ActorBase(nn.Module, abc.ABC):
                 done = terminated or truncated
                 total_reward += reward  # type: ignore
                 cost = info.get("cost", 0.0)
-                total_cost += cost  # type: ignore
+                total_cost += cost * (cost_gamma ** length)  # type: ignore
                 length += 1
                 if done:
                     episode_successes.append(info.get("is_success", False))
@@ -252,8 +252,8 @@ class ActorBase(nn.Module, abc.ABC):
 
         return episode_rewards, episode_costs, episode_lengths, episode_successes
 
-    def evaluate_policy_parallel(self, envs: VectorEnv, num_episodes=100, deterministic=True, base_seed=0) -> Tuple[List[float], List[float], List[int], List[bool]]:
-        """Evaluate the policy by rolling out episodes in a vectorized environment. Default base_seed is 0, the envs will be seeded: base_seed, base_seed+1, base_seed+2, ... etc. Returns lists of episode rewards, costs, lengths, and success flags."""
+    def evaluate_policy_parallel(self, envs: VectorEnv, num_episodes=100, deterministic=True, base_seed=0, cost_gamma: float = 1.0) -> Tuple[List[float], List[float], List[int], List[bool]]:
+        """Evaluate the policy by rolling out episodes in a vectorized environment. Default base_seed is 0, the envs will be seeded: base_seed, base_seed+1, base_seed+2, ... etc. Returns lists of episode rewards, (cost_gamma-discounted) costs, lengths, and success flags."""
         self.eval()
         deterministic_before = self.deterministic
         self.deterministic = deterministic
@@ -271,7 +271,7 @@ class ActorBase(nn.Module, abc.ABC):
             action = action if isinstance(envs.single_action_space, Box) else action.squeeze(-1)
             obs, rewards, terminateds, truncateds, infos = envs.step(action)
             episode_rew_vec += rewards
-            episode_cost_vec += infos.get('cost', np.zeros(envs.num_envs))
+            episode_cost_vec += infos.get('cost', np.zeros(envs.num_envs)) * np.power(cost_gamma, episode_len_vec)
             episode_len_vec += 1
             for i in range(num_envs):
                 if terminateds[i] or truncateds[i]:
@@ -285,13 +285,15 @@ class ActorBase(nn.Module, abc.ABC):
                         episode_successes.append(infos['final_info'][i]['is_success'])  # type: ignore
                     else:
                         episode_successes.append(False)
-                    # extract last step cost from final_info if available
+                    # extract last step cost from final_info if available (same timestep, use same discount)
+                    last_step_discount = cost_gamma ** (episode_len_vec[i] - 1)
                     if 'final_info' in infos and 'cost' in infos['final_info']:
-                        episode_cost_vec[i] += infos['final_info']['cost'][i]  # type: ignore
+                        episode_cost_vec[i] += infos['final_info']['cost'][i] * last_step_discount  # type: ignore
                     elif 'final_info' in infos and isinstance(infos['final_info'], list) and 'cost' in infos['final_info'][i]:
-                        episode_cost_vec[i] += infos['final_info'][i]['cost']  # type: ignore
+                        episode_cost_vec[i] += infos['final_info'][i]['cost'] * last_step_discount  # type: ignore
                     episode_rew_vec[i] = 0.0
                     episode_cost_vec[i] = 0.0
+                    episode_len_vec[i] = 0
             print(f"Evaluating episodes {len(episode_rewards)}/{num_episodes}", end='\r')
             if len(episode_rewards) >= num_episodes:
                 break
@@ -549,10 +551,14 @@ class PPO:
                  cmdp_mode: bool = False,
                  cost_critic: Optional[Critic] = None,  # required if cmdp_mode is True
                  cost_threshold: float = 0.0,           # must be > 0 if cmdp_mode is True
-                 constrain_undiscounted_cost: bool = False,  # if True, use undiscounted cost to update lagrange multiplier, else use discounted cost
+                 cost_gamma: float = 1.0,               # discount factor for costs. 1.0 = undiscounted cost constraint
+                 cost_critic_extra_gamma: float = 1.0,  # multiplied with cost_gamma to get the actual discount factor for cost critic TD updates. Useful for stabilising training when cost_gamma=1.
                  lagrange_lr: float = 0.01,
+                 decay_lagrange_lr: bool = False,
+                 min_lagrange_lr: float = 0.001,
+                 lagrange_init: float = 0.0,
                  lagrange_max: float = 1000.0,
-                 moving_cost_estimate_step_size: float = 0.01,  # step size for moving average estimation of cost per episode. Formula: new_estimate = (1-step_size)*old_estimate + step_size*new_observation. Whether the estimate is discounted or undiscounted depends on constrain_undiscounted_cost.
+                 moving_cost_estimate_step_size: float = 0.01,  # step size for moving average estimation of cost per episode. Formula: new_estimate = (1-step_size)*old_estimate + step_size*new_observation.
                  actor_lr: float = 3e-4,
                  critic_lr: float = 3e-4,
                  decay_lr: bool = False,
@@ -570,6 +576,7 @@ class PPO:
                  value_loss_coef: float = 0.5,
                  entropy_coef: float = 0.0,
                  decay_entropy_coef: bool = False,
+                 entropy_decay_fraction: float = 0.8,
                  normalize_advantages: bool = True,
                  clipnorm: Optional[float] = 0.5,
                  norm_rewards: bool = False,
@@ -592,10 +599,19 @@ class PPO:
             cmdp_mode: If True, enable Constrained MDP mode with cost constraints.
             cost_critic: Cost value network (required if cmdp_mode=True).
             cost_threshold: Target average cost per episode (required if cmdp_mode=True).
-            constrain_undiscounted_cost: If True, constrain undiscounted costs for Lagrange update.
-            lagrange_lr: Learning rate for Lagrange multiplier update.
+            cost_gamma: Discount factor for costs. 1.0 = undiscounted, <1.0 = discounted.
+                Used for cost stat tracking, Lagrange constraint, and (multiplied with
+                cost_critic_extra_gamma) for cost critic TD updates.
+            cost_critic_extra_gamma: Extra multiplier on cost_gamma for the cost critic
+                TD targets / GAE. Effective cost critic discount = cost_gamma * cost_critic_extra_gamma.
+                Useful when cost_gamma=1.0 but you want the cost critic to train with
+                a slight discount (e.g. 0.99) for stability.
+            lagrange_lr: Initial learning rate for Lagrange multiplier update.
+            decay_lagrange_lr: If True, anneal lagrange_lr linearly over iterations.
+            min_lagrange_lr: Minimum lagrange_lr after annealing (default 0.001).
+            lagrange_init: Initial value of the Lagrange multiplier (default 0.0).
             lagrange_max: Maximum value for Lagrange multiplier.
-            moving_cost_estimate_step_size: Step size for moving average estimation of cost per episode. Formula: new_estimate = (1-step_size) x old_estimate + step_size x new_observation. Whether the estimate is discounted or undiscounted depends on constrain_undiscounted_cost.
+            moving_cost_estimate_step_size: Step size for moving average estimation of cost per episode. Formula: new_estimate = (1-step_size) x old_estimate + step_size x new_observation.
             actor_lr: Initial learning rate for actor optimizer.
             critic_lr: Initial learning rate for critic optimizer.
             decay_lr: If True, anneal learning rates linearly over iterations.
@@ -613,6 +629,8 @@ class PPO:
             value_loss_coef: Coefficient for value loss in total objective.
             entropy_coef: Initial coefficient for entropy regularization.
             decay_entropy_coef: If True, anneal entropy coef linearly.
+            entropy_decay_fraction: Fraction of total iters over which entropy
+                decays linearly to 0 (default 0.8). The remaining iters use 0.
             normalize_advantages: If True, normalize advantages before policy update.
             clipnorm: Gradient norm clipping value (0.5 by default).
             norm_rewards: If True, normalize rewards by running std of discounted returns.
@@ -665,6 +683,7 @@ class PPO:
         self.value_loss_coef = value_loss_coef
         self.entropy_coef = entropy_coef
         self.decay_entropy_coef = decay_entropy_coef
+        self.entropy_decay_fraction = entropy_decay_fraction
         self.normalize_advantages = normalize_advantages
         self.clipnorm = clipnorm
         self.norm_rewards = norm_rewards
@@ -673,12 +692,15 @@ class PPO:
         self.training_device = training_device
         self.custom_info_keys_to_log_at_episode_end = custom_info_keys_to_log_at_episode_end
         self.cost_threshold = cost_threshold
-        self.constrain_undiscounted_cost = constrain_undiscounted_cost
+        self.cost_gamma = cost_gamma
+        self.cost_critic_gamma = cost_gamma * cost_critic_extra_gamma
         self.lagrange_lr = lagrange_lr
+        self.decay_lagrange_lr = decay_lagrange_lr
+        self.min_lagrange_lr = min_lagrange_lr
         self.lagrange_max = lagrange_max
         self.moving_cost_estimate_step_size = moving_cost_estimate_step_size
-        self.lagrange = 0.0  # Lagrange multiplier
-        self.moving_average_cost = 0.0  # moving average estimate of cost per episode, discounted or undiscounted depending on constrain_undiscounted_cost
+        self.lagrange = lagrange_init  # Lagrange multiplier
+        self.moving_average_cost = 0.0  # moving average estimate of cost per episode (discounted by cost_gamma)
         self.stats_window = stats_window
         self.verbose = verbose
 
@@ -706,15 +728,13 @@ class PPO:
             'lagranges': [],            # after each iteration
             'returns': [],              # return of each trajectory collected so far
             'discounted_returns': [],   # discounted return of each trajectory collected so far
-            'discounted_costs': [],     # discounted cost of each trajectory collected so far
             'lengths': [],              # length of each trajectory collected so far
-            'total_costs': [],          # total cost of each trajectory collected so far (if env provides this info)
+            'total_costs': [],          # cost_gamma-discounted cost of each trajectory collected so far
             'successes': [],            # success of each trajectory collected so far (if env provides this info)
             'mean_returns': [],         # mean return of latest stats_window trajectories after each iteration
             'mean_discounted_returns': [],  # mean discounted return of latest stats_window trajectories after each iteration
-            'mean_discounted_costs': [],    # mean discounted cost of latest stats_window trajectories after each iteration
             'mean_lengths': [],         # mean length of latest stats_window trajectories after each iteration
-            'mean_total_costs': [],     # mean total cost of latest stats_window trajectories after each iteration (if env provides this info)
+            'mean_total_costs': [],     # mean cost_gamma-discounted cost of latest stats_window trajectories after each iteration
             'mean_successes': [],       # mean success of latest stats_window trajectories after each iteration (if env provides this info)
         }
         self.stats['info_keys'] = {key: [] for key in (self.custom_info_keys_to_log_at_episode_end)}
@@ -768,7 +788,6 @@ class PPO:
 
         self.returns_buffer = np.zeros((N,), dtype=np.float32)
         self.discounted_returns_buffer = np.zeros((N,), dtype=np.float32)
-        self.discounted_costs_buffer = np.zeros((N,), dtype=np.float32)
         self.lengths_buffer = np.zeros((N,), dtype=np.int32)
         self.costs_total_buffer = np.zeros((N,), dtype=np.float32)
 
@@ -820,34 +839,25 @@ class PPO:
 
                 # update returns, lengths, costs
                 self.discounted_returns_buffer += r_t * np.power(self.gamma, self.lengths_buffer)
-                self.discounted_costs_buffer += c_t * np.power(self.gamma, self.lengths_buffer)
                 self.returns_buffer += r_t
+                self.costs_total_buffer += c_t * np.power(self.cost_gamma, self.lengths_buffer)
                 self.lengths_buffer += 1
-                self.costs_total_buffer += c_t
                 for i in range(self.envs.num_envs):
                     if terminated_t[i] or truncated_t[i]:
                         self.stats['returns'].append(self.returns_buffer[i])
                         self.stats['discounted_returns'].append(self.discounted_returns_buffer[i])
-                        self.stats['discounted_costs'].append(self.discounted_costs_buffer[i])
                         self.stats['lengths'].append(self.lengths_buffer[i])
                         self.stats['total_costs'].append(self.costs_total_buffer[i])
                         if self.cmdp_mode:
                             # update moving average estimate of cost per episode
-                            if self.constrain_undiscounted_cost:
-                                if (len(self.stats['total_costs']) == 1):
-                                    self.moving_average_cost = self.costs_total_buffer[i]
-                                else:
-                                    self.moving_average_cost = (1 - self.moving_cost_estimate_step_size) * self.moving_average_cost + self.moving_cost_estimate_step_size * self.costs_total_buffer[i]
+                            if (len(self.stats['total_costs']) == 1):
+                                self.moving_average_cost = self.costs_total_buffer[i]
                             else:
-                                if (len(self.stats['discounted_costs']) == 1):
-                                    self.moving_average_cost = self.discounted_costs_buffer[i]
-                                else:
-                                    self.moving_average_cost = (1 - self.moving_cost_estimate_step_size) * self.moving_average_cost + self.moving_cost_estimate_step_size * self.discounted_costs_buffer[i]
+                                self.moving_average_cost = (1 - self.moving_cost_estimate_step_size) * self.moving_average_cost + self.moving_cost_estimate_step_size * self.costs_total_buffer[i]
                         if 'final_info' in infos and 'is_success' in infos['final_info']:
                             self.stats['successes'].append(infos['final_info']['is_success'][i])  # type: ignore
                         self.returns_buffer[i] = 0.0
                         self.discounted_returns_buffer[i] = 0.0
-                        self.discounted_costs_buffer[i] = 0.0
                         self.lengths_buffer[i] = 0
                         self.costs_total_buffer[i] = 0.0
                         self.stats['total_episodes'] += 1
@@ -891,13 +901,11 @@ class PPO:
         # Also track custom info keys from env for handy metrics.
         mean_return = np.mean(self.stats['returns'][-self.stats_window:]) if len(self.stats['returns']) > 0 else 0.0
         mean_discounted_return = np.mean(self.stats['discounted_returns'][-self.stats_window:]) if len(self.stats['discounted_returns']) > 0 else 0.0
-        mean_discounted_cost = np.mean(self.stats['discounted_costs'][-self.stats_window:]) if len(self.stats['discounted_costs']) > 0 else 0.0
         mean_length = np.mean(self.stats['lengths'][-self.stats_window:]) if len(self.stats['lengths']) > 0 else 0.0
         mean_total_cost = np.mean(self.stats['total_costs'][-self.stats_window:]) if len(self.stats['total_costs']) > 0 else 0.0
         mean_success = np.mean(self.stats['successes'][-self.stats_window:]) if len(self.stats['successes']) > 0 else 0.0
         self.stats['mean_returns'].append(mean_return)
         self.stats['mean_discounted_returns'].append(mean_discounted_return)
-        self.stats['mean_discounted_costs'].append(mean_discounted_cost)
         self.stats['mean_lengths'].append(mean_length)
         self.stats['mean_total_costs'].append(mean_total_cost)
         self.stats['mean_successes'].append(mean_success)
@@ -940,11 +948,11 @@ class PPO:
                 c_cat_c_cur = c_cat_c_cur.reshape(self.envs.num_envs, self.nsteps + 1, 1)
                 c = c_cat_c_cur[:, :-1, :]  # (N, M, 1)
                 c_next = c_cat_c_cur[:, 1:, :]  # (N, M, 1)
-                cost_advantages = self.costs_buf + self.gamma * (1.0 - self.terminateds_buf) * c_next - c  # (N, M, 1)
+                cost_advantages = self.costs_buf + self.cost_critic_gamma * (1.0 - self.terminateds_buf) * c_next - c  # (N, M, 1)
                 cost_advantages *= (1.0 - self.truncateds_buf)  # zero out advantages where episodes are truncated (see comment above)
                 cost_adv_next = torch.zeros((self.envs.num_envs, 1), dtype=torch.float32, device=self.training_device)
                 for t in reversed(range(self.nsteps)):
-                    cost_advantages[:, t, :] += (1.0 - dones[:, t, :]) * self.gamma * self.lam * cost_adv_next
+                    cost_advantages[:, t, :] += (1.0 - dones[:, t, :]) * self.cost_critic_gamma * self.lam * cost_adv_next
                     cost_adv_next = cost_advantages[:, t, :]
 
                 self.cost_values_buf.data.copy_(c.data, non_blocking=True)
@@ -979,7 +987,7 @@ class PPO:
             if reward_std >= 1e-3:
                 self.rewards_buf /= reward_std  # type: ignore
             if self.cmdp_mode:
-                costs_std = np.std(self.stats['discounted_costs'])
+                costs_std = np.std(self.stats['total_costs'])
                 if costs_std > 1e-3:
                     self.costs_buf /= costs_std  # type: ignore
         obs_flat = self.obs_buf.reshape(-1, *self.obs_buf.shape[2:])
@@ -997,7 +1005,12 @@ class PPO:
         # do annealing updates of lr, entropy coef, clip ratio
         entropy_coef = self.entropy_coef
         if self.decay_entropy_coef:
-            entropy_coef = self.entropy_coef * (1.0 - float(self.stats['iterations']) / float(self.iters))
+            progress = float(self.stats['iterations']) / float(self.iters)
+            decay_end = self.entropy_decay_fraction
+            if progress >= decay_end:
+                entropy_coef = 0.0
+            else:
+                entropy_coef = self.entropy_coef * (1.0 - progress / decay_end)
         actor_lr, critic_lr = self.actor_lr, self.critic_lr
         if self.decay_lr:
             actor_lr = max(self.actor_lr * (1.0 - float(self.stats['iterations']) / float(self.iters)), self.min_lr)
@@ -1098,8 +1111,11 @@ class PPO:
         # Lagrange update:
         if self.cmdp_mode:
             #   λ <- clip(λ + lr * (mean_cost - cost_threshold), [0, lagrange_max])
-            # Switch between discounted vs undiscounted cost via `constrain_undiscounted_cost`.
-            self.lagrange = self.lagrange + self.lagrange_lr * (self.moving_average_cost - self.cost_threshold)
+            # Cost is discounted by cost_gamma (1.0 = undiscounted).
+            current_lagrange_lr = self.lagrange_lr
+            if self.decay_lagrange_lr:
+                current_lagrange_lr = max(self.lagrange_lr * (1.0 - float(self.stats['iterations']) / float(self.iters)), self.min_lagrange_lr)
+            self.lagrange = self.lagrange + current_lagrange_lr * (self.moving_average_cost - self.cost_threshold)
             self.lagrange = np.clip(self.lagrange, 0.0, self.lagrange_max)  # avoid too large lagrange multiplier
 
         # update stats
@@ -1137,16 +1153,16 @@ class PPO:
             return
         for it in range(for_iterations):
             self.train_one_iteration()
+            _cost_label = f"cost ({'cost_gamma=' + f'{self.cost_gamma}' if self.cost_gamma < 1.0 else 'undiscounted'})"
             print(
                 f"Iteration {self.stats['iterations']}/{self.iters} complete.\n"
                 f"  Total timesteps: {self.stats['total_timesteps']}\n"
                 f"  Total episodes: {self.stats['total_episodes']}\n"
                 f"  Mean ({self.stats_window}-window) return: {self.stats['mean_returns'][-1]:.6f}\n"
-                f"  Mean ({self.stats_window}-window) total cost: {self.stats['mean_total_costs'][-1]:.6f}\n"
-                f"  Mean ({self.stats_window}-window) discounted cost: {self.stats['mean_discounted_costs'][-1]:.6f}\n"
+                f"  Mean ({self.stats_window}-window) {_cost_label}: {self.stats['mean_total_costs'][-1]:.6f}\n"
                 f"  Mean ({self.stats_window}-window) length: {self.stats['mean_lengths'][-1]:.6f}\n"
                 f"  Mean ({self.stats_window}-window) success: {self.stats['mean_successes'][-1]:.6f}\n"
-                f"  Exp. Moving average cost ({'undiscounted' if self.constrain_undiscounted_cost else 'discounted'}) (alpha = {self.moving_cost_estimate_step_size}): {self.moving_average_cost:.6f}\n"
+                f"  Exp. Moving average {_cost_label} (alpha = {self.moving_cost_estimate_step_size}): {self.moving_average_cost:.6f}\n"
                 f"  Lagrange multiplier: {self.stats['lagranges'][-1]:.6f}\n"
                 f"  Total loss: {self.stats['losses'][-1]:.6f}\n"
                 f"  Actor loss: {self.stats['actor_losses'][-1]:.6f}\n"
