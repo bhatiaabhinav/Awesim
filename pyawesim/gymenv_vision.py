@@ -45,14 +45,14 @@ class AwesimEnv(gym.Env):
         follow_assist: bool = True,
         aeb_assist: bool = True,
         stop_assist: bool = True,
-        deprecated_info_display : bool = False,
+        deprecated_info_display: bool = False,
         deprecated_map: bool = False,
         npc_rogue_factor: float = 0.0,
         cam_resolution: Tuple[int, int] = DEFAULT_CAM_RESOLUTION,
         anti_aliasing: bool = False,
         reward_shaping: bool = False,
         reward_shaping_gamma: float = 0.99,
-        framestack: int = 1,
+        framestack: int = 4,
         city_width: int = DEFAULT_CITY_WIDTH,
         goal_lane: Optional[Union[int, str]] = "random",
         num_cars: int = DEFAULT_NUM_CARS,
@@ -76,6 +76,33 @@ class AwesimEnv(gym.Env):
         env_index: int = 0,
         verbose: bool = False,
     ) -> None:
+        """
+        Initialize the AwesimEnv with simulation and agent configuration.
+
+        Args:
+            cam_resolution (Tuple[int, int]): Resolution of the agent's camera (width, height).
+            city_width (int): Width of the city map in meters.
+            goal_lane (Optional[int]): Target lane ID to reach, or None for general driving.
+            num_cars (int): Number of vehicles in the simulation.
+            decision_interval (float): Time interval between agent actions (seconds).
+            sim_duration (float): Maximum duration of an episode (seconds).
+            appointment_time (float): Time in seconds by which the agent should reach the goal lane, otherwise lost wage cost will start accumulating.
+            time_penalty_per_second (float): Penalty per second for time spent.
+            goal_reward (float): Reward for reaching the goal lane.
+            crash_penalty (float): Penalty for crashing.
+            cost_gas_per_gallon (float): Cost of gas per gallon ($).
+            cost_lost_wage_per_hour (float): Cost of lost wages per hour ($).
+            may_lose_entire_day_wage (bool): If True, lose entire 8-hour workday wage if not reached by the end of sim_duration.
+            cost_car (float): Cost of the car ($), applied on total loss in a crash.
+            init_fuel_gallons (float): Initial fuel level in gallons.
+            deterministic_actions (bool): If True, actions to select follow-mode vs stop-mode and turn/merge signals are deterministic instead of bernoulli-sampled.
+            synchronized (bool): If True, synchronize simulation for rendering.
+            synchronized_sim_speedup (float): Speedup factor for synchronized simulation.
+            should_render (bool): If True, connect to rendering server.
+            render_server_ip (str): IP address of the rendering server.
+            env_index (int): Index for environment instance (used for seeding).
+            verbose (bool): If True, print action and event information.
+        """
         super().__init__()
         if decision_interval <= 0:
             raise ValueError("decision_interval must be positive")
@@ -87,7 +114,6 @@ class AwesimEnv(gym.Env):
         self.aeb_assist = aeb_assist
         self.stop_assist = stop_assist
         self.deprecated_info_display = deprecated_info_display
-        assert deprecated_info_display == False, "deprecated_info_display=True is not supported anymore"
         self.deprecated_map = deprecated_map
         self.npc_rogue_factor = npc_rogue_factor
         self.cam_resolution = cam_resolution
@@ -95,7 +121,6 @@ class AwesimEnv(gym.Env):
         self.reward_shaping = reward_shaping
         self.reward_shaping_gamma = reward_shaping_gamma
         self.framestack = framestack
-        assert framestack == 1, "framestack > 1 is not supported anymore as we are not using image observations and the state representation is markovian and fully observable"
         self.goal_lane = goal_lane
         self.goal_select_random = goal_lane == "random"
         self.city_width = city_width
@@ -127,12 +152,11 @@ class AwesimEnv(gym.Env):
             self.sim, self.city_width, self.num_cars, 0.02, A.Monday_8_AM, A.WEATHER_SUNNY, self.deprecated_map
         )  # Set up city with fixed time (8 AM) and sunny weather
         A.sim_set_agent_enabled(self.sim, True)  # Enable agent control
+        if self.use_das:
+            A.sim_set_agent_driving_assistant_enabled(self.sim, True)  # Enable ADAS
         self.agent = A.sim_get_agent_car(self.sim)  # Get agent vehicle
         if self.verbose:
             print(f"Agent car ID: {self.agent.id}")
-        if self.use_das:
-            A.sim_set_agent_driving_assistant_enabled(self.sim, True)  # Enable ADAS
-            self.das = A.sim_get_driving_assistant(self.sim, self.agent.id)
         self.cams = [A.rgbcam_malloc(A.coordinates_create(0, 0), 0, 0, cam_resolution[0], cam_resolution[1], A.from_degrees(0), A.meters(0)) for _ in range(7)]  # Initialize 7 cameras
         if self.anti_aliasing:
             for cam in self.cams:
@@ -177,17 +201,12 @@ class AwesimEnv(gym.Env):
                 low=-1, high=1, shape=(2,), dtype=np.float32
             )
 
-        # Define observation space. 
-        # For all cars: is car, dimensions, capabilities, position, speed, orientation, indicator lane, indicator turn, fuel
-        # Driving assistant: is das, state vars
-        # Sim: time
-        # Map: for all intersections: is intersection,center, state, fcfs prioritized car positions
-        
-        obs = self._get_observation()
+        # Define observation space. 9 images: 7 cameras (front main, front wide, front-left, front-right, rear, rear-left, rear-right), one minimap and one image displaying various vehicle, adas and environment state variables.
+        # The images are stacked along the channel dimension for each camera, and then stacked along a new axis for each camera.
+        # Final shape: (9, 3 * framestack, height, width)
         self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=obs.shape, dtype=np.float32 # shape: (num_entities, feature_dim)
+            low=0, high=255, shape=(9, 3 * framestack, cam_resolution[1], cam_resolution[0]), dtype=np.uint8
         )
-
 
     def sample_random_goal(self):
         map = A.sim_get_map(self.sim)
@@ -198,207 +217,6 @@ class AwesimEnv(gym.Env):
                 break
         self.goal_lane = random_lane.id
         self.goal_lane_midpoint = A.map_get_lane(A.sim_get_map(self.sim), self.goal_lane).mid_point if self.goal_lane is not None else None
-
-    def _get_state(self) -> np.ndarray:
-        cars_matrix = self._get_cars_matrix()               # (max_cars, feature_dim_car)
-        das_matrix = self._get_das_matrix()                 # (1, feature_dim_das)
-        sim_matrix = self._get_sim_matrix()                 # (1, feature_dim_sim)
-        intersections_matrix = self._get_intersections_matrix()                 # (max_intersections, feature_dim_map)
-
-        feature_dim = max(cars_matrix.shape[1], das_matrix.shape[1], sim_matrix.shape[1], intersections_matrix.shape[1])
-
-        # pad others:
-        def pad_matrix(matrix, target_feature_dim):
-            current_feature_dim = matrix.shape[1]
-            if current_feature_dim < target_feature_dim:
-                padding = np.zeros((matrix.shape[0], target_feature_dim - current_feature_dim), dtype=matrix.dtype)
-                matrix = np.concatenate([matrix, padding], axis=1)
-            return matrix
-
-        cars_matrix = pad_matrix(cars_matrix, feature_dim)
-        das_matrix = pad_matrix(das_matrix, feature_dim)
-        sim_matrix = pad_matrix(sim_matrix, feature_dim)
-        intersections_matrix = pad_matrix(intersections_matrix, feature_dim)
-
-        state = np.concatenate([cars_matrix, das_matrix, sim_matrix, intersections_matrix], axis=0)  # (num_entities, feature_dim)
-        return state
-
-    def _get_car_state(self, car_id) -> np.ndarray:
-        car = A.sim_get_car(self.sim, car_id)
-        if car is not None:
-            is_car = True
-            is_das = False
-            is_sim = False
-            is_intersection = False
-            position_x = car.center.x
-            position_y = car.center.y
-            orientation_sin = np.sin(car.orientation)
-            orientation_cos = np.cos(car.orientation)
-            speed = car.speed
-            acc = car.acceleration
-            width = car.dimensions.x
-            length = car.dimensions.y
-            merge_ind_left = car.indicator_lane == A.INDICATOR_LEFT
-            merge_ind_none = car.indicator_lane == A.INDICATOR_NONE
-            merge_ind_right = car.indicator_lane == A.INDICATOR_RIGHT
-            turn_ind_left = car.indicator_turn == A.INDICATOR_LEFT
-            turn_ind_none = car.indicator_turn == A.INDICATOR_NONE
-            turn_ind_right = car.indicator_turn == A.INDICATOR_RIGHT
-            fuel_level = min(A.car_get_fuel_level(car), 50.0)  # cap at 50 liters
-        else:
-            # all zeros for non-existent cars
-            is_car = False
-            is_das = False
-            is_sim = False
-            is_intersection = False
-            position_x = 0.0
-            position_y = 0.0
-            orientation_sin = 0.0
-            orientation_cos = 0.0
-            speed = 0.0
-            acc = 0.0
-            width = 0.0
-            length = 0.0
-            merge_ind_left = False
-            merge_ind_none = False
-            merge_ind_right = False
-            turn_ind_left = False
-            turn_ind_none = False
-            turn_ind_right = False
-            fuel_level = 0.0
-
-        # normalize:
-        position_x /= self.city_width
-        position_y /= self.city_width
-        width /= 2.43       # (8 ft in meters)
-        length /= 6.096     # (20 ft in meters)
-        speed /= 44.7        # max speed ~100 mph in m/s
-        acc /= 12.0         # max acceleration
-        fuel_level /= 50.0  # max fuel level
-
-        state_vector = np.array([
-            float(is_car), float(is_das), float(is_sim), float(is_intersection),
-            position_x, position_y, orientation_sin, orientation_cos, speed, acc,
-            width, length,
-            float(merge_ind_left), float(merge_ind_none), float(merge_ind_right),
-            float(turn_ind_left), float(turn_ind_none), float(turn_ind_right),
-            fuel_level,
-        ], dtype=np.float32)
-
-        return state_vector
-
-    def _get_cars_matrix(self):
-        max_cars = self.num_cars
-        car_states = [self._get_car_state(car_id) for car_id in range(max_cars)]
-        cars_matrix = np.stack(car_states, axis=0)  # (max_cars, feature_dim)
-        return cars_matrix
-
-    def _get_das_matrix(self) -> np.ndarray:
-        if self.das is not None:
-            is_car = False
-            is_das = True
-            is_sim = False
-            is_intersection = False
-            speed_target = self.das.speed_target
-            thw = self.das.thw
-            should_stop_at_intersection = self.das.should_stop_at_intersection
-            aeb_in_progress = self.das.aeb_in_progress
-        else:
-            is_car = False
-            is_das = False
-            is_sim = False
-            is_intersection = False
-            speed_target = 0.0
-            thw = 0.0
-            should_stop_at_intersection = False
-            aeb_in_progress = False
-
-        # normalize
-        speed_target /= 44.7        # max speed ~100 mph in m/s
-        thw /= self.MAX_THW         # max thw
-
-        state_vector = np.array([
-            float(is_car), float(is_das), float(is_sim), float(is_intersection),
-            speed_target, thw,
-            float(should_stop_at_intersection), float(aeb_in_progress),
-        ], dtype=np.float32)
-
-        state_matrix = state_vector[np.newaxis, :]  # (1, feature_dim)
-
-        return state_matrix
-
-    def _get_sim_matrix(self) -> np.ndarray:
-        is_car = False
-        is_das = False
-        is_sim = True
-        is_intersection = False
-        t = A.sim_get_time(self.sim)
-        goal_lane_x = 0.0 if self.goal_lane_midpoint is None else self.goal_lane_midpoint.x
-        goal_lane_y = 0.0 if self.goal_lane_midpoint is None else self.goal_lane_midpoint.y
-
-        # normalize
-        t /= 3600.0  # seconds in a day
-        goal_lane_x /= self.city_width
-        goal_lane_y /= self.city_width
-
-        state_vector = np.array([
-            float(is_car), float(is_das), float(is_sim), float(is_intersection),
-            t,
-            goal_lane_x, goal_lane_y,
-        ], dtype=np.float32)
-
-        state_matrix = state_vector[np.newaxis, :]  # (1, feature_dim)
-
-        return state_matrix
-
-    def _get_intersection_state(self, intersection_id) -> np.ndarray:
-        intersection = A.map_get_intersection(A.sim_get_map(self.sim), intersection_id)
-        is_car = False
-        is_das = False
-        is_sim = False
-        is_intersection = True
-        position_x = intersection.center.x
-        position_y = intersection.center.y
-        state_is_NS_green_EW_red = intersection.state == A.NS_GREEN_EW_RED
-        state_is_NS_YELLOW_EW_RED = intersection.state == A.NS_YELLOW_EW_RED
-        state_is_ALL_RED_BEFORE_EW_GREEN = intersection.state == A.ALL_RED_BEFORE_EW_GREEN
-        state_is_NS_RED_EW_GREEN = intersection.state == A.NS_RED_EW_GREEN
-        state_is_EW_YELLOW_NS_RED = intersection.state == A.EW_YELLOW_NS_RED
-        state_is_ALL_RED_BEFORE_NS_GREEN = intersection.state == A.ALL_RED_BEFORE_NS_GREEN
-        state_is_FOUR_WAY_STOP = intersection.state == A.FOUR_WAY_STOP
-        state_is_T_JUNC_NS = intersection.state == A.T_JUNC_NS
-        state_is_T_JUNC_EW = intersection.state == A.T_JUNC_EW
-        fcfs_car1 = A.sim_get_car(self.sim, A.intersection_get_car_at_stop_sign_fcfs_queue(intersection, 0))  # placeholder for actual position
-        if fcfs_car1 is not None:
-            fcfs_car1_pos_x = fcfs_car1.center.x
-            fcfs_car1_pos_y = fcfs_car1.center.y
-        else:
-            fcfs_car1_pos_x = 0.0
-            fcfs_car1_pos_y = 0.0
-
-        # normalize
-        position_x /= self.city_width
-        position_y /= self.city_width
-        fcfs_car1_pos_x /= self.city_width
-        fcfs_car1_pos_y /= self.city_width
-
-        state_vector = np.array([
-            float(is_car), float(is_das), float(is_sim), float(is_intersection),
-            position_x, position_y,
-            float(state_is_NS_green_EW_red), float(state_is_NS_YELLOW_EW_RED), float(state_is_ALL_RED_BEFORE_EW_GREEN), float(state_is_NS_RED_EW_GREEN), float(state_is_EW_YELLOW_NS_RED), float(state_is_ALL_RED_BEFORE_NS_GREEN),
-            float(state_is_FOUR_WAY_STOP), float(state_is_T_JUNC_NS), float(state_is_T_JUNC_EW),
-            fcfs_car1_pos_x, fcfs_car1_pos_y,
-        ], dtype=np.float32)
-
-        return state_vector
-
-    def _get_intersections_matrix(self) -> np.ndarray:
-        map = A.sim_get_map(self.sim)
-        max_intersections = A.map_get_num_intersections(map)
-        intersection_states = [self._get_intersection_state(intersection_id) for intersection_id in range(max_intersections)]
-        map_matrix = np.stack(intersection_states, axis=0)  # (max_intersections, feature_dim)
-        return map_matrix
-
 
     def _get_info_for_info_display(self) -> list[Tuple[float, A.RGB]]:
 
@@ -461,7 +279,63 @@ class AwesimEnv(gym.Env):
             ]
 
         return infos_and_colors
-    
+
+    def _get_info_for_info_display_deprecated(self) -> list[Tuple[float, A.RGB]]:
+
+        if self.use_das:
+            A.situational_awareness_build(self.sim, self.agent.id)
+            das = A.sim_get_driving_assistant(self.sim, self.agent.id)
+            sit = A.sim_get_situational_awareness(self.sim, self.agent.id)
+
+            # car state
+            fuel = A.car_get_fuel_level(self.agent) / self.OBSERVATION_NORMALIZATION["fuel"]
+            speed = A.car_get_speed(self.agent) / self.OBSERVATION_NORMALIZATION["speed"]
+            accel = A.car_get_acceleration(self.agent) / self.OBSERVATION_NORMALIZATION["acceleration"]
+            ind_turn_left = A.car_get_indicator_turn(self.agent) == A.INDICATOR_LEFT
+            ind_merge_left = A.car_get_indicator_lane(self.agent) == A.INDICATOR_LEFT
+            ind_left = ind_turn_left or ind_merge_left
+            ind_turn_right = A.car_get_indicator_turn(self.agent) == A.INDICATOR_RIGHT
+            ind_merge_right = A.car_get_indicator_lane(self.agent) == A.INDICATOR_RIGHT
+            ind_right = ind_turn_right or ind_merge_right
+
+            # ADAS state
+            speed_target = das.speed_target / self.OBSERVATION_NORMALIZATION["speed"]
+            thw_target = das.thw / self.MAX_THW
+            merge_intent_left = das.merge_intent == A.INDICATOR_LEFT
+            merge_intent_right = das.merge_intent == A.INDICATOR_RIGHT
+            turn_intent_left = das.turn_intent == A.INDICATOR_LEFT
+            turn_intent_right = das.turn_intent == A.INDICATOR_RIGHT
+            intent_left = merge_intent_left or turn_intent_left
+            intent_right = merge_intent_right or turn_intent_right
+            should_stop_at_intersection = das.should_stop_at_intersection
+            aeb_in_progress = das.aeb_in_progress
+
+            # environment state
+            t = A.sim_get_time(self.sim) / self.OBSERVATION_NORMALIZATION["time"]
+            speed_limit = sit.lane.speed_limit / self.OBSERVATION_NORMALIZATION["speed"]
+
+            infos_and_colors = [
+                (fuel, A.RGB_WHITE), (abs(speed), A.RGB_BLUE if speed >= 0 else A.RGB_YELLOW), (abs(accel), A.RGB_GREEN if accel >= 0 else A.RGB_RED),
+                (float(ind_left), A.RGB_RED if ind_turn_left else (A.RGB_ORANGE if ind_merge_left else A.RGB_WHITE)), (float(ind_right), A.RGB_RED if ind_turn_right else (A.RGB_ORANGE if ind_merge_right else A.RGB_WHITE)), (abs(speed_target), A.RGB_MAGENTA if speed_target >= 0 else A.RGB_CYAN),
+                (thw_target, A.RGB_MAGENTA), (float(intent_left), A.RGB_RED if turn_intent_left else (A.RGB_ORANGE if merge_intent_left else A.RGB_WHITE)), (float(intent_right), A.RGB_RED if turn_intent_right else (A.RGB_ORANGE if merge_intent_right else A.RGB_WHITE)),
+                (float(should_stop_at_intersection), A.RGB_CYAN), (float(aeb_in_progress), A.RGB_RED), (t, A.RGB_WHITE), (speed_limit, A.RGB_WHITE),
+            ]
+        else:
+            # car state
+            fuel = A.car_get_fuel_level(self.agent) / self.OBSERVATION_NORMALIZATION["fuel"]
+            speed = A.car_get_speed(self.agent) / self.OBSERVATION_NORMALIZATION["speed"]
+
+            # environment state
+            t = A.sim_get_time(self.sim) / self.OBSERVATION_NORMALIZATION["time"]
+
+            infos_and_colors = [
+                (fuel, A.RGB_RED if fuel < A.from_gallons(1) else A.RGB_GREEN),
+                (abs(speed), A.RGB_BLUE if speed >= 0 else A.RGB_YELLOW),
+                (t, A.RGB_WHITE),
+            ]
+
+        return infos_and_colors
+
     def _get_obs_as_list_of_images(self) -> list[np.ndarray]:
         # ensure cams are attached to the agent
         A.rgbcam_attach_to_car(self.cams[0], self.agent, A.CAR_CAMERA_MAIN_FORWARD)
@@ -483,7 +357,7 @@ class AwesimEnv(gym.Env):
         A.minimap_render(self.minimap, self.sim)
 
         # info display render
-        infos_and_colors = self._get_info_for_info_display()
+        infos_and_colors = self._get_info_for_info_display() if not self.deprecated_info_display else self._get_info_for_info_display_deprecated()
         for i, (info, color) in enumerate(infos_and_colors):
             A.infos_display_set_info(self.infos_display, i, info)
             A.infos_display_set_info_color(self.infos_display, i, color)
@@ -502,6 +376,11 @@ class AwesimEnv(gym.Env):
         ]
 
     def _get_opt_dist_to_goal(self) -> float:
+        # cur_pos = A.car_get_center(self.agent)
+        # goal_pos = self.goal_lane_midpoint
+        # if goal_pos is None:
+        #     return 0.0
+        # return abs(cur_pos.x - goal_pos.x) + abs(cur_pos.y - goal_pos.y)
         self_lane = A.car_get_lane(self.agent, A.sim_get_map(self.sim))
         goal_lane = A.map_get_lane(A.sim_get_map(self.sim), self.goal_lane)
         A.path_planner_compute_shortest_path(self.path_planner, self_lane, A.car_get_lane_progress_meters(self.agent), goal_lane, 0.5 * A.lane_get_length(goal_lane))
@@ -510,7 +389,24 @@ class AwesimEnv(gym.Env):
         return dist
 
     def _get_observation(self) -> np.ndarray:
-        return self._get_state()
+        # self.frame_buffer contains `framestack` elements.
+        # Each element is a list of 9 arrays of shape (3, H, W).
+        # We want (9, 3 * framestack, H, W).
+
+        buffer_list = list(self.frame_buffer)
+        num_cams = 9
+
+        final_obs = []
+        for cam_idx in range(num_cams):
+            # Collect frames for this camera
+            cam_frames = [step_obs[cam_idx]
+                          for step_obs in buffer_list]  # List of (3, H, W)
+            # Concatenate along channel dimension (axis 0)
+            stacked_cam = np.concatenate(
+                cam_frames, axis=0)  # (3 * framestack, H, W)
+            final_obs.append(stacked_cam)
+
+        return np.stack(final_obs, axis=0)  # (9, 3 * framestack, H, W)
 
     def _get_reward(self) -> float:
         """
@@ -580,6 +476,9 @@ class AwesimEnv(gym.Env):
             A.sim_connect_to_render_server(self.sim, self.render_server_ip, 4242)
 
         A.sim_set_agent_enabled(self.sim, True)
+        # Initialize frame buffer
+        self.frame_buffer = deque(maxlen=self.framestack)
+
         self.agent = A.sim_get_agent_car(self.sim)
         if self.use_das:
             # Enable ADAS features
@@ -602,6 +501,15 @@ class AwesimEnv(gym.Env):
 
         self.steps = 0
         self.fuel_drive_beginning = A.car_get_fuel_level(self.agent)
+
+        # Capture initial observation
+        initial_frames = self._get_obs_as_list_of_images()
+        processed_frames = [f.transpose(2, 0, 1).copy()
+                            for f in initial_frames]  # (3, H, W)
+
+        # Fill with initial frame
+        for _ in range(self.framestack):
+            self.frame_buffer.append(processed_frames)
 
         return self._get_observation(), {}
 
@@ -779,6 +687,12 @@ class AwesimEnv(gym.Env):
             delta_time = min(self.TERMINATION_CHECK_INTERVAL, self.decision_interval - elapsed_time)    # make sure you don't end up simulating more than decision_interval if it is not a multiple of TERMINATION_CHECK_INTERVAL
             t0 = A.sim_get_time(self.sim)
             A.simulate(self.sim, delta_time)  # Advance simulation
+
+            # Capture observation for framestacking
+            current_frames = self._get_obs_as_list_of_images()
+            processed_frames = [f.transpose(2, 0, 1).copy()
+                                for f in current_frames]
+            self.frame_buffer.append(processed_frames)
 
             delta_time = A.sim_get_time(self.sim) - t0  # true delta time (since it is not guaranteed that sim would have simulated exactly for delta_time if it is not a multiple of dt.)
             elapsed_time = A.sim_get_time(self.sim) - sim_time_initial

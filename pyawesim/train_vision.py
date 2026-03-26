@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import wandb
-from gymenv import AwesimEnv
+from gymenv_vision import AwesimEnv
 from gymnasium.spaces import Box
 from gymnasium.vector import SyncVectorEnv, AsyncVectorEnv, AutoresetMode, VectorEnv
 from ppo import Actor, ActorBase, Critic, PPO

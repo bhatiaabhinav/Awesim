@@ -4,10 +4,10 @@ import sys
 import gymnasium
 import numpy as np
 import torch
-from gymenv import AwesimEnv
+from gymenv import AwesimCityEnv
 from ppo import Actor
 from gymnasium.vector import SyncVectorEnv, AsyncVectorEnv, AutoresetMode
-from train import ModelArchitecture
+from new_train_attn import ModelArchitecture
 
 TEST_CONFIG = {
     "speedup": 8.0,                     # simulation speedup factor
@@ -19,29 +19,24 @@ TEST_CONFIG = {
     "episodes": 100,                    # number of episodes to run for evaluation
     "video_interval": 10,               # interval for video recording (in episodes), None to disable
 }
-from train import ENV_CONFIG
-ENV_CONFIG.update({
-    "deterministic_actions": True,
-})
+from new_train_attn import ENV_CONFIG
 VEC_ENV_CONFIG = {
     "n_envs": 16,
     "async": True,
 }
-from train import NET_CONFIG
-from train import POLICY_CONFIG
+from new_train_attn import NET_CONFIG
+from new_train_attn import POLICY_CONFIG
 POLICY_CONFIG.update({
     "deterministic": True,
 })
 
 
-def make_env(env_index: int = 0) -> AwesimEnv:
+def make_env(env_index: int = 0) -> AwesimCityEnv:
     """Create an AwesimEnv instance with specified configuration."""
-    return AwesimEnv(**ENV_CONFIG, env_index=env_index)  # type: ignore
+    return AwesimCityEnv(**ENV_CONFIG, env_index=env_index)  # type: ignore
 
 
 def test_model(model_path) -> None:
-    NET_CONFIG["c_in"] = ENV_CONFIG["framestack"] * 3
-
     env = make_env(0)
     env.should_render = TEST_CONFIG["render"]
     env.synchronized = TEST_CONFIG["synchronized"]
@@ -49,10 +44,13 @@ def test_model(model_path) -> None:
     env.render_server_ip = TEST_CONFIG["render_server_ip"]
     env.verbose = TEST_CONFIG["verbose"]
 
-    action_dim = env.action_space.shape[0]     # type: ignore
-    actor_dim_out = action_dim * 2 if POLICY_CONFIG["state_dependent_std"] else action_dim
-    actor_model = ModelArchitecture(dim_out=actor_dim_out, **NET_CONFIG)
-    actor = Actor(actor_model, env.observation_space, env.action_space, deterministic=POLICY_CONFIG["deterministic"], norm_obs=POLICY_CONFIG["norm_obs"], state_dependent_std=POLICY_CONFIG["state_dependent_std"])    # type: ignore
+    obs_space: Box = env.observation_space       # type: ignore
+    print(f"Observation space: {obs_space}")
+    action_space: Discrete = env.action_space      # type: ignore
+    print(f"Action space: {action_space}")
+    print(f"Action meanings: {env.action_meanings}")
+    actor_model = ModelArchitecture(env, dim_out=int(action_space.n), **NET_CONFIG)
+    actor = Actor(actor_model, env.observation_space, env.action_space, deterministic=POLICY_CONFIG["deterministic"], norm_obs=POLICY_CONFIG["norm_obs"])    # type: ignore
 
     # Load the model
     print(f"Loading model from {model_path}")
@@ -109,7 +107,7 @@ if __name__ == "__main__":
                 print(f"\033[93mWarning: key {k} not found in any config, ignoring the override.\033[0m")
 
     if len(sys.argv) < 2 or "=" in sys.argv[1]:
-        print("Usage: python test.py <model_path> [key=value ...]")
+        print("Usage: python test_attn.py <model_path> [key=value ...]")
         sys.exit(1)
 
     model_path = sys.argv[1]
