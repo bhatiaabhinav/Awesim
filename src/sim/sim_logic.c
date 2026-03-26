@@ -1,7 +1,6 @@
 #include "sim.h"
 #include "logging.h"
 #include "ai.h"
-#include "bad.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>

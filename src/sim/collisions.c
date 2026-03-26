@@ -3,7 +3,6 @@
 #include <stdio.h>
 #include "sim.h"
 #include "car.h"
-#include "bad.h"
 #include "logging.h"
 
 static bool collisions_valid_index(CarId car_id) {

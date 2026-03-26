@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
-#include "bad.h"
 #include "logging.h"
+#include "sim.h"
 
 static bool traffic_violations_valid_car_id(CarId car_id) {
     return car_id >= 0 && car_id < MAX_CARS_IN_SIMULATION;
