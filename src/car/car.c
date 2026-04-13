@@ -41,8 +41,8 @@ void car_init(Car* car, Dimensions3D dimensions, CarCapabilities capabilities, L
     car->auto_turn_off_indicators = true; // Default to true, can be changed later
     car->prev_lane_id = ID_NULL; // Initialize previous lane ID to NULL
     car->recent_forward_movement = 0.0; // Initialize recent forward movement to 0
-    car->lowest_speed_in_stop_zone = INFINITY; // No stop zone visit yet
-    car->lowest_speed_post_stop_line_before_lane_end = INFINITY; // No stop line crossing yet
+    car->lowest_speed_in_stop_zone = __FLT_MAX__; // No stop zone visit yet
+    car->lowest_speed_post_stop_line_before_lane_end = __FLT_MAX__; // No stop line crossing yet
     reset_stats(car);
 }
 

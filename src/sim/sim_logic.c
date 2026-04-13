@@ -77,8 +77,8 @@ static void car_handle_movement_or_lane_change(Simulation* sim, Car* car, Lane* 
     lane_remove_car(current_lane, car, sim);
     lane_add_car(new_lane, car, sim);
     car_set_lane(car, new_lane);
-    car->lowest_speed_in_stop_zone = INFINITY; // Reset stop zone tracking on lane change
-    car->lowest_speed_post_stop_line_before_lane_end = INFINITY; // Reset post stop line tracking on lane change
+    car->lowest_speed_in_stop_zone = __FLT_MAX__; // Reset stop zone tracking on lane change
+    car->lowest_speed_post_stop_line_before_lane_end = __FLT_MAX__; // Reset post stop line tracking on lane change
 }
 
 static void sim_update_car(Simulation* self, CarId car_id, Seconds dt) {

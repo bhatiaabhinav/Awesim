@@ -38,11 +38,11 @@ static int _bsa_call_count = 0;
 
 static void _find_vehicle_behind_and_at_and_ahead_of_point(Map* map, Car* all_cars, const Lane* lane, Meters point, Meters at_buffer_half, Car** car_behind_out, Meters* car_behind_distance_out, Car** car_at_out, Meters* car_at_distance_out, Car** car_ahead_out, Meters* car_ahead_distance_out, bool consider_prev_lanes, bool consider_next_lanes) {
     *car_behind_out = NULL;
-    *car_behind_distance_out = INFINITY;
+    *car_behind_distance_out = __FLT_MAX__;
     *car_at_out = NULL;
-    *car_at_distance_out = INFINITY;
+    *car_at_distance_out = __FLT_MAX__;
     *car_ahead_out = NULL;
-    *car_ahead_distance_out = INFINITY;
+    *car_ahead_distance_out = __FLT_MAX__;
 
     if (!lane) return;
 
@@ -86,12 +86,12 @@ static void _find_vehicle_behind_and_at_and_ahead_of_point(Map* map, Car* all_ca
             Lane* left_lane = lane_get_connection_left(lane, map);
             Lane* right_lane = lane_get_connection_right(lane, map);
             if (left_lane && right_lane) {
-                Meters dist_left = INFINITY;
+                Meters dist_left = __FLT_MAX__;
                 if (left_lane->num_cars > 0) {
                     Car* car = &all_cars[left_lane->cars_ids[left_lane->num_cars - 1]];
                     dist_left = car->lane_progress_meters - car->dimensions.y * 0.5;
                 }
-                Meters dist_right = INFINITY;
+                Meters dist_right = __FLT_MAX__;
                 if (right_lane->num_cars > 0) {
                     Car* car = &all_cars[right_lane->cars_ids[right_lane->num_cars - 1]];
                     dist_right = car->lane_progress_meters - car->dimensions.y * 0.5;
@@ -128,12 +128,12 @@ static void _find_vehicle_behind_and_at_and_ahead_of_point(Map* map, Car* all_ca
             Lane* left_lane = lane_get_connection_incoming_left(lane, map);
             Lane* right_lane = lane_get_connection_incoming_right(lane, map);
             if (left_lane && right_lane) {
-                Meters dist_left = INFINITY;
+                Meters dist_left = __FLT_MAX__;
                 if (left_lane->num_cars > 0) {
                     Car* car = &all_cars[left_lane->cars_ids[0]];
                     dist_left = left_lane->length - car->lane_progress_meters - car->dimensions.y * 0.5;
                 }
-                Meters dist_right = INFINITY;
+                Meters dist_right = __FLT_MAX__;
                 if (right_lane->num_cars > 0) {
                     Car* car = &all_cars[right_lane->cars_ids[0]];
                     dist_right = right_lane->length - car->lane_progress_meters - car->dimensions.y * 0.5;
@@ -452,10 +452,10 @@ void situational_awareness_build(Simulation* sim, CarId car_id) {
 
     // start with what happens on the current lane:
     Car* car_ahead = NULL;
-    Meters car_ahead_distance = INFINITY;
+    Meters car_ahead_distance = __FLT_MAX__;
     Car* car_behind = NULL;
-    Meters car_behind_distance = INFINITY;
-    Meters car_at_distance = INFINITY;
+    Meters car_behind_distance = __FLT_MAX__;
+    Meters car_at_distance = __FLT_MAX__;
     Car* car_at = NULL;
     _find_vehicle_behind_and_at_and_ahead_of_point(map, all_cars, lane, lane_progress_m, car_half_length_for_buffer, &car_behind, &car_behind_distance, &car_at, &car_at_distance, &car_ahead, &car_ahead_distance, true, true);
     situation->nearby_vehicles.ahead[INDICATOR_NONE] = car_ahead;
@@ -468,11 +468,11 @@ void situational_awareness_build(Simulation* sim, CarId car_id) {
     // what happens if we switch lane left:
     const Lane* target_lane_left = situation->lane_target_for_indicator[INDICATOR_LEFT];
     Car* car_ahead_left = NULL;
-    Meters car_ahead_distance_left = INFINITY;
+    Meters car_ahead_distance_left = __FLT_MAX__;
     Car* car_behind_left = NULL;
-    Meters car_behind_distance_left = INFINITY;
+    Meters car_behind_distance_left = __FLT_MAX__;
     Car* car_at_left = NULL;
-    Meters car_at_distance_left = INFINITY;
+    Meters car_at_distance_left = __FLT_MAX__;
     // Inline hypothetical position: avoid redundant merge/exit lane lookups
     Meters hypothetical_position;
     if (!target_lane_left) {
@@ -492,11 +492,11 @@ void situational_awareness_build(Simulation* sim, CarId car_id) {
     // what happens if we switch lane right:
     const Lane* target_lane_right = situation->lane_target_for_indicator[INDICATOR_RIGHT];
     Car* car_ahead_right = NULL;
-    Meters car_ahead_distance_right = INFINITY;
+    Meters car_ahead_distance_right = __FLT_MAX__;
     Car* car_behind_right = NULL;
-    Meters car_behind_distance_right = INFINITY;
+    Meters car_behind_distance_right = __FLT_MAX__;
     Car* car_at_right = NULL;
-    Meters car_at_distance_right = INFINITY;
+    Meters car_at_distance_right = __FLT_MAX__;
     if (!target_lane_right) {
         hypothetical_position = 0;
     } else if (target_lane_right == situation->merges_into_lane) {
@@ -531,8 +531,8 @@ void situational_awareness_build(Simulation* sim, CarId car_id) {
                 Car* car_left = (lane_next_left->num_cars > 0) ? &all_cars[lane_next_left->cars_ids[lane_next_left->num_cars - 1]] : NULL;
                 Car* car_right = (lane_next_right->num_cars > 0) ? &all_cars[lane_next_right->cars_ids[lane_next_right->num_cars - 1]] : NULL;
                 
-                Meters dist_left = car_left ? car_left->lane_progress_meters : INFINITY;
-                Meters dist_right = car_right ? car_right->lane_progress_meters : INFINITY;
+                Meters dist_left = car_left ? car_left->lane_progress_meters : __FLT_MAX__;
+                Meters dist_right = car_right ? car_right->lane_progress_meters : __FLT_MAX__;
 
                 lane_next = (dist_left < dist_right) ? lane_next_left : lane_next_right;
             } else if (lane_next_left) {
@@ -559,8 +559,8 @@ void situational_awareness_build(Simulation* sim, CarId car_id) {
                 Car* car_left = (lane_prev_left->num_cars > 0) ? &all_cars[lane_prev_left->cars_ids[0]] : NULL;
                 Car* car_right = (lane_prev_right->num_cars > 0) ? &all_cars[lane_prev_right->cars_ids[0]] : NULL;
                 
-                Meters dist_left = car_left ? (lane_progress_m + (lane_prev_left->length - car_left->lane_progress_meters)) : INFINITY;
-                Meters dist_right = car_right ? (lane_progress_m + (lane_prev_right->length - car_right->lane_progress_meters)) : INFINITY;
+                Meters dist_left = car_left ? (lane_progress_m + (lane_prev_left->length - car_left->lane_progress_meters)) : __FLT_MAX__;
+                Meters dist_right = car_right ? (lane_progress_m + (lane_prev_right->length - car_right->lane_progress_meters)) : __FLT_MAX__;
 
                 lane_prev = (dist_left < dist_right) ? lane_prev_left : lane_prev_right;
             } else if (lane_prev_left) {

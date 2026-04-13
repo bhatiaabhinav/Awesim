@@ -148,8 +148,8 @@ struct Car {
     Meters recent_forward_movement;
 
     // stop zone tracking (reset on lane change, updated by sim_logic):
-    MetersPerSecond lowest_speed_in_stop_zone; // Lowest speed recorded while the car was in the stop zone. Set to INFINITY when reset (on lane change or init).
-    MetersPerSecond lowest_speed_post_stop_line_before_lane_end; // Lowest speed recorded after passing the stop line until the end of the lane. Set to INFINITY when reset (on lane change or init).
+    MetersPerSecond lowest_speed_in_stop_zone; // Lowest speed recorded while the car was in the stop zone. Set to __FLT_MAX__ when reset (on lane change or init).
+    MetersPerSecond lowest_speed_post_stop_line_before_lane_end; // Lowest speed recorded after passing the stop line until the end of the lane. Set to __FLT_MAX__ when reset (on lane change or init).
     
     // stats:
     CarTravelStats travel_stats;

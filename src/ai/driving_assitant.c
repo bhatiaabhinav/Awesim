@@ -112,7 +112,7 @@ bool driving_assistant_reset_settings(DrivingAssistant* das, Car* car) {
 //   car: Pointer to the ego vehicle's data (speed, capabilities, length).
 //   sa: Pointer to situational awareness data (lead vehicle details, initial distance).
 // Returns:
-//   The best-case gap (in meters) under maximum braking, or INFINITY if inputs are invalid
+//   The best-case gap (in meters) under maximum braking, or __FLT_MAX__ if inputs are invalid
 //   or just the current distance to the lead vehicle if no forward collision risk exists (e.g., ego reversing).
 static Meters compute_best_case_braking_gap(Simulation* sim, const Car* car, const SituationalAwareness* sa, Meters* distance_to_lead_cached, MetersPerSecond* speed_lead_cached, MetersPerSecondSquared* accel_lead_cached) {
     #ifdef BENCHMARK_AEB
@@ -121,10 +121,10 @@ static Meters compute_best_case_braking_gap(Simulation* sim, const Car* car, con
     // Validate inputs
     if (!car || !sa) {
         LOG_ERROR("NULL car or situational awareness.");
-        return INFINITY;
+        return __FLT_MAX__;
     }
     if (!sa->nearby_vehicles.lead) {
-        return INFINITY;  // No lead vehicle, no collision risk
+        return __FLT_MAX__;  // No lead vehicle, no collision risk
     }
 
     // Constants and numerical safeguards
@@ -454,8 +454,8 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
                                 
                                 Meters distance_of_foremost_vehicle_to_stop_line = lane_get_length(foremost_vehicle_lane) - perceived_progress - STOP_LINE_BUFFER_METERS - car_get_length(foremost_vehicle) / 2.0;
 
-                                Seconds time_for_foremost_vehicle_to_stop_line = (perceived_speed > STOP_SPEED_THRESHOLD) ? distance_of_foremost_vehicle_to_stop_line / perceived_speed : INFINITY;
-                                Seconds time_for_ego_to_stop_line = (situation->speed > STOP_SPEED_THRESHOLD) ? distance_to_stop_line / situation->speed : INFINITY;
+                                Seconds time_for_foremost_vehicle_to_stop_line = (perceived_speed > STOP_SPEED_THRESHOLD) ? distance_of_foremost_vehicle_to_stop_line / perceived_speed : __FLT_MAX__;
+                                Seconds time_for_ego_to_stop_line = (situation->speed > STOP_SPEED_THRESHOLD) ? distance_to_stop_line / situation->speed : __FLT_MAX__;
                                 if (time_for_ego_to_stop_line >= time_for_foremost_vehicle_to_stop_line) {
                                     is_approaching_faster_than_others = false;
                                 }
@@ -1046,7 +1046,7 @@ void driving_assistant_post_sim_step(DrivingAssistant* das, Car* car, Simulation
 
     if (das->aeb_assistance && das->aeb_in_progress) {
         bool disengagement_conditions_met = false;
-        Meters best_case_braking_gap = -INFINITY;  // Initialize to invalid value
+        Meters best_case_braking_gap = -__FLT_MAX__;  // Initialize to invalid value
         if (sa->nearby_vehicles.lead == NULL) {
             disengagement_conditions_met = true; // If lead vehicle is gone, disengage AEB
         } else if (sa->speed < AEB_DISENGAGE_MAX_SPEED_MPS) {

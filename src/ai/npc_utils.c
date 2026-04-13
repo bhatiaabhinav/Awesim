@@ -94,7 +94,7 @@ Meters calculate_hypothetical_position_on_lane_change(const Car* car, const Lane
 
 static Seconds compute_time_headway(Meters distance, MetersPerSecond speed) {
     if (speed <= STOP_SPEED_THRESHOLD) {
-        return INFINITY; // effectively infinite time headway if not moving
+        return __FLT_MAX__; // effectively infinite time headway if not moving
     }
     return distance / speed;
 }

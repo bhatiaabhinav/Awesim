@@ -401,7 +401,7 @@ void awesim_setup(Simulation* sim, Meters city_width, int num_cars, Seconds dt, 
             car_dimensions_and_acc_profile_get_random_realistic_preset(&dims, &capable_acc_profile);
         }
         CarPersonality prefs = preferences_sample_random();
-        Liters fuel_tank_capacity = INFINITY; // Default to infinite fuel tank capacity
+        Liters fuel_tank_capacity = __FLT_MAX__; // Default to infinite fuel tank capacity
         car_init(car, dims, (CarCapabilities){capable_acc_profile, from_mph(120), 0.0}, fuel_tank_capacity, prefs);
         LOG_TRACE("Car id %d init: Dimensions: width = %.2f meters, length = %.2f meters, height = %.2f meters", car->id, car_get_width(car), car_get_length(car), car_get_height(car));
         Road* random_road;

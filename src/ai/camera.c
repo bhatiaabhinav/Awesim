@@ -127,7 +127,7 @@ static void ensure_z_buffer(RGBCamera* camera) {
 static void clear_z_buffer(RGBCamera* camera) {
     int size = camera->render_width * camera->render_height;
 #ifdef OPT_Z_BUFFER_EUCLIDEAN
-    // Initialize to infinity for Euclidean distance (closest wins)
+    // Initialize to __FLT_MAX__ for Euclidean distance (closest wins)
     float val = FLT_MAX;
     for(int i=0; i<size; i++) camera->z_buffer[i] = val;
 #else
