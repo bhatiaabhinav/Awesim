@@ -364,7 +364,7 @@ static bool placement_would_cause_collision(Car* car, Lane* lane, Simulation* si
     return would_collide;
 }
 
-void awesim_setup(Simulation* sim, Meters city_width, int num_cars, Seconds dt, ClockReading initial_clock_reading, Weather weather, bool use_deprecated_map) {
+void awesim_setup(Simulation* sim, Meters city_width, int num_cars, Seconds dt, ClockReading initial_clock_reading, Weather weather, bool use_deprecated_map, LaneId* agent_start_lane_id_options) {
     sim_init(sim);
     sim_set_dt(sim, dt);
     sim_set_initial_clock_reading(sim, initial_clock_reading);
@@ -414,17 +414,30 @@ void awesim_setup(Simulation* sim, Meters city_width, int num_cars, Seconds dt, 
         bool lane_invalid_misc = false;
         while ((would_collide || lane_too_short || lane_invalid_misc) && attempts < max_attempts) {
             attempts++;
-            random_road = map_get_road(map, rand_int_range(0, map->num_roads - 1));
-            random_lane = road_get_lane(random_road, map, rand_int_range(0, road_get_num_lanes(random_road) - 1));
-            lane_too_short = (car_get_length(car) + meters(2)) > (random_lane->length) || random_lane->length < 40;
-            if (lane_too_short) {
-                LOG_TRACE("Car id %d placement attempt %d on lane %d at position %.2f meters failed because lane is too short (lane length = %.2f meters, car length = %.2f meters). Retrying with a new lane.", car->id, attempts, random_lane->id, random_progress * random_lane->length, random_lane->length, car_get_length(car));
-                continue;
+            if (i == 0 && agent_start_lane_id_options != NULL) {
+                int num_options = 0;
+                while (agent_start_lane_id_options[num_options] != ID_NULL) {
+                    num_options++;
+                }
+                int random_lane_id = rand_int(num_options);
+                random_lane = map_get_lane(map, agent_start_lane_id_options[random_lane_id]);
+                random_road = map_get_road_by_lane_id(map, random_lane->id);
+                lane_too_short = false;
+                lane_invalid_misc = false;
             }
-            lane_invalid_misc = i == 0 && (road_get_num_lanes(random_road) > 1 || random_road->type == TURN); // Agent car must be on a single-lane road and not on a turn
-            if (lane_invalid_misc) {
-                LOG_TRACE("Car id %d placement attempt %d on lane %d at position %.2f meters failed because agent car must be on a single-lane road (road has %d lanes). Retrying with a new lane.", car->id, attempts, random_lane->id, random_progress * random_lane->length, road_get_num_lanes(random_road));
-                continue;
+            if (i != 0 || agent_start_lane_id_options == NULL) {
+                random_road = map_get_road(map, rand_int_range(0, map->num_roads - 1));
+                random_lane = road_get_lane(random_road, map, rand_int_range(0, road_get_num_lanes(random_road) - 1));
+                lane_too_short = (car_get_length(car) + meters(2)) > (random_lane->length) || random_lane->length < 40;
+                if (lane_too_short) {
+                    LOG_TRACE("Car id %d placement attempt %d on lane %d at position %.2f meters failed because lane is too short (lane length = %.2f meters, car length = %.2f meters). Retrying with a new lane.", car->id, attempts, random_lane->id, random_progress * random_lane->length, random_lane->length, car_get_length(car));
+                    continue;
+                }
+                lane_invalid_misc = i == 0 && (road_get_num_lanes(random_road) > 1 || random_road->type == TURN); // Agent car must be on a single-lane road and not on a turn
+                if (lane_invalid_misc) {
+                    LOG_TRACE("Car id %d placement attempt %d on lane %d at position %.2f meters failed because agent car must be on a single-lane road (road has %d lanes). Retrying with a new lane.", car->id, attempts, random_lane->id, random_progress * random_lane->length, road_get_num_lanes(random_road));
+                    continue;
+                }
             }
             double random_progress_meters = rand_uniform(10 + car_get_length(car) / 2, random_lane->length - 20 - car_get_length(car) / 2); // Avoid placing too close to start or end of lane
             random_progress = random_progress_meters / random_lane->length;

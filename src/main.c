@@ -34,7 +34,9 @@ int main(int argc, char* argv[]) {
         LOG_ERROR("Failed to allocate memory for Simulation. Exiting.");
         return EXIT_FAILURE;
     }
-    awesim_setup(sim, city_width, num_cars, dt, initial_clock_reading, weather, false);
+    LaneId agent_start_lane_id_options[] = {621, 87, 86, 600, ID_NULL}; // Example lane IDs where the agent car can be spawned. The last element must be ID_NULL to indicate the end of options.
+    // LaneId* agent_start_lane_id_options = NULL;
+    awesim_setup(sim, city_width, num_cars, dt, initial_clock_reading, weather, false, agent_start_lane_id_options);
     sim_set_npc_rogue_factor(sim, 0.05); // Set NPC rogue factor between 0.0 (law-abiding) to 1.0 (maximum rogue)
     // Make a file to store map information
     sim_get_driving_assistant(sim, 0)->smart_das_driving_style = SMART_DAS_DRIVING_STYLE_NORMAL;
