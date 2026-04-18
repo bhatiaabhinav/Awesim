@@ -140,7 +140,7 @@ static Meters compute_best_case_braking_gap(Simulation* sim, const Car* car, con
         speed_lead = *speed_lead_cached;
         accel_lead = *accel_lead_cached;
     } else {
-        perceive_lead_vehicle(car, sim, sa, &distance_to_lead, &speed_lead, &accel_lead);
+        perceive_lead_vehicle(car, sim, sa, &distance_to_lead, &speed_lead, &accel_lead, true, true);
     }
     #ifdef BENCHMARK_AEB
     double _baeb_t1 = _bdas_get_time_us();
@@ -443,7 +443,7 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
                             Meters perceived_progress;
                             MetersPerSecond perceived_speed;
                             // Add perception dropout for the other vehicle
-                            bool perceived = car_noisy_perceive_other(car, foremost_vehicle, sim, NULL, &perceived_progress, &perceived_speed, NULL, NULL, NULL, NULL, NULL, NULL, false, dt);
+                            bool perceived = car_noisy_perceive_other(car, foremost_vehicle, sim, NULL, &perceived_progress, &perceived_speed, NULL, NULL, NULL, NULL, NULL, NULL, false, dt, true);
                             if (!perceived) {
                                 foremost_vehicle = NULL;
                             }
@@ -758,7 +758,7 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
     MetersPerSecondSquared accel_lead;
     bool lead_perception_cached = false;
     if (das->follow_assistance && sa->nearby_vehicles.lead) {
-        perceive_lead_vehicle(car, sim, sa, &distance_to_lead, &speed_lead, &accel_lead);
+        perceive_lead_vehicle(car, sim, sa, &distance_to_lead, &speed_lead, &accel_lead, true, true);
         lead_perception_cached = true;
         Meters distance_to_lead_bumper_to_bumper = distance_to_lead - (car_get_length(car) + car_get_length(sa->nearby_vehicles.lead)) / 2.0; // bumper to bumper distance
         Meters target_distance_bumper_to_bumper = das->buffer + fmax(sa->speed, 0) * das->thw;

@@ -332,7 +332,7 @@ MetersPerSecondSquared car_compute_acceleration_adaptive_cruise(const Car* car, 
         target_distance_from_next_car += car_lengths_offset;
         Meters distance_to_lead_vehicle;
         MetersPerSecond speed_lead_vehicle;
-        perceive_lead_vehicle(car, sim, situation, &distance_to_lead_vehicle, &speed_lead_vehicle, NULL);
+        perceive_lead_vehicle(car, sim, situation, &distance_to_lead_vehicle, &speed_lead_vehicle, NULL, true, true);
         Meters position_target = car_position + distance_to_lead_vehicle - target_distance_from_next_car;
         Meters position_target_overshoot_buffer = target_distance_from_next_car - car_lengths_offset - from_feet(1.0); // let's call being within 1.0 feet of the next car as a crash.
         return car_compute_acceleration_chase_target(car, position_target, speed_lead_vehicle, position_target_overshoot_buffer, speed_target, use_preferred_accel_profile);

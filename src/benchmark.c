@@ -10,7 +10,7 @@ int main(int argc, char** argv) {
     const Seconds dt = 0.02;                        // time resolution for integration.
     Simulation* sim = (Simulation*)malloc(sizeof(Simulation));
     LOG_DEBUG("Allocated memory for simulation, size %.2f kilobytes.", sizeof(*sim) / 1024.0);
-    awesim_setup(sim, city_width, num_cars, dt, clock_reading(0, 8, 0, 0), WEATHER_SUNNY, false);
+    awesim_setup(sim, city_width, num_cars, dt, clock_reading(0, 8, 0, 0), WEATHER_SUNNY, false, NULL);
     const int benchmark_n_transitions = 100000;
 
     double t0 = get_sys_time_seconds();

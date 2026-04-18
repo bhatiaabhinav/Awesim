@@ -356,19 +356,21 @@ Vec2D vec2d_rotate_to_car_frame(const Car* self, Vec2D global_vec) {
     return rel_vec;
 }
 
-bool car_noisy_perceive_other(const Car* self, const Car* other, Simulation* sim, double* progress_out, Meters* progress_meters_out, MetersPerSecond* speed_out, MetersPerSecondSquared* acceleration_out, Meters* rel_distance_out, Radians* rel_orientation_out, Coordinates* rel_position_out, Vec2D* rel_speed_vector_out, Vec2D* rel_acceleration_vector_out, bool consider_blind_spot, double dropout_probability_multiplier) {
+bool car_noisy_perceive_other(const Car* self, const Car* other, Simulation* sim, double* progress_out, Meters* progress_meters_out, MetersPerSecond* speed_out, MetersPerSecondSquared* acceleration_out, Meters* rel_distance_out, Radians* rel_orientation_out, Coordinates* rel_position_out, Vec2D* rel_speed_vector_out, Vec2D* rel_acceleration_vector_out, bool consider_blind_spot, double dropout_probability_multiplier, bool noisy) {
     if (!self || !other || !sim) {
         return false;
     }
-    double net_probability = sim->perception_noise_dropout_probability * dropout_probability_multiplier;
-    if (net_probability > 1e-9 && rand_0_to_1() < net_probability) {
-        return false; // Not perceived
+    if (noisy) {
+        double net_probability = sim->perception_noise_dropout_probability * dropout_probability_multiplier;
+        if (net_probability > 1e-9 && rand_0_to_1() < net_probability) {
+            return false; // Not perceived
+        }
     }
     Map* map = sim_get_map(sim);  // cache once
     Lane* other_lane = car_get_lane(other, map);
 
     // Blind spot check — only fetch self_lane and adjacency when needed
-    if (consider_blind_spot) {
+    if (noisy && consider_blind_spot) {
         double base_blindspot_drop_probability = sim->perception_noise_blind_spot_dropout_base_probability * dropout_probability_multiplier;
         if (base_blindspot_drop_probability > 1e-9) {
             Lane* self_lane = car_get_lane(self, map);
@@ -406,8 +408,8 @@ bool car_noisy_perceive_other(const Car* self, const Car* other, Simulation* sim
     bool same_lane = (self->lane_id == other->lane_id);
 
     // Only compute cosine_alignment and true_distance when noise parameters require them
-    bool distance_noise_on = sim->perception_noise_distance_std_dev_percent > 1e-9;
-    bool speed_noise_on = sim->perception_noise_speed_std_dev > 1e-9;
+    bool distance_noise_on = noisy && sim->perception_noise_distance_std_dev_percent > 1e-9;
+    bool speed_noise_on = noisy && sim->perception_noise_speed_std_dev > 1e-9;
 
     Meters noisy_progress_meters;
     double cosine_alignment;

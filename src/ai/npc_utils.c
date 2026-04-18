@@ -99,8 +99,48 @@ static Seconds compute_time_headway(Meters distance, MetersPerSecond speed) {
     return distance / speed;
 }
 
-bool perceive_lead_vehicle(const Car* self, Simulation* sim, const SituationalAwareness* situation, Meters *out_distance, MetersPerSecond* out_speed, MetersPerSecondSquared* out_acceleration) {
-    return car_noisy_perceive_other(self, situation->nearby_vehicles.lead, sim, NULL, NULL, out_speed, out_acceleration, out_distance, NULL, NULL, NULL, NULL, false, 0.0);
+bool perceive_lead_vehicle(const Car* self, Simulation* sim, const SituationalAwareness* situation, Meters *out_distance, MetersPerSecond* out_speed, MetersPerSecondSquared* out_acceleration, bool lane_progress_based, bool noisy) {
+    const Car* lead = situation->nearby_vehicles.lead;
+    if (!lead) return false;
+
+    if (lane_progress_based) {
+        // Distance along the lane path (center-to-center)
+        Meters distance;
+        bool same_lane = (self->lane_id == lead->lane_id);
+        if (same_lane) {
+            distance = lead->lane_progress_meters - self->lane_progress_meters;
+        } else {
+            // Lead is on the next lane
+            distance = (situation->lane->length - self->lane_progress_meters) + lead->lane_progress_meters;
+        }
+        if (distance < 0) distance = 0;
+
+        if (noisy) {
+            // Apply distance noise
+            bool distance_noise_on = sim->perception_noise_distance_std_dev_percent > 1e-9;
+            if (distance_noise_on) {
+                double distance_noise_stddev = sim->perception_noise_distance_std_dev_percent * distance;
+                distance = fmax(0, rand_gaussian(distance, distance_noise_stddev));
+            }
+            // Apply speed noise
+            if (out_speed) {
+                bool speed_noise_on = sim->perception_noise_speed_std_dev > 1e-9;
+                if (speed_noise_on) {
+                    MetersPerSecond speed_noise_std = sim->perception_noise_speed_std_dev * lead->speed;
+                    *out_speed = rand_gaussian(lead->speed, speed_noise_std);
+                } else {
+                    *out_speed = lead->speed;
+                }
+            }
+        } else {
+            if (out_speed) *out_speed = lead->speed;
+        }
+        if (out_distance) *out_distance = distance;
+        if (out_acceleration) *out_acceleration = lead->acceleration;
+        return true;
+    } else {
+        return car_noisy_perceive_other(self, lead, sim, NULL, NULL, out_speed, out_acceleration, out_distance, NULL, NULL, NULL, NULL, false, 0.0, noisy);
+    }
 }
 
 bool car_is_lane_change_dangerous(Car* car, Simulation* sim, const SituationalAwareness* situation, CarIndicator lane_change_indicator, Seconds time_headway_threshold, Meters buffer, double dropout_probability_multiplier) {
@@ -114,7 +154,7 @@ bool car_is_lane_change_dangerous(Car* car, Simulation* sim, const SituationalAw
     const Car* car_colliding = situation->nearby_vehicles.colliding[lane_change_indicator];
 
     if (car_colliding) {
-        bool noticed = car_noisy_perceive_other(car, car_colliding, sim, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, true, dropout_probability_multiplier);   // may go unnoticed if in blind spot
+        bool noticed = car_noisy_perceive_other(car, car_colliding, sim, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, true, dropout_probability_multiplier, true);   // may go unnoticed if in blind spot
         if (noticed) {
             return true; // there is a car in the target lane that is colliding with us
         }
@@ -123,7 +163,7 @@ bool car_is_lane_change_dangerous(Car* car, Simulation* sim, const SituationalAw
         Meters hypothetical_position = calculate_hypothetical_position_on_lane_change(car, lane, lane_target, sim_get_map(sim));
         Meters other_car_position;
         MetersPerSecond other_car_speed;
-        bool noticed = car_noisy_perceive_other(car, car_ahead, sim, NULL, &other_car_position, &other_car_speed, NULL, NULL, NULL, NULL, NULL, NULL, false, dropout_probability_multiplier);
+        bool noticed = car_noisy_perceive_other(car, car_ahead, sim, NULL, &other_car_position, &other_car_speed, NULL, NULL, NULL, NULL, NULL, NULL, false, dropout_probability_multiplier, true);
         if (noticed) {
             Meters distance_to_other_car = other_car_position - hypothetical_position - car_get_length(car_ahead) / 2 - car_get_length(car) / 2;
             Seconds thw = compute_time_headway(fmax(distance_to_other_car, 0.0), situation->speed);
@@ -136,7 +176,7 @@ bool car_is_lane_change_dangerous(Car* car, Simulation* sim, const SituationalAw
         Meters hypothetical_position = calculate_hypothetical_position_on_lane_change(car, lane, lane_target, sim_get_map(sim));
         Meters other_car_position;
         MetersPerSecond other_car_speed;
-        bool noticed = car_noisy_perceive_other(car, car_behind, sim, NULL, &other_car_position, &other_car_speed, NULL, NULL, NULL, NULL, NULL, NULL, true, dropout_probability_multiplier);
+        bool noticed = car_noisy_perceive_other(car, car_behind, sim, NULL, &other_car_position, &other_car_speed, NULL, NULL, NULL, NULL, NULL, NULL, true, dropout_probability_multiplier, true);
         if (noticed) {
             Meters distance_to_other_car = hypothetical_position - other_car_position - car_get_length(car_behind) / 2 - car_get_length(car) / 2;
             Seconds thw = compute_time_headway(fmax(distance_to_other_car, 0.0), fmax(other_car_speed, 0.0));
@@ -294,7 +334,7 @@ bool car_has_something_to_yield_to_at_intersection(const Car* self, Simulation* 
             Car* c = lane_get_car(lane, sim, 0); // get the leading car
             Meters car_progress_m;
             MetersPerSecond car_speed;
-            bool noticed = car_noisy_perceive_other(self, c, sim, NULL, &car_progress_m, &car_speed, NULL, NULL, NULL, NULL, NULL, NULL, false, dropout_probability_multiplier);
+            bool noticed = car_noisy_perceive_other(self, c, sim, NULL, &car_progress_m, &car_speed, NULL, NULL, NULL, NULL, NULL, NULL, false, dropout_probability_multiplier, true);
             if (!noticed) {
                 continue;   // did not perceive this car
             }
@@ -631,7 +671,7 @@ bool defensive_yield_despite_right_of_way(const Car* self, Simulation* sim, cons
             Meters car_progress_m;
             MetersPerSecond car_speed;
             MetersPerSecondSquared car_acceleration;
-            bool noticed = car_noisy_perceive_other(self, c, sim, NULL, &car_progress_m, &car_speed, &car_acceleration, NULL, NULL, NULL, NULL, NULL, false, dropout_probability_multiplier);
+            bool noticed = car_noisy_perceive_other(self, c, sim, NULL, &car_progress_m, &car_speed, &car_acceleration, NULL, NULL, NULL, NULL, NULL, false, dropout_probability_multiplier, true);
             if (!noticed) {
                 continue;   // did not perceive this car
             }

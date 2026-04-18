@@ -264,8 +264,10 @@ Seconds sim_get_time(const Simulation* self); // Get the current simulation time
 SituationalAwareness* sim_get_situational_awareness(Simulation* self, CarId id);    // Forward declaration
 void situational_awareness_build(Simulation* sim, CarId car_id);
 
-// Try to perceive the lead vehicle in the same lane. If successful, fills out_distance, out_speed, and out_acceleration with perceived values (with noise) and returns true. If no lead vehicle is perceived, returns false and does not modify the out parameters.
-bool perceive_lead_vehicle(const Car* self, Simulation* sim, const SituationalAwareness* situation, Meters *out_distance, MetersPerSecond* out_speed, MetersPerSecondSquared* out_acceleration);
+// Try to perceive the lead vehicle in the same lane. If successful, fills out_distance, out_speed, and out_acceleration with perceived values and returns true. If no lead vehicle is perceived, returns false and does not modify the out parameters.
+// If lane_progress_based is true, computes center-to-center distance along the lane (using lane progress) rather than euclidean. Speed and acceleration are returned as raw scalars (not geometry-based).
+// If noisy is false, bypasses dropout and perception noise (perfect perception).
+bool perceive_lead_vehicle(const Car* self, Simulation* sim, const SituationalAwareness* situation, Meters *out_distance, MetersPerSecond* out_speed, MetersPerSecondSquared* out_acceleration, bool lane_progress_based, bool noisy);
 
 // Set acceleration, indicator_turn, indicator_lane.
 void npc_car_make_decisions(Car* self, Simulation* sim);

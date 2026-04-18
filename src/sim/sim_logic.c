@@ -464,7 +464,7 @@ static void sim_update_car(Simulation* self, CarId car_id, Seconds dt) {
         SituationalAwareness* sa = sim_get_situational_awareness(self, car_id);
         if (abs_speed > TAILGATING_MIN_SPEED_MPS && sa->nearby_vehicles.lead && a >= 0) {
             Meters distance_to_lead;
-            perceive_lead_vehicle(car, self, sa, &distance_to_lead, NULL, NULL);
+            perceive_lead_vehicle(car, self, sa, &distance_to_lead, NULL, NULL, true, true);
             Meters bumper_to_bumper = distance_to_lead - (car_get_length(car) + car_get_length(sa->nearby_vehicles.lead)) * 0.5;
             Seconds time_headway = bumper_to_bumper / abs_speed;
             if (time_headway < TAILGATING_TIME_HEADWAY_THRESHOLD) {
