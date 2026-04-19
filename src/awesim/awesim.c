@@ -342,6 +342,7 @@ void awesim_map_setup(Map* map, Meters city_width) {
     // Outer loop (local roads)
     create_square_loop_two_way(map, coordinates_create(0, 0), outer_loop_side, outer_loop_num_lanes, lane_width, local_speed_limit, local_turn_speed_limit, local_turn_radius, SKIP_TURN_NONE, 0, "Outer Loop");
     create_all_intersections_from_crossing_roads(map, intersection_turn_radius, true);
+    map_update_static_cached_variables(map);
 }
 
 
@@ -355,7 +356,7 @@ static bool placement_would_cause_collision(Car* car, Lane* lane, Simulation* si
         Meters distance_between_centers = fabs(progress_meters - other_progress_meters);
         Meters other_length = car_get_length(other_car);
         LOG_TRACE("Checking collision for car id %d (len = %.10f) on lane %d at progress %.10f meters with car id %d (len = %.10f) at progress %.10f meters. Distance between centers = %.10f meters.", car->id, car_length, lane->id, progress_meters, other_car->id, other_length, other_progress_meters, distance_between_centers);
-        if (distance_between_centers < meters(1) + (car_length + other_length) / 2.0) {
+        if (distance_between_centers < meters(1) + car->cached_half_length + other_car->cached_half_length) {
             LOG_TRACE("Placement of car id %d on lane %d at %.10f meters would cause collision with car %d at progress %.10f meters.", car->id, lane->id, progress_meters, other_car->id, other_progress_meters);
             would_collide = true;
             break;
@@ -439,7 +440,7 @@ void awesim_setup(Simulation* sim, Meters city_width, int num_cars, Seconds dt, 
                     continue;
                 }
             }
-            double random_progress_meters = rand_uniform(10 + car_get_length(car) / 2, random_lane->length - 20 - car_get_length(car) / 2); // Avoid placing too close to start or end of lane
+            double random_progress_meters = rand_uniform(10 + car->cached_half_length, random_lane->length - 20 - car->cached_half_length); // Avoid placing too close to start or end of lane
             random_progress = random_progress_meters / random_lane->length;
             would_collide = placement_would_cause_collision(car, random_lane, sim, random_progress);
             if (would_collide) LOG_TRACE("Car id %d placement attempt %d on lane %d at position %.2f meters failed due to a potential collision. Retrying with a new lane.", car->id, attempts, random_lane->id, random_progress * random_lane->length);
@@ -980,4 +981,5 @@ void awesim_map_setup_old(Map* map, Meters city_width) {
     road_set_name(entry_shoulders[3], "I-1 N Entry Ramp");
     road_set_name(entry_ramps[3], "S-2 W -> I-1 N Entry Ramp");
     LOG_TRACE("Exit and entry ramps created for all highways");
+    map_update_static_cached_variables(map);
 }

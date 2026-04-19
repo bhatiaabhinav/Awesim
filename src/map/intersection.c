@@ -501,7 +501,7 @@ void intersection_update(Intersection* controller, Simulation* sim, Seconds dt) 
                     CarId car_id = lane->cars_ids[0]; // foremost car
                     Car* car = sim_get_car(sim, car_id);
                     if (car) {
-                        Meters distance = lane->length - car->lane_progress_meters - (car_get_length(car) / 2.0);
+                        Meters distance = lane->length - car->lane_progress_meters - car->cached_half_length;
                         if (distance < STOP_LINE_BUFFER_METERS + meters(0.1)) {
                             // Car is at stop sign. Check if it's already in queue.
                             bool already_queued = false;
@@ -553,17 +553,32 @@ void print_traffic_state(const Intersection* intersection) {
 
 
 
+// Intersection* road_leads_to_intersection(const Road* road, Map* map) {
+//     if (!road) {
+//         LOG_ERROR("Road is NULL, cannot determine upcoming intersection.");
+//         return NULL;
+//     }
+//     const Lane* lane = road_get_leftmost_lane(road, map);
+//     for (int i = 0; i < 3; i++) {
+//         if (lane->connections[i] != ID_NULL) {
+//             Lane* connected_lane = map_get_lane(map, lane->connections[i]);
+//             if (connected_lane->is_at_intersection) {
+//                 return map_get_intersection(map, connected_lane->intersection_id);
+//             }
+//         }
+//     }
+//     return NULL;
+// }
+
 Intersection* road_leads_to_intersection(const Road* road, Map* map) {
-    if (!road) {
-        LOG_ERROR("Road is NULL, cannot determine upcoming intersection.");
-        return NULL;
-    }
-    const Lane* lane = road_get_leftmost_lane(road, map);
+    const Lane* lane = &map->lanes[road->lane_ids[0]]; // Check the leftmost lane for intersection connection
     for (int i = 0; i < 3; i++) {
-        if (lane->connections[i] != ID_NULL) {
-            Lane* connected_lane = map_get_lane(map, lane->connections[i]);
+        LaneId connected_lane_id = lane->connections[i];
+        if (connected_lane_id != ID_NULL) {
+            // Lane* connected_lane = map_get_lane(map, lane->connections[i]);
+            Lane* connected_lane = &map->lanes[connected_lane_id];
             if (connected_lane->is_at_intersection) {
-                return map_get_intersection(map, connected_lane->intersection_id);
+                return &map->intersections[connected_lane->intersection_id];
             }
         }
     }
@@ -619,7 +634,7 @@ Car* intersection_get_foremost_vehicle(const Intersection* self, Simulation* sim
 
             // Distance to the end of the lane (which connects to the intersection)
             // adjusted for half car length to account for the leading edge.
-            double distance = lane->length - car_get_lane_progress_meters(car) - (car_get_length(car) / 2.0);
+            double distance = lane->length - car_get_lane_progress_meters(car) - car->cached_half_length;
 
             if (distance < min_distance) {
                 min_distance = distance;

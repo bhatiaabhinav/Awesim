@@ -98,6 +98,11 @@ struct Lane {
     Vec2D cached_actual_end;           // outgoing->start_point or end_point
     bool arc_geometry_precomputed;     // true after lane_precompute_arc_geometry is called
 
+    // Precomputed static cached variables (populated by lane_update_static_cached_variables)
+    bool static_cache_valid;
+    int cached_num_connections_incoming;
+    int cached_num_connections;
+
     CarId cars_ids[MAX_CARS_PER_LANE]; // Array of cars currently in this lane, ordered/ranked by their position on the lane in descending order (i.e., the first car (index = 0) is the one closest to the end of the lane).
     int num_cars;                  // Number of cars currently in this lane
 };
@@ -180,6 +185,7 @@ Car* lane_get_car(const Lane* self, Simulation* sim, int index);
 
 int lane_get_num_connections_incoming(const Lane* self);
 int lane_get_num_connections(const Lane* self);
+void lane_update_static_cached_variables(Lane* self);
 bool lane_is_merge_available(const Lane* self);
 bool lane_is_exit_lane_available(const Lane* self, double progress);
 bool lane_is_exit_lane_eventually_available(const Lane* self, double progress);
@@ -227,6 +233,10 @@ struct Road {
     // Only for turns:
     RoadId road_from_id;
     RoadId road_to_id;
+
+    // Precomputed static cached variables (populated by road_update_static_cached_variables)
+    bool static_cache_valid;
+    bool cached_is_merge_available;
 };
 
 // Road Setters
@@ -263,6 +273,7 @@ bool road_is_exit_road_eventually_available(const Road* self, Map* map, double p
 Road* turn_road_get_from(const Road* self, Map* map);
 Road* turn_road_get_to(const Road* self, Map* map);
 int road_find_index_of_lane(const Road* self, LaneId lane_id);
+void road_update_static_cached_variables(Road* self, Map* map);
 
 
 // Road Creaters
@@ -450,6 +461,9 @@ Intersection* map_get_intersections(Map* self);
 // Returns number of intersections currently in the map
 int map_get_num_intersections(const Map* self);
 
+
+// Updates static cached variables for all lanes in the map
+void map_update_static_cached_variables(Map* map);
 
 // Prints the full map information to a file or stdout
 void map_print(Map* self, FILE* file);

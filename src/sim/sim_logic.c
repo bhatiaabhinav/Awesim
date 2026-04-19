@@ -295,7 +295,7 @@ static void sim_update_car(Simulation* self, CarId car_id, Seconds dt) {
             }
         }
         // Track intersection passage: count when the car exits an intersection lane onto a non-intersection lane
-        if (pre_transition_lane->is_at_intersection && !lane->is_at_intersection) {
+        if (car_id == 0 && pre_transition_lane->is_at_intersection && !lane->is_at_intersection) {
             Intersection* ixn = lane_get_intersection(pre_transition_lane, map);
             if (ixn) {
                 car->travel_stats.intersections_passed++;
@@ -336,9 +336,9 @@ static void sim_update_car(Simulation* self, CarId car_id, Seconds dt) {
     car_set_speed(car, v);
     car_set_fuel_level(car, fuel_remaining);
 
-    // Update lowest speed in stop zone tracking
+    // Update lowest speed in stop zone tracking (all cars, needed for FCFS 4-way stop logic)
     {
-        Meters car_half_length = car_get_length(car) * 0.5;
+        Meters car_half_length = car->cached_half_length;
         Meters dist_to_end = lane->length * (1.0 - progress);
         Meters dist_from_leading_edge = dist_to_end - car_half_length;
         Meters stop_zone_near = STOP_LINE_BUFFER_METERS + STOP_LINE_BUFFER_TOLERANCE_METERS;
@@ -386,7 +386,7 @@ static void sim_update_car(Simulation* self, CarId car_id, Seconds dt) {
     #endif
 
     // ---- Update travel stats ----
-    {
+    if (car_id == 0) { // Only track detailed stats for the first car for now to save on performance. This can be extended to more cars later if needed.
         CarTravelStats* stats = &car->travel_stats;
         Meters ds_abs = fabs(net_forward_movement_meters);
 
@@ -462,10 +462,10 @@ static void sim_update_car(Simulation* self, CarId car_id, Seconds dt) {
 
         // Tailgating: too close to lead vehicle at speed, and not braking
         SituationalAwareness* sa = sim_get_situational_awareness(self, car_id);
-        if (abs_speed > TAILGATING_MIN_SPEED_MPS && sa->nearby_vehicles.lead && a >= 0) {
+        if (abs_speed > TAILGATING_MIN_SPEED_MPS && sa->lead && a >= 0) {
             Meters distance_to_lead;
             perceive_lead_vehicle(car, self, sa, &distance_to_lead, NULL, NULL, true, true);
-            Meters bumper_to_bumper = distance_to_lead - (car_get_length(car) + car_get_length(sa->nearby_vehicles.lead)) * 0.5;
+            Meters bumper_to_bumper = distance_to_lead - (car->cached_half_length + sa->lead->cached_half_length);
             Seconds time_headway = bumper_to_bumper / abs_speed;
             if (time_headway < TAILGATING_TIME_HEADWAY_THRESHOLD) {
                 if (rand_0_to_1() < TAILGATING_DETECTION_PROBABILITY * dt) {

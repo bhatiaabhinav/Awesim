@@ -113,6 +113,7 @@ struct Car {
     LaneId lane_id;                   // current lane
     double lane_progress;          // progress in the lane as a fraction of the lane length.
     Meters lane_progress_meters;   // progress in the lane in meters. Should be set by the simulation engine. Is a product of lane_progress and lane length.
+    Meters cached_half_length;     // half the car's length (dimensions.y * 0.5), cached here for hot-loop cache locality
     int lane_rank;              // rank of the car in the lane, where 0 is the first car in the lane (the one closest to the end of the lane), and num_cars-1 is the last car in the lane (the one closest to the start of the lane).
     MetersPerSecond speed;              // current speed. Should be set by the simulation engine.
     double damage;                      // damage level of the car. 0.0 for no damage and 1.0 for total damage.

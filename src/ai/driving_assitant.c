@@ -123,7 +123,7 @@ static Meters compute_best_case_braking_gap(Simulation* sim, const Car* car, con
         LOG_ERROR("NULL car or situational awareness.");
         return __FLT_MAX__;
     }
-    if (!sa->nearby_vehicles.lead) {
+    if (!sa->lead) {
         return __FLT_MAX__;  // No lead vehicle, no collision risk
     }
 
@@ -146,7 +146,7 @@ static Meters compute_best_case_braking_gap(Simulation* sim, const Car* car, con
     double _baeb_t1 = _bdas_get_time_us();
     #endif
 
-    const Meters initial_gap = distance_to_lead  - (car_get_length(car) + car_get_length(sa->nearby_vehicles.lead)) / 2.0;  // Initial bumper-to-bumper gap
+    const Meters initial_gap = distance_to_lead  - (car->cached_half_length + sa->lead->cached_half_length);  // Initial bumper-to-bumper gap
     if (initial_gap <= 0) {
         return 0;  // Already colliding or overlapping
     }
@@ -601,6 +601,7 @@ static const double _speed_limit_multipliers[SMART_DAS_DRIVING_STYLES_COUNT] = {
 // Precomputed mph-to-mps constants for speed limit adjustments
 static const MetersPerSecond _mph5  = 5.0  * (1609.34 / 3600.0);
 static const MetersPerSecond _mph10 = 10.0 * (1609.34 / 3600.0);
+static const Meters _one_foot_m = 0.3048;
 
 static MetersPerSecond determine_preferred_speed_limit(Map* map, const Lane* lane, SmartDASDrivingStyle style) {
     MetersPerSecond lane_speed_limit = lane->speed_limit;
@@ -683,10 +684,10 @@ void driving_assistant_smart_update_das_variables(DrivingAssistant* das, Car* ca
 }
 
 bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* sim) {
-    if (!car || !sim || !das) {
-        LOG_ERROR("Invalid car, simulation, or driving assistant provided to driving_assistant_control_car");
-        return false; // Indicating error due to invalid input
-    }
+    // if (!car || !sim || !das) {
+    //     LOG_ERROR("Invalid car, simulation, or driving assistant provided to driving_assistant_control_car");
+    //     return false; // Indicating error due to invalid input
+    // }
 
     // Car control variables to determine:
 
@@ -695,12 +696,14 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
     CarIndicator turn_indicator = INDICATOR_NONE;
     bool request_lane_change = false;
     bool request_turn = false;
+    Map* map = sim_get_map(sim);
+    Seconds dt = sim_get_dt(sim);
 
     #ifdef BENCHMARK_DAS_CONTROL
     double _bdas_t0 = _bdas_get_time_us();
     #endif
     situational_awareness_build(sim, car->id);  // ensure up-to-date situational awareness
-    SituationalAwareness* sa = sim_get_situational_awareness(sim, car_get_id(car));
+    SituationalAwareness* sa = sim_get_situational_awareness(sim, car->id);
     #ifdef BENCHMARK_DAS_CONTROL
     double _bdas_t1 = _bdas_get_time_us();
     #endif
@@ -726,11 +729,10 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
     // ----------- Speed adjustment (approaching end of lane to a lower speed limit lane, unless going straight into an intersection -- where we may speed up to make light and the speed limit is usually anyway the same) ------------
     const Lane* next_lane = sa->lane_next_after_turn[das->turn_intent];
     if (next_lane) {
-        MetersPerSecond next_speed_target = determine_preferred_speed_limit(sim_get_map(sim), next_lane, das->smart_das_driving_style);
+        MetersPerSecond next_speed_target = determine_preferred_speed_limit(map, next_lane, das->smart_das_driving_style);
         if (next_speed_target < sa->speed && !(sa->is_an_intersection_upcoming && das->turn_intent == INDICATOR_NONE)) {
             //printf("Car %d approaching lane with lower speed limit (%.2f mph), adjusting speed from %.2f mph\n", car->id, next_speed_target * 3600.0 / 1609.34, sa->speed * 3600.0 / 1609.34);
             Meters position_target = sa->lane_progress_m + sa->distance_to_end_of_lane_from_leading_edge;
-            MetersPerSecond next_speed_target = determine_preferred_speed_limit(sim_get_map(sim), next_lane, das->smart_das_driving_style);
             MetersPerSecondSquared accel_approach_end_of_lane = car_compute_acceleration_chase_target(car, position_target, next_speed_target, 0, sa->lane->speed_limit, das->use_preferred_accel_profile);
             accel = fmin(accel, accel_approach_end_of_lane);
         }
@@ -748,7 +750,7 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
         MetersPerSecondSquared accel_stop;
         Meters position_target = sa->lane_progress_m + fmax(distance_to_stop_line, 0);
         accel_stop = car_compute_acceleration_chase_target(car, position_target, 0, fmax(sa->distance_to_end_of_lane_from_leading_edge - position_target, meters(0)), das->speed_target, das->use_preferred_accel_profile);
-        accel_stop = 0.9 * accel_stop + 0.1 * car_get_acceleration(car); // smooth it a bit
+        accel_stop = 0.9 * accel_stop + 0.1 * car->acceleration; // smooth it a bit
         accel = fmin(accel, accel_stop);
     }
 
@@ -757,16 +759,16 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
     MetersPerSecond speed_lead;
     MetersPerSecondSquared accel_lead;
     bool lead_perception_cached = false;
-    if (das->follow_assistance && sa->nearby_vehicles.lead) {
+    if (das->follow_assistance && sa->lead) {
         perceive_lead_vehicle(car, sim, sa, &distance_to_lead, &speed_lead, &accel_lead, true, true);
         lead_perception_cached = true;
-        Meters distance_to_lead_bumper_to_bumper = distance_to_lead - (car_get_length(car) + car_get_length(sa->nearby_vehicles.lead)) / 2.0; // bumper to bumper distance
+        Meters distance_to_lead_bumper_to_bumper = distance_to_lead - (car->cached_half_length + sa->lead->cached_half_length); // bumper to bumper distance
         Meters target_distance_bumper_to_bumper = das->buffer + fmax(sa->speed, 0) * das->thw;
         Meters position_delta = distance_to_lead_bumper_to_bumper - target_distance_bumper_to_bumper;
         MetersPerSecond speed_target = speed_lead; // we want to match the lead vehicle's speed
         if (sa->almost_stopped) {
             if (sa->speed >= 0) {
-                if (from_feet(1) < distance_to_lead_bumper_to_bumper && distance_to_lead_bumper_to_bumper < 1.5 * das->buffer) {
+                if (_one_foot_m < distance_to_lead_bumper_to_bumper && distance_to_lead_bumper_to_bumper < 1.5 * das->buffer) {
                     position_delta = 0; // if we are almost stopped and within a reasonable range of the target distance, don't adjust position target to prevent microadjustments
                     speed_target = 0;  // and stop or stay stopped
                 }
@@ -778,7 +780,7 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
             }
         }
         Meters position_target = sa->lane_progress_m + position_delta;
-        Meters overshoot_buffer = sa->speed >= 0 ? distance_to_lead_bumper_to_bumper - from_feet(1) : from_feet(1);
+        Meters overshoot_buffer = sa->speed >= 0 ? distance_to_lead_bumper_to_bumper - _one_foot_m : _one_foot_m;
         MetersPerSecondSquared accel_follow = car_compute_acceleration_chase_target(car, position_target, speed_target, overshoot_buffer, das->speed_target, das->use_preferred_accel_profile);
         accel = fmin(accel, accel_follow);
     }
@@ -788,8 +790,7 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
     double _bdas_t3 = _bdas_get_time_us();
     #endif
 
-    Seconds dt = sim_get_dt(sim);
-    MetersPerSecondSquared accel_prev = car_get_acceleration(car);
+    MetersPerSecondSquared accel_prev = car->acceleration;
 
     bool in_forward_gear = sa->going_forward;
     bool in_reverse_gear = sa->reversing;
@@ -916,7 +917,7 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
     // auto engagement conditions
     bool execute_aeb = false;
     Meters best_case_braking_gap;
-    if (das->aeb_assistance && sa->nearby_vehicles.lead) {
+    if (das->aeb_assistance && sa->lead) {
         if (das->aeb_in_progress) {
             execute_aeb = true; // once AEB is engaged, stay engaged until lead is gone or we are stopped to prevent oscillation
         } else if (sa->speed >= AEB_ENGAGE_MIN_SPEED_MPS) {
@@ -957,7 +958,7 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
         // if merge assistance is active, issue request only when it is safe, else issue right away
         if (das->merge_assistance && lane_indicator != INDICATOR_NONE) {
             Meters buffer = das->buffer;
-            if (car_is_lane_change_dangerous(car, sim, sa, lane_indicator, das->thw, buffer, sim_get_dt(sim))) {
+            if (car_is_lane_change_dangerous(car, sim, sa, lane_indicator, das->thw, buffer, dt)) {
                 LOG_TRACE("Waiting for safe merge for car %d with indicator %d", car->id, lane_indicator);
                 request_lane_change = false;        // Keep indicating but don't execute
             } else {
@@ -1047,7 +1048,7 @@ void driving_assistant_post_sim_step(DrivingAssistant* das, Car* car, Simulation
     if (das->aeb_assistance && das->aeb_in_progress) {
         bool disengagement_conditions_met = false;
         Meters best_case_braking_gap = -__FLT_MAX__;  // Initialize to invalid value
-        if (sa->nearby_vehicles.lead == NULL) {
+        if (sa->lead == NULL) {
             disengagement_conditions_met = true; // If lead vehicle is gone, disengage AEB
         } else if (sa->speed < AEB_DISENGAGE_MAX_SPEED_MPS) {
             disengagement_conditions_met = true;
@@ -1132,19 +1133,19 @@ SmartDASDrivingStyle driving_assistant_get_smart_das_driving_style(const Driving
 
 // Setters (will update the timestamp)
 
-static bool validate_input(const Car* car, const DrivingAssistant* das, const Simulation* sim) {
-    if (!car || !das || !sim) {
-        LOG_ERROR("Invalid car, driving assistant, or simulation provided");
-        return false;
-    }
-    return true;
-}
+// static bool validate_input(const Car* car, const DrivingAssistant* das, const Simulation* sim) {
+//     if (!car || !das || !sim) {
+//         LOG_ERROR("Invalid car, driving assistant, or simulation provided");
+//         return false;
+//     }
+//     return true;
+// }
 
 
 void driving_assistant_configure_speed_target(DrivingAssistant* das, const Car* car, const Simulation* sim, MetersPerSecond speed_target) {
-    if (!validate_input(car, das, sim)) {
-        return; // Early return if input validation fails
-    }
+    // if (!validate_input(car, das, sim)) {
+    //     return; // Early return if input validation fails
+    // }
     if (das->speed_target > car->capabilities.top_speed) {
         LOG_WARN("Speed target %.2f m/s exceeds car's top speed %.2f m/s for car %d. Setting to top speed.", speed_target, car->capabilities.top_speed, car->id);
         speed_target = car->capabilities.top_speed; // Ensure speed target does not exceed car's top speed
@@ -1154,33 +1155,33 @@ void driving_assistant_configure_speed_target(DrivingAssistant* das, const Car* 
 }
 
 void driving_assistant_configure_should_stop_at_intersection(DrivingAssistant* das, const Car* car, const Simulation* sim, bool should_stop_at_intersection) {
-    if (!validate_input(car, das, sim)) {
-        return; // Early return if input validation fails
-    }
+    // if (!validate_input(car, das, sim)) {
+    //     return; // Early return if input validation fails
+    // }
     das->should_stop_at_intersection = should_stop_at_intersection;
     das->last_configured_at = sim_get_time(sim);
 }
 
 void driving_assistant_configure_merge_intent(DrivingAssistant* das, const Car* car, const Simulation* sim, CarIndicator merge_intent) {
-    if (!validate_input(car, das, sim)) {
-        return; // Early return if input validation fails
-    }
+    // if (!validate_input(car, das, sim)) {
+    //     return; // Early return if input validation fails
+    // }
     das->merge_intent = merge_intent;
     das->last_configured_at = sim_get_time(sim);
 }
 
 void driving_assistant_configure_turn_intent(DrivingAssistant* das, const Car* car, const Simulation* sim, CarIndicator turn_intent) {
-    if (!validate_input(car, das, sim)) {
-        return;
-    }
+    // if (!validate_input(car, das, sim)) {
+    //     return;
+    // }
     das->turn_intent = turn_intent;
     das->last_configured_at = sim_get_time(sim);
 }
 
 void driving_assistant_configure_thw(DrivingAssistant* das, const Car* car, const Simulation* sim, Seconds thw) {
-    if (!validate_input(car, das, sim)) {
-        return;
-    }
+    // if (!validate_input(car, das, sim)) {
+    //     return;
+    // }
     if (thw < 0) {
         LOG_WARN("THW cannot be negative for car %d. Setting it to 0.", car->id);
         thw = 0;
@@ -1190,9 +1191,9 @@ void driving_assistant_configure_thw(DrivingAssistant* das, const Car* car, cons
 }
 
 void driving_assistant_configure_buffer(DrivingAssistant* das, const Car* car, const Simulation* sim, Meters buffer) {
-    if (!validate_input(car, das, sim)) {
-        return;
-    }
+    // if (!validate_input(car, das, sim)) {
+    //     return;
+    // }
     if (buffer < 0) {
         LOG_WARN("Buffer cannot be negative for car %d. Setting it to 0.", car->id);
         buffer = 0;
@@ -1202,25 +1203,25 @@ void driving_assistant_configure_buffer(DrivingAssistant* das, const Car* car, c
 }
 
 void driving_assistant_configure_follow_assistance(DrivingAssistant* das, const Car* car, const Simulation* sim, bool follow_assistance) {
-    if (!validate_input(car, das, sim)) {
-        return;
-    }
+    // if (!validate_input(car, das, sim)) {
+    //     return;
+    // }
     das->follow_assistance = follow_assistance;
     das->last_configured_at = sim_get_time(sim);
 }
 
 void driving_assistant_configure_merge_assistance(DrivingAssistant* das, const Car* car, const Simulation* sim, bool merge_assistance) {
-    if (!validate_input(car, das, sim)) {
-        return;
-    }
+    // if (!validate_input(car, das, sim)) {
+    //     return;
+    // }
     das->merge_assistance = merge_assistance;
     das->last_configured_at = sim_get_time(sim);
 }
 
 void driving_assistant_configure_aeb_assistance(DrivingAssistant* das, const Car* car, const Simulation* sim, bool aeb_assistance) {
-    if (!validate_input(car, das, sim)) {
-        return;
-    }
+    // if (!validate_input(car, das, sim)) {
+    //     return;
+    // }
     if (!aeb_assistance) {
         das->aeb_in_progress = false; // Reset AEB state if AEB assistance is disabled
     }
@@ -1230,25 +1231,25 @@ void driving_assistant_configure_aeb_assistance(DrivingAssistant* das, const Car
 
 
 void driving_assistant_configure_use_preferred_accel_profile(DrivingAssistant* das, const Car* car, const Simulation* sim, bool use_preferred_accel_profile) {
-    if (!validate_input(car, das, sim)) {
-        return;
-    }
+    // if (!validate_input(car, das, sim)) {
+    //     return;
+    // }
     das->use_preferred_accel_profile = use_preferred_accel_profile;
     das->last_configured_at = sim_get_time(sim);
 }
 
 void driving_assistant_configure_use_linear_speed_control(DrivingAssistant* das, const Car* car, const Simulation* sim, bool use_linear_speed_control) {
-    if (!validate_input(car, das, sim)) {
-        return;
-    }
+    // if (!validate_input(car, das, sim)) {
+    //     return;
+    // }
     das->use_linear_speed_control = use_linear_speed_control;
     das->last_configured_at = sim_get_time(sim);
 }
 
 void driving_assistant_configure_smart_das(DrivingAssistant* das, const Car* car, const Simulation* sim, bool smart_das) {
-    if (!validate_input(car, das, sim)) {
-        return;
-    }
+    // if (!validate_input(car, das, sim)) {
+    //     return;
+    // }
     das->smart_das = smart_das;
     if (!smart_das) {
         das->smart_das_intersection_approach_engaged = false; // reset the flag
@@ -1257,9 +1258,9 @@ void driving_assistant_configure_smart_das(DrivingAssistant* das, const Car* car
 }
 
 void driving_assistant_configure_smart_das_driving_style(DrivingAssistant* das, const Car* car, const Simulation* sim, SmartDASDrivingStyle driving_style) {
-    if (!validate_input(car, das, sim)) {
-        return;
-    }
+    // if (!validate_input(car, das, sim)) {
+    //     return;
+    // }
     das->smart_das_driving_style = driving_style;
     das->last_configured_at = sim_get_time(sim);
 }

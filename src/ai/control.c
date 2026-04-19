@@ -317,7 +317,7 @@ MetersPerSecondSquared car_compute_acceleration_adaptive_cruise(const Car* car, 
         LOG_ERROR("Error: Car %d speed_target must be non-negative. Received: %f", car_get_id(car), speed_target);
         exit(EXIT_FAILURE);
     }
-    const Car* lead_car = situation->nearby_vehicles.lead;
+    const Car* lead_car = situation->lead;
     // First, check if there is a lead car
     if (!lead_car) {
         // No lead car, just cruise at the target speed
@@ -328,7 +328,7 @@ MetersPerSecondSquared car_compute_acceleration_adaptive_cruise(const Car* car, 
         Meters car_position = situation->lane_progress_m;
 
         Meters target_distance_from_next_car = fmax(car_speed, 0) * lead_car_distance_in_seconds_target + min_distance;
-        Meters car_lengths_offset = (car_get_length(car) + car_get_length(situation->nearby_vehicles.lead)) / 2;
+        Meters car_lengths_offset = car->cached_half_length + situation->lead->cached_half_length;
         target_distance_from_next_car += car_lengths_offset;
         Meters distance_to_lead_vehicle;
         MetersPerSecond speed_lead_vehicle;
@@ -343,8 +343,8 @@ MetersPerSecondSquared car_compute_acceleration_adaptive_cruise(const Car* car, 
 BrakingDistance car_compute_braking_distance(const Car* car) {
     BrakingDistance braking_distance;
     CarAccelProfile capable = car->capabilities.accel_profile;
-    CarAccelProfile preferred = car_accel_profile_get_effective(car->capabilities.accel_profile, car->preferences.acceleration_profile);
-    MetersPerSecond speed = car_get_speed(car);
+    const CarAccelProfile preferred = car_accel_profile_get_effective(car->capabilities.accel_profile, car->preferences.acceleration_profile);
+    MetersPerSecond speed = car->speed;
     braking_distance.capable = speed * speed / (2 * capable.max_deceleration);
     braking_distance.preferred = speed * speed / (2 * preferred.max_deceleration);
     // for pid braking distance, when speed is greater than MPH_60/4, we apply preferred.max_deceleration until speed is less than MPH_60/4. Then exponential decay kicks in and v^2/x^2 ratio becomes k at all times. Therefore stopping distance = distance to reach speed MPH_60/4 + distance to stop from there.

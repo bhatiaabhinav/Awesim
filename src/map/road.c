@@ -71,28 +71,29 @@ Lane* road_get_lane(const Road* self, Map* map, int index) {
         return NULL;
     }
     LaneId lane_id = self->lane_ids[index];
-    return map_get_lane(map, lane_id);
+    return &map->lanes[lane_id];
 }
 
 Lane* road_get_leftmost_lane(const Road* self, Map* map) {
-    if (self->num_lanes == 0) {
-        return NULL;
-    }
     LaneId lane_id = self->lane_ids[0];
-    return map_get_lane(map, lane_id);
+    return &map->lanes[lane_id];
 }
 
 Lane* road_get_rightmost_lane(const Road* self, Map* map) {
-    if (self->num_lanes == 0) {
-        return NULL;
-    }
     LaneId lane_id = self->lane_ids[self->num_lanes - 1];
-    return map_get_lane(map, lane_id);
+    return &map->lanes[lane_id];
 }
 
 bool road_is_merge_available(const Road* self, Map* map) {
+    if (self->static_cache_valid) return self->cached_is_merge_available;
     const Lane* leftmost_lane = road_get_leftmost_lane(self, map);
     return leftmost_lane && lane_is_merge_available(leftmost_lane);
+}
+
+void road_update_static_cached_variables(Road* self, Map* map) {
+    const Lane* leftmost_lane = road_get_leftmost_lane(self, map);
+    self->cached_is_merge_available = leftmost_lane && lane_is_merge_available(leftmost_lane);
+    self->static_cache_valid = true;
 }
 
 bool road_is_exit_road_available(const Road* self, Map* map, double progress) {

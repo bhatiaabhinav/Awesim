@@ -180,56 +180,52 @@ LaneId lane_get_connection_left_id(const Lane* self) { return self->connections[
 Lane* lane_get_connection_left(const Lane* self, Map* map) {
     LaneId left_id = lane_get_connection_left_id(self);
     if (left_id < 0) return NULL;
-    return map_get_lane(map, left_id);
+    return &map->lanes[left_id];
 }
 LaneId lane_get_connection_straight_id(const Lane* self) { return self->connections[1]; }
 Lane* lane_get_connection_straight(const Lane* self, Map* map) {
     LaneId straight_id = lane_get_connection_straight_id(self);
     if (straight_id < 0) return NULL;
-    return map_get_lane(map, straight_id);
+    return &map->lanes[straight_id];
 }
 LaneId lane_get_connection_right_id(const Lane* self) { return self->connections[2]; }
 Lane* lane_get_connection_right(const Lane* self, Map* map) {
     LaneId right_id = lane_get_connection_right_id(self);
     if (right_id < 0) return NULL;
-    return map_get_lane(map, right_id);
+    return &map->lanes[right_id];
 }
 LaneId lane_get_merge_into_id(const Lane* self) { return self->merges_into_id; }
 Lane* lane_get_merge_into(const Lane* self, Map* map) {
     LaneId merge_id = lane_get_merge_into_id(self);
     if (merge_id < 0) return NULL;
-    return map_get_lane(map, merge_id);
+    return &map->lanes[merge_id];
 }
 LaneId lane_get_exit_lane_id(const Lane* self) { return self->exit_lane_id; }
 Lane* lane_get_exit_lane(const Lane* self, Map* map) {
     LaneId exit_id = lane_get_exit_lane_id(self);
     if (exit_id < 0) return NULL;
-    return map_get_lane(map, exit_id);
+    return &map->lanes[exit_id];
 }
 LaneId lane_get_adjacent_left_id(const Lane* self) { return self->adjacents[0]; }
 Lane* lane_get_adjacent_left(const Lane* self, Map* map) {
     LaneId left_id = lane_get_adjacent_left_id(self);
-    if (left_id < 0) return NULL;
-    return map_get_lane(map, left_id);
+    return left_id < 0 ? NULL : &map->lanes[left_id];
 }
 LaneId lane_get_adjacent_right_id(const Lane* self) { return self->adjacents[1]; }
 Lane* lane_get_adjacent_right(const Lane* self, Map* map) {
     LaneId right_id = lane_get_adjacent_right_id(self);
-    if (right_id < 0) return NULL;
-    return map_get_lane(map, right_id);
+    return right_id < 0 ? NULL : &map->lanes[right_id];
 }
 RoadId lane_get_road_id(const Lane* self) { return self->road_id; }
 Road* lane_get_road(const Lane* self, Map* map) {
     RoadId road_id = lane_get_road_id(self);
-    if (road_id < 0) return NULL;
-    return map_get_road(map, road_id);
+    return road_id < 0 ? NULL : &map->roads[road_id];
 }
 IntersectionId lane_get_intersection_id(const Lane* self) { return self->intersection_id; }
 bool lane_is_at_intersection(const Lane* self) { return self->is_at_intersection; }
 Intersection* lane_get_intersection(const Lane* self, Map* map) {
     IntersectionId intersection_id = lane_get_intersection_id(self);
-    if (intersection_id < 0) return NULL;
-    return map_get_intersection(map, intersection_id);
+    return intersection_id < 0 ? NULL : &map->intersections[intersection_id];
 }
 int lane_get_num_cars(const Lane* self) { return self->num_cars; }
 CarId lane_get_car_id(const Lane* self, int index) {
@@ -252,20 +248,36 @@ Car* lane_get_car(const Lane* self, Simulation* sim, int index) {
 // Fancier Functions
 //
 
-int lane_get_num_connections_incoming(const Lane* self) {
+static int _lane_compute_num_connections_incoming(const Lane* self) {
     int count = 0;
-    if (self->connections_incoming[0] >= 0) count++; // left incoming
-    if (self->connections_incoming[1] >= 0) count++; // straight incoming
-    if (self->connections_incoming[2] >= 0) count++; // right incoming
+    if (self->connections_incoming[0] >= 0) count++;
+    if (self->connections_incoming[1] >= 0) count++;
+    if (self->connections_incoming[2] >= 0) count++;
     return count;
 }
 
-int lane_get_num_connections(const Lane* self) {
+static int _lane_compute_num_connections(const Lane* self) {
     int count = 0;
-    if (self->connections[0] >= 0) count++; // left connection
-    if (self->connections[1] >= 0) count++; // straight connection
-    if (self->connections[2] >= 0) count++; // right connection
+    if (self->connections[0] >= 0) count++;
+    if (self->connections[1] >= 0) count++;
+    if (self->connections[2] >= 0) count++;
     return count;
+}
+
+int lane_get_num_connections_incoming(const Lane* self) {
+    if (self->static_cache_valid) return self->cached_num_connections_incoming;
+    return _lane_compute_num_connections_incoming(self);
+}
+
+int lane_get_num_connections(const Lane* self) {
+    if (self->static_cache_valid) return self->cached_num_connections;
+    return _lane_compute_num_connections(self);
+}
+
+void lane_update_static_cached_variables(Lane* self) {
+    self->cached_num_connections_incoming = _lane_compute_num_connections_incoming(self);
+    self->cached_num_connections = _lane_compute_num_connections(self);
+    self->static_cache_valid = true;
 }
 
 bool lane_is_merge_available(const Lane* self) {
@@ -529,6 +541,15 @@ void map_precompute_lane_geometry(Map* map) {
         if (lane->type == QUARTER_ARC_LANE) {
             lane_precompute_arc_geometry(lane, map);
         }
+    }
+}
+
+void map_update_static_cached_variables(Map* map) {
+    for (int i = 0; i < map->num_lanes; i++) {
+        lane_update_static_cached_variables(map_get_lane(map, i));
+    }
+    for (int i = 0; i < map->num_roads; i++) {
+        road_update_static_cached_variables(map_get_road(map, i), map);
     }
 }
 // Lane Car Management

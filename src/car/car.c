@@ -22,6 +22,7 @@ void car_init(Car* car, Dimensions3D dimensions, CarCapabilities capabilities, L
     car->lane_id = ID_NULL;
     car->lane_progress = 0.0;
     car->lane_progress_meters = 0.0;
+    car->cached_half_length = dimensions.y * 0.5;
     car->lane_rank = -1;
     car->speed = 0.0;
     car->damage = 0.0;

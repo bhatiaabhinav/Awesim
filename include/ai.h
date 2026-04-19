@@ -31,28 +31,8 @@ struct BrakingDistance {
 };
 typedef struct BrakingDistance BrakingDistance;
 
-// Struct for vehicles near the ego, aiding lane/turn/merge/cruise decisions.
-struct NearbyVehicles {
-    Car* ahead[3];                 // Vehicle ahead in target lane for change/merge. If none, closest in next lane (straight outgoing).
-    Car* colliding[3];             // Colliding vehicle during lane change (for indicator_none, it is the currently colliding vehicle). There may be multiple colliding vehicles, so the one furthest ahead is used.
-    Car* behind[3];                // Vehicle behind in target lane for change/merge. If none, closest in prev lane (straight incoming).
-    Car* lead;      // Lead vehicle in current lane (ahead in current lane), defined as the closest vehicle with progress greater than ours. If none in the same lane, then the closest vehicle ahead in the next lane (straight outgoing).. If none, car == NULL.
-    Car* following; // Following vehicle in current lane, (behind in current lane), defined as the closest vehicle with progress less than ours. If none, car == NULL.
-};
-typedef struct NearbyVehicles NearbyVehicles;
-
-
-// Flattened list of nearby vehicles for easier processing
-struct NearbyVehiclesFlattened {
-    CarId car_ids[11];              // Array to hold extracted car IDs
-    int count;                      // Number of cars extracted
-};
-
-typedef struct NearbyVehiclesFlattened NearbyVehiclesFlattened;
-
-void nearby_vehicles_flatten(NearbyVehicles* nearby_vehicles, NearbyVehiclesFlattened* flattened);
-CarId nearby_vehicles_flattened_get_car_id(const NearbyVehiclesFlattened* flattened, int index);
-int nearby_vehicles_flattened_get_count(const NearbyVehiclesFlattened* flattened);
+// (NearbyVehicles struct removed — lead vehicle is now a direct field on SituationalAwareness,
+//  and merge safety is checked live in car_is_lane_change_dangerous)
 
 
 struct RGB {
@@ -252,8 +232,8 @@ struct SituationalAwareness {
     bool is_my_turn_at_stop_sign_fcfs;     // If at a four-way stop sign, is it my turn to go based on FCFS?
     
 
-    // Surrounding Vehicles
-    NearbyVehicles nearby_vehicles;
+    // Lead vehicle: closest vehicle ahead in current lane (or next connected lane). NULL if none.
+    Car* lead;
 
     // Braking distances
     BrakingDistance braking_distance;
