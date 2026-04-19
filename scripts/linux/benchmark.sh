@@ -13,7 +13,7 @@ if [ $? -ne 0 ]; then
 fi
 
 clang \
-    -O3 -flto -funroll-loops \
+    -O3 -flto -funroll-loops -march=native -ffast-math \
     -Iinclude \
     src/benchmark.c src/utils/*.c src/map/*.c src/sim/*.c src/awesim/*.c src/car/*.c src/ai/*.c src/logging/*.c\
     -o ./bin/benchmark \
