@@ -782,7 +782,7 @@ bool defensive_yield_despite_right_of_way(const Car* self, Simulation* sim, cons
 
 
             Meters lane_length = lane_get_length(lane);
-            Meters distance_to_lane_end = lane_length - car_progress_m - car_get_length(c) / 2;
+            Meters distance_to_lane_end = lane_length - car_progress_m - c->cached_half_length;
 
             if (distance_to_lane_end > 0) {
                 if (car_speed > 0) {

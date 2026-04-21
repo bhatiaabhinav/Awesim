@@ -7,7 +7,8 @@
 #include <assert.h>
 #include <math.h>
 
-
+#define STOP_ZONE_NEAR  (STOP_LINE_BUFFER_METERS + STOP_LINE_BUFFER_TOLERANCE_METERS)
+#define STOP_ZONE_FAR  (STOP_LINE_BUFFER_METERS - STOP_LINE_BUFFER_TOLERANCE_METERS)
 
 // #define BENCHMARK_SIM_LOGIC
 // #define BENCHMARK_SIM_UPDATE_CAR
@@ -58,25 +59,23 @@ static int _bench_upd_call_count = 0;
 #define BENCH_UPD_INTERVAL 500000 // Print every N calls (steps * cars)
 #endif
 
-static void car_handle_movement_or_lane_change(Simulation* sim, Car* car, Lane* new_lane) {
-    Map* map = sim_get_map(sim);
-    Lane* current_lane = car_get_lane(car, map);
+static void car_handle_movement_or_lane_change(Simulation* sim, Car* car, Lane* current_lane, Lane* new_lane) {
     if (current_lane == new_lane) {
         lane_move_car(current_lane, car, sim);
         return; // No change needed
     }
-    if (current_lane == NULL || new_lane == NULL) {
-        LOG_ERROR("Car %d cannot change lanes: current lane or new lane is NULL", car->id);
-        return;
-    }
-    if (new_lane->direction == direction_opposite(current_lane->direction)) {
-        LOG_ERROR("Car %d cannot change to a lane in the opposite direction: current lane %d, new lane %d", car->id, current_lane->id, new_lane->id);
-        return;
-    }
+    // if (current_lane == NULL || new_lane == NULL) {
+    //     LOG_ERROR("Car %d cannot change lanes: current lane or new lane is NULL", car->id);
+    //     return;
+    // }
+    // if (new_lane->direction == direction_opposite(current_lane->direction)) {
+    //     LOG_ERROR("Car %d cannot change to a lane in the opposite direction: current lane %d, new lane %d", car->id, current_lane->id, new_lane->id);
+    //     return;
+    // }
     LOG_TRACE("Processing car %d changing lane from %d to %d", car->id, current_lane->id, new_lane->id);
     lane_remove_car(current_lane, car, sim);
     lane_add_car(new_lane, car, sim);
-    car_set_lane(car, new_lane);
+    car->lane_id = new_lane->id;
     car->lowest_speed_in_stop_zone = __FLT_MAX__; // Reset stop zone tracking on lane change
     car->lowest_speed_post_stop_line_before_lane_end = __FLT_MAX__; // Reset post stop line tracking on lane change
 }
@@ -86,19 +85,19 @@ static void sim_update_car(Simulation* self, CarId car_id, Seconds dt) {
     double _buc_t0 = _bench_get_time_us();
     #endif
     Car* car = sim_get_car(self, car_id);
-    Map* map = sim_get_map(self);
-    Lane* lane = car_get_lane(car, map);
-    double progress = car_get_lane_progress(car);
-    Meters s = car_get_lane_progress_meters(car);
-    CarIndicator lane_change_intent = car_get_indicator_lane(car);
-    CarIndicator turn_intent = car_get_indicator_turn(car);
-    CarIndicator lane_change_requested = car_get_request_indicated_lane(car) ? lane_change_intent : INDICATOR_NONE;
-    CarIndicator turn_requested = car_get_request_indicated_turn(car) ? turn_intent : INDICATOR_NONE;
-    MetersPerSecondSquared a = car_get_acceleration(car);
+    Map* map = &self->map;
+    Lane* lane = &map->lanes[car->lane_id];
+    double progress = car->lane_progress;
+    Meters s = car->lane_progress_meters;
+    CarIndicator lane_change_intent = car->indicator_lane;
+    CarIndicator turn_intent = car->indicator_turn;
+    CarIndicator lane_change_requested = car->request_indicated_lane ? lane_change_intent : INDICATOR_NONE;
+    CarIndicator turn_requested = car->request_indicated_turn ? turn_intent : INDICATOR_NONE;
+    MetersPerSecondSquared a = car->acceleration;
     // multiply acceleration by grip of the lane
-    a *= lane->grip;
-    car_set_acceleration(car, a);
-    MetersPerSecond v = car_get_speed(car);
+    // a *= lane->grip;
+    // car_set_acceleration(car, a);
+    MetersPerSecond v = car->speed;
     bool lane_changed = false;
     bool turned = false;
     bool lane_changed_left = false;
@@ -110,9 +109,9 @@ static void sim_update_car(Simulation* self, CarId car_id, Seconds dt) {
     double _buc_t1 = _bench_get_time_us();
     #endif
 
-    LOG_TRACE("Car %d fuel level: %.2f liters", car->id, car_get_fuel_level(car));
+    LOG_TRACE("Car %d fuel level: %.2f liters", car->id, car->fuel_level);
     // If fuel is zero, simulate coasting to a stop in 1 minute using a speed-proportional controller (a = -√k ⋅ v). The settling time is 4 / √k => k = (4 / settling_time)^2 = (4/60)^2. If the car is applying brakes, add that effect as well.
-    if (car_get_fuel_level(car) <= 1e-10) {
+    if (car->fuel_level <= 1e-10) {
         double sqrt_k = 4.0 / 60.0;
         double a_coast = -sqrt_k * v;
         double a_brake = 0;
@@ -134,25 +133,27 @@ static void sim_update_car(Simulation* self, CarId car_id, Seconds dt) {
 
     LOG_TRACE("T=%.2f: Processing car %d on lane %d with progress %.5f (s = %.5f), v = %.2f, a = %.2f, lane_change_requested = %d, turn_requested = %d", self->time, car->id, lane->id, progress, s, v, a, lane_change_requested, turn_requested);
 
-    Lane* adjacent_left = lane_get_adjacent_left(lane, map);
-    Lane* adjacent_right = lane_get_adjacent_right(lane, map);
-    if(lane_change_requested == INDICATOR_LEFT && adjacent_left && adjacent_left->direction == lane->direction) {
-        lane = adjacent_left;
-        lane_change_requested = INDICATOR_NONE; // Reset request after lane change
-        lane_changed = true;
-        lane_changed_left = true;
-        s = progress * lane->length; // Update s after changing lane. Progress is constant across neighbor lanes, but s can be different for curved roads.
-        LOG_TRACE("Car %d changed to left lane %d", car->id, lane->id);
-    } else if (lane_change_requested == INDICATOR_RIGHT && adjacent_right) {
-        assert(adjacent_right->direction == lane->direction && "How did this happen? Map error!");
-        lane = adjacent_right;
-        lane_change_requested = INDICATOR_NONE; // Reset request after lane change
-        lane_changed = true;
-        lane_changed_right = true;
-        s = progress * lane->length; // Update s after changing lane. Progress is constant across neighbor lanes, but s can be different for curved roads.
-        LOG_TRACE("Car %d changed to right lane %d", car->id, lane->id);
-    } else {
-        // Do nothing
+    if(lane_change_requested == INDICATOR_LEFT) {
+        Lane* adjacent_left = lane->adjacents[0] != ID_NULL ? &map->lanes[lane->adjacents[0]] : NULL;
+        if (adjacent_left && adjacent_left->direction == lane->direction) {
+            lane = adjacent_left;
+            lane_change_requested = INDICATOR_NONE; // Reset request after lane change
+            lane_changed = true;
+            lane_changed_left = true;
+            s = progress * lane->length; // Update s after changing lane. Progress is constant across neighbor lanes, but s can be different for curved roads.
+            LOG_TRACE("Car %d changed to left lane %d", car->id, lane->id);
+        }
+    } else if (lane_change_requested == INDICATOR_RIGHT) {
+        Lane* adjacent_right = lane->adjacents[1] != ID_NULL ? &map->lanes[lane->adjacents[1]] : NULL;
+        if (adjacent_right) {
+            assert(adjacent_right->direction == lane->direction && "How did this happen? Map error!");
+            lane = adjacent_right;
+            lane_change_requested = INDICATOR_NONE; // Reset request after lane change
+            lane_changed = true;
+            lane_changed_right = true;
+            s = progress * lane->length; // Update s after changing lane. Progress is constant across neighbor lanes, but s can be different for curved roads.
+            LOG_TRACE("Car %d changed to right lane %d", car->id, lane->id);
+        }
     }
     #ifdef BENCHMARK_SIM_UPDATE_CAR
     double _buc_t3 = _bench_get_time_us();
@@ -201,17 +202,17 @@ static void sim_update_car(Simulation* self, CarId car_id, Seconds dt) {
     }
     Meters net_forward_movement_meters = s - s_initial; // Calculate net movement in meters.
     LOG_TRACE("Car %d: Updated speed = %.2f, position s = %.2f, Net forward movement = %.2f, progress = %.5f", car->id, v, s, net_forward_movement_meters, progress);
-    Liters fuel_consumed = fuel_consumption_compute_typical(_v, a, dt);
-    Liters fuel_remaining = fmax(car_get_fuel_level(car) - fuel_consumed, 0);
+    Liters fuel_consumed = car->fuel_level < 1e9 ? fuel_consumption_compute_typical(_v, a, dt) : 0.0; // treat very high fuel as infinite fuel, and as a flag for disabling fuel dynamics.
+    Liters fuel_remaining = car->fuel_level - fuel_consumed;
+    if (fuel_remaining < 0.0) fuel_remaining = 0.0;
     #ifdef BENCHMARK_SIM_UPDATE_CAR
     double _buc_t4 = _bench_get_time_us();
     #endif
 
     // ------------ handle merge --------------------
     // ----------------------------------------------
-    bool merge_available = lane_is_merge_available(lane);
     bool merge_intent = lane_change_requested == INDICATOR_LEFT;
-    if (merge_available && merge_intent) {
+    if (merge_intent && lane_is_merge_available(lane)) {
         Lane* merges_into = lane_get_merge_into(lane, map);
         s += lane->merges_into_start * merges_into->length;
         lane = merges_into;
@@ -230,10 +231,11 @@ static void sim_update_car(Simulation* self, CarId car_id, Seconds dt) {
         LOG_TRACE("Car %d: Progress %.2f (s = %.2f) exceeds lane length %.2f. Handling turn. Connections: left = %d, straight = %d, right = %d", car->id, progress, s, lane->length, lane->connections[0], lane->connections[1], lane->connections[2]);
         Lane* pre_transition_lane = lane;
         CarIndicator this_turn_direction = INDICATOR_NONE; // Track which direction was taken in this iteration
-        Lane* connection_left = lane_get_connection_left(lane, map);
-        Lane* connection_straight = lane_get_connection_straight(lane, map);
-        Lane* connection_right = lane_get_connection_right(lane, map);
-        if (turn_requested == INDICATOR_LEFT && connection_left) {
+        bool has_connection_left = lane->connections[0] != ID_NULL;
+        bool has_connection_straight = lane->connections[1] != ID_NULL;
+        bool has_connection_right = lane->connections[2] != ID_NULL;
+        if (turn_requested == INDICATOR_LEFT && has_connection_left) {
+            Lane* connection_left = lane_get_connection_left(lane, map);
             s -= lane->length;
             lane = connection_left;
             turn_requested = INDICATOR_NONE; // Reset request after turn
@@ -241,7 +243,8 @@ static void sim_update_car(Simulation* self, CarId car_id, Seconds dt) {
             turned_left = true;
             this_turn_direction = INDICATOR_LEFT;
             LOG_TRACE("Car %d turned left into lane %d.", car->id, lane->id);
-        } else if (turn_requested == INDICATOR_RIGHT && connection_right) {
+        } else if (turn_requested == INDICATOR_RIGHT && has_connection_right) {
+            Lane* connection_right = lane_get_connection_right(lane, map);
             s -= lane->length;
             lane = connection_right;
             turn_requested = INDICATOR_NONE; // Reset request after turn
@@ -250,18 +253,21 @@ static void sim_update_car(Simulation* self, CarId car_id, Seconds dt) {
             this_turn_direction = INDICATOR_RIGHT;
             LOG_TRACE("Car %d turned right into lane %d.", car->id, lane->id);
         } else {
-            if (connection_straight) {
+            if (has_connection_straight) {
+                Lane* connection_straight = lane_get_connection_straight(lane, map);
                 s -= lane->length;
                 lane = connection_straight;
                 LOG_TRACE("Car %d went straight into lane %d", car->id, lane->id);
-            } else if (connection_right) {
+            } else if (has_connection_right) {
+                Lane* connection_right = lane_get_connection_right(lane, map);
                 s -= lane->length;
                 lane = connection_right;
                 turned = true;
                 turned_right = true;
                 this_turn_direction = INDICATOR_RIGHT;
                 LOG_TRACE("Car %d had to turn right into lane %d as no straight connection was available.", car->id, lane->id);
-            } else if (connection_left) {
+            } else if (has_connection_left) {
+                Lane* connection_left = lane_get_connection_left(lane, map);
                 s -= lane->length;
                 lane = connection_left;
                 turned = true;
@@ -318,8 +324,7 @@ static void sim_update_car(Simulation* self, CarId car_id, Seconds dt) {
     // ------------ handle exit ---------------------
     // --------------------------------------------
     bool exit_intent = lane_change_requested == INDICATOR_RIGHT;
-    bool exit_available = lane_is_exit_lane_available(lane, progress);
-    if (exit_intent && exit_available) {
+    if (exit_intent && lane_is_exit_lane_available(lane, progress)) {
         s = (progress - lane->exit_lane_start) * lane->length;
         lane = lane_get_exit_lane(lane, map);
         progress = s / lane->length;
@@ -332,52 +337,55 @@ static void sim_update_car(Simulation* self, CarId car_id, Seconds dt) {
     double _buc_t7 = _bench_get_time_us();
     #endif
 
-    car_set_lane_progress(car, progress, s, net_forward_movement_meters);
-    car_set_speed(car, v);
-    car_set_fuel_level(car, fuel_remaining);
+    // car_set_lane_progress(car, progress, s);
+    car->lane_progress = progress;
+    car->lane_progress_meters = s;
+    // car_set_speed(car, v);
+    car->speed = v;
+    // car_set_fuel_level(car, fuel_remaining);
+    car->fuel_level = fuel_remaining;
 
     // Update lowest speed in stop zone tracking (all cars, needed for FCFS 4-way stop logic)
-    {
-        Meters car_half_length = car->cached_half_length;
-        Meters dist_to_end = lane->length * (1.0 - progress);
-        Meters dist_from_leading_edge = dist_to_end - car_half_length;
-        Meters stop_zone_near = STOP_LINE_BUFFER_METERS + STOP_LINE_BUFFER_TOLERANCE_METERS;
-        Meters stop_zone_far  = STOP_LINE_BUFFER_METERS - STOP_LINE_BUFFER_TOLERANCE_METERS;
-        if (dist_from_leading_edge <= stop_zone_near && dist_from_leading_edge >= stop_zone_far) {
-            MetersPerSecond abs_v = fabs(v);
-            if (abs_v < car->lowest_speed_in_stop_zone) {
-                car->lowest_speed_in_stop_zone = abs_v;
+    Meters dist_to_end = lane->length * (1.0 - progress);
+    Meters dist_from_leading_edge = dist_to_end - car->cached_half_length;
+    if (dist_from_leading_edge <= STOP_ZONE_NEAR && dist_from_leading_edge >= STOP_ZONE_FAR) {
+        if (v < car->lowest_speed_in_stop_zone) {
+            car->lowest_speed_in_stop_zone = v;
+            if (car->lowest_speed_in_stop_zone < 0) {
+                car->lowest_speed_in_stop_zone = 0; // Do not allow lowest speed in stop zone to be negative, as that would mess up violation detection and FCFS logic.
             }
         }
-        if (dist_from_leading_edge < STOP_LINE_BUFFER_METERS && dist_from_leading_edge > 0) {
-            MetersPerSecond abs_v = fabs(v);
-            if (abs_v < car->lowest_speed_post_stop_line_before_lane_end) {
-                car->lowest_speed_post_stop_line_before_lane_end = abs_v;
+    }
+    if (dist_from_leading_edge < STOP_LINE_BUFFER_METERS && dist_from_leading_edge > 0) {
+        if (v < car->lowest_speed_post_stop_line_before_lane_end) {
+            car->lowest_speed_post_stop_line_before_lane_end = v;
+            if (car->lowest_speed_post_stop_line_before_lane_end < 0) {
+                car->lowest_speed_post_stop_line_before_lane_end = 0; // Do not allow lowest speed post stop line to be negative, as that would mess up violation detection and FCFS logic.
             }
         }
     }
     #ifdef BENCHMARK_SIM_UPDATE_CAR
     double _buc_c1 = _bench_get_time_us();
     #endif
-    car_handle_movement_or_lane_change(self, car, lane);
+    car_handle_movement_or_lane_change(self, car, original_lane, lane);
     #ifdef BENCHMARK_SIM_UPDATE_CAR
     double _buc_c2 = _bench_get_time_us();
     #endif
-    car_update_geometry(self, car);
+    car_update_center_orientation(self, car);
     #ifdef BENCHMARK_SIM_UPDATE_CAR
     double _buc_c3 = _bench_get_time_us();
     #endif
     if (lane_changed) { 
-        car_set_request_indicated_lane(car, false); // Reset lane change request after successful lane change
-        if (car_get_auto_turn_off_indicators(car)) {
-            car_set_indicator_lane(car, INDICATOR_NONE); // Automatically turn off lane change indicator after changing lane
+        car->request_indicated_lane = false;  // Reset lane change request after successful lane change
+        if (car->auto_turn_off_indicators) {
+            car->indicator_lane = INDICATOR_NONE; // Automatically turn off lane change indicator after changing lane
             LOG_TRACE("Car %d: Automatically turned off lane change indicator after changing to lane %d", car->id, lane->id);
         }
     }
     if (turned) {
-        car_set_request_indicated_turn(car, false); // Reset turn request after successful turn
-        if (car_get_auto_turn_off_indicators(car)) {
-            car_set_indicator_turn(car, INDICATOR_NONE); // Automatically turn off turn indicator after turning
+        car->request_indicated_turn = false; // Reset turn request after successful turn
+        if (car->auto_turn_off_indicators) {
+            car->indicator_turn = INDICATOR_NONE; // Automatically turn off turn indicator after turning
             LOG_TRACE("Car %d: Automatically turned off turn indicator after turning to lane %d", car->id, lane->id);
         }
     }
@@ -450,12 +458,13 @@ static void sim_update_car(Simulation* self, CarId car_id, Seconds dt) {
     }
 
     // ---- Detect speeding and tailgating violations ----
-    if (self->traffic_violations_logs_queue.enabled[car_id]) {
+    if (self->traffic_violations_logs_queue.enabled[car_id] && ((self->step_count + car_id) % car->capabilities.action_repeat == 0)) {
+        double effective_dt = dt * car->capabilities.action_repeat; // Scale probability by action_repeat
         MetersPerSecond abs_speed = fabs(v);
         MetersPerSecond speed_limit = lane->speed_limit;
         if (abs_speed > speed_limit + OVERSPEEDING_THRESHOLD_MPS) {
-            // Probabilistic detection: probability per second * dt
-            if (rand_0_to_1() < OVERSPEEDING_DETECTION_PROBABILITY * dt) {
+            // Probabilistic detection: probability per second * effective_dt
+            if (rand_0_to_1() < OVERSPEEDING_DETECTION_PROBABILITY * effective_dt) {
                 traffic_violation_log(&self->traffic_violations_logs_queue, car_id, TRAFFIC_VIOLATION_OVERSPEEDING, self->time, abs_speed - speed_limit);
             }
         }
@@ -464,21 +473,21 @@ static void sim_update_car(Simulation* self, CarId car_id, Seconds dt) {
         SituationalAwareness* sa = sim_get_situational_awareness(self, car_id);
         if (abs_speed > TAILGATING_MIN_SPEED_MPS && sa->lead && a >= 0) {
             Meters distance_to_lead;
-            perceive_lead_vehicle(car, self, sa, &distance_to_lead, NULL, NULL, true, true);
+            perceive_lead_vehicle(car, self, sa, &distance_to_lead, NULL, NULL, true, false);
             Meters bumper_to_bumper = distance_to_lead - (car->cached_half_length + sa->lead->cached_half_length);
             Seconds time_headway = bumper_to_bumper / abs_speed;
             if (time_headway < TAILGATING_TIME_HEADWAY_THRESHOLD) {
-                if (rand_0_to_1() < TAILGATING_DETECTION_PROBABILITY * dt) {
+                if (rand_0_to_1() < TAILGATING_DETECTION_PROBABILITY * effective_dt) {
                     traffic_violation_log(&self->traffic_violations_logs_queue, car_id, TRAFFIC_VIOLATION_TAILGATING, self->time, time_headway);
                 }
             }
         }
     }
 
-    Road* road = lane_get_road(lane, map);
-    Intersection* intersection = lane_get_intersection(lane, map);
-    const char* road_name = road ? road->name : intersection ? intersection->name : "Unknown";
-    LOG_TRACE("Car %d processing complete: Updated state: lane %d (%s), progress %.5f (%.5f miles), speed = %.5f mps (%.5f mph), acceleration = %.5f mpss", car->id, lane->id, road_name, progress, to_miles(s), v, to_mph(v), a);
+    // Road* road = lane_get_road(lane, map);
+    // Intersection* intersection = lane_get_intersection(lane, map);
+    // const char* road_name = road ? road->name : intersection ? intersection->name : "Unknown";
+    // LOG_TRACE("Car %d processing complete: Updated state: lane %d (%s), progress %.5f (%.5f miles), speed = %.5f mps (%.5f mph), acceleration = %.5f mpss", car->id, lane->id, road_name, progress, to_miles(s), v, to_mph(v), a);
     #ifdef BENCHMARK_SIM_UPDATE_CAR
     double _buc_t8 = _bench_get_time_us();
     _bench_upd_init_total_us      += _buc_t1 - _buc_t0;
@@ -564,6 +573,10 @@ void sim_integrate(Simulation* self, Seconds time_period) {
         double _bench_sa_start = _bench_get_time_us();
         #endif
         for(int car_id=0; car_id < self->num_cars; car_id++) {
+            Car* car = sim_get_car(self, car_id);
+            if ((self->step_count + car_id) % car->capabilities.action_repeat != 0) {
+                continue;
+            }
             situational_awareness_build(self, car_id);
         }
         #ifdef BENCHMARK_SIM_LOGIC
@@ -576,6 +589,10 @@ void sim_integrate(Simulation* self, Seconds time_period) {
         #endif
         for(int car_id=0; car_id < self->num_cars; car_id++) {
             Car* car = sim_get_car(self, car_id);
+            if ((self->step_count + car_id) % car->capabilities.action_repeat != 0) {
+                LOG_TRACE("Car %d is skipping decision making this step due to action repeat. (action_repeat = %d, step_count = %d)", car->id, car->capabilities.action_repeat, self->step_count);
+                continue;
+            }
             if (!sim_is_agent_enabled(self) || car_id > 0) {
                 // NPC car logic
                 npc_car_make_decisions(car, self);
@@ -618,6 +635,9 @@ void sim_integrate(Simulation* self, Seconds time_period) {
         #endif
         for (int car_id = 0; car_id < self->num_cars; car_id++) {
             Car* car = sim_get_car(self, car_id);
+            if ((self->step_count + car_id) % car->capabilities.action_repeat != 0) {
+                continue;
+            }
             DrivingAssistant* das = sim_get_driving_assistant(self, car_id);
             if (das) {
                 driving_assistant_post_sim_step(das, car, self);
@@ -684,6 +704,7 @@ void sim_integrate(Simulation* self, Seconds time_period) {
         #endif
 
         self->time += dt;
+        self->step_count++;
     }
     LOG_TRACE("Simulation advanced to time %.2f", self->time);
 }

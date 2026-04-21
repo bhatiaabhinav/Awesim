@@ -1,4 +1,6 @@
 #include "map.h"
+#include "car.h"
+#include "sim.h"
 #include "utils.h"
 #include "logging.h"
 #include <stdio.h>
@@ -557,63 +559,65 @@ void map_update_static_cached_variables(Map* map) {
 
 // add a car to the lane, maintaining descending order by progress
 void lane_add_car(Lane* self, Car* car, Simulation* sim) {
-    CarId car_id = car_get_id(car);
     if (self->num_cars >= MAX_CARS_PER_LANE) {
-        LOG_ERROR("Lane (id=%d) is full, cannot add car (id=%d). Max cars allowed: %d", self->id, car_id, MAX_CARS_PER_LANE);
+        LOG_ERROR("Lane (id=%d) is full, cannot add car (id=%d). Max cars allowed: %d", self->id, car->id, MAX_CARS_PER_LANE);
         return;
     }
 
-    double new_progress = car_get_lane_progress(car);
+    double new_progress = car->lane_progress;
     int insert_pos = self->num_cars;
 
-    // Find correct position to insert (keep descending order: highest progress first)
-    for (int i = 0; i < self->num_cars; i++) {
-        Car* car_i = sim_get_car(sim, self->cars_ids[i]);
-        if (new_progress > car_get_lane_progress(car_i)) {
-            insert_pos = i;
-            break;
+    // Find correct position to insert (keep descending order: highest progress first) using binary search
+    int low = 0;
+    int high = self->num_cars - 1;
+    while (low <= high) {
+        int mid = low + (high - low) / 2;
+        Car* car_mid = &sim->cars[self->cars_ids[mid]];
+        if (car_mid->lane_progress < new_progress) {
+            high = mid - 1;
+        } else {
+            low = mid + 1;
         }
     }
+    insert_pos = low;
 
     // Shift elements to the right and update ranks
     for (int i = self->num_cars; i > insert_pos; i--) {
         self->cars_ids[i] = self->cars_ids[i - 1];
-        Car* moved_car = sim_get_car(sim, self->cars_ids[i]);
-        car_set_lane_rank(moved_car, i);
+        sim->cars[self->cars_ids[i]].lane_rank = i; // update rank of the car we just moved
     }
 
-    self->cars_ids[insert_pos] = car_id;
-    car_set_lane_rank(car, insert_pos);
+    self->cars_ids[insert_pos] = car->id;
+    car->lane_rank = insert_pos;
     self->num_cars++;
 }
 
 // move a car (after updated progress) within the lane, maintaining descending order by progress, assuming other cars are properly ordered
 void lane_move_car(Lane* self, Car* car, Simulation* sim) {
-    CarId car_id = car_get_id(car);
-    double new_progress = car_get_lane_progress(car);
+    double new_progress = car->lane_progress;
 
-    int index = car_get_lane_rank(car);  // use known rank
+    int index = car->lane_rank;  // use known rank
 
-    if (index < 0 || index >= self->num_cars || self->cars_ids[index] != car_id) {
-        LOG_ERROR("Car (id=%d) has invalid rank in lane (id=%d). Cannot move.", car_id, self->id);
-        return;
-    }
+    // if (index < 0 || index >= self->num_cars || self->cars_ids[index] != car->id) {
+    //     LOG_ERROR("Car (id=%d) has invalid rank in lane (id=%d). Cannot move.", car->id, self->id);
+    //     return;
+    // }
 
     // Early exit if order is already valid
-    if ((index == 0 || new_progress <= car_get_lane_progress(sim_get_car(sim, self->cars_ids[index - 1]))) &&
-        (index == self->num_cars - 1 || new_progress >= car_get_lane_progress(sim_get_car(sim, self->cars_ids[index + 1])))) {
+    if ((index == 0 || new_progress <= sim->cars[self->cars_ids[index - 1]].lane_progress) &&
+        (index == self->num_cars - 1 || new_progress >= sim->cars[self->cars_ids[index + 1]].lane_progress)) {
         return;
     }
 
     // Bubble left (toward front) if progress increased
     while (index > 0) {
         int prev_idx = index - 1;
-        Car* prev_car = sim_get_car(sim, self->cars_ids[prev_idx]);
-        if (new_progress > car_get_lane_progress(prev_car)) {
+        Car* prev_car = &sim->cars[self->cars_ids[prev_idx]];
+        if (new_progress > prev_car->lane_progress) {
             self->cars_ids[index] = self->cars_ids[prev_idx];
-            car_set_lane_rank(prev_car, index);
+            prev_car->lane_rank = index; // update rank of the car we just moved
             index--;
-            self->cars_ids[index] = car_id;
+            self->cars_ids[index] = car->id;
         } else {
             break;
         }
@@ -622,39 +626,38 @@ void lane_move_car(Lane* self, Car* car, Simulation* sim) {
     // Bubble right (toward back) if progress decreased
     while (index < self->num_cars - 1) {
         int next_idx = index + 1;
-        Car* next_car = sim_get_car(sim, self->cars_ids[next_idx]);
-        if (new_progress < car_get_lane_progress(next_car)) {
+        Car* next_car = &sim->cars[self->cars_ids[next_idx]];
+        if (new_progress < next_car->lane_progress) {
             self->cars_ids[index] = self->cars_ids[next_idx];
-            car_set_lane_rank(next_car, index);
+            next_car->lane_rank = index; // update rank of the car we just moved
             index++;
-            self->cars_ids[index] = car_id;
+            self->cars_ids[index] = car->id;
         } else {
             break;
         }
     }
 
-    car_set_lane_rank(car, index);
+    car->lane_rank = index; // update rank of the moved car
 }
 
 // remove a car from the lane, maintaining descending order by progress
 void lane_remove_car(Lane* self, Car* car, Simulation* sim) {
-    CarId car_id = car_get_id(car);
-    int index = car_get_lane_rank(car);
+    int index = car->lane_rank; // use known rank
 
-    if (index < 0 || index >= self->num_cars || self->cars_ids[index] != car_id) {
-        LOG_ERROR("Car (id=%d) has invalid rank in lane (id=%d). Cannot remove.", car_id, self->id);
-        return;
-    }
+    // if (index < 0 || index >= self->num_cars || self->cars_ids[index] != car_id) {
+    //     LOG_ERROR("Car (id=%d) has invalid rank in lane (id=%d). Cannot remove.", car_id, self->id);
+    //     return;
+    // }
 
     // Shift left and update ranks
     for (int i = index; i < self->num_cars - 1; i++) {
         self->cars_ids[i] = self->cars_ids[i + 1];
-        Car* moved_car = sim_get_car(sim, self->cars_ids[i]);
-        car_set_lane_rank(moved_car, i);
+        sim->cars[self->cars_ids[i]].lane_rank = i; // update rank of the car we just moved
     }
     self->cars_ids[self->num_cars - 1] = ID_NULL; // Clear last position
 
     self->num_cars--;
 
-    car_set_lane_rank(car, -1); // Reset rank in car
+    // car_set_lane_rank(car, -1); // Reset rank in car
+    car->lane_rank = -1; // Reset rank in car
 }

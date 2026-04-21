@@ -7,6 +7,9 @@
 #include <windows.h>
 #endif
 
+#define CONTROL_HZ 15.0
+#define PHYSICS_HZ 60.0
+
 static char* SERVER_IP = "127.0.0.1";
 static int SERVER_PORT = 4242;
 
@@ -16,18 +19,19 @@ int main(int argc, char* argv[]) {
         LOG_ERROR("Invalid input. City width must be greater than 0. Exiting.");
         exit(EXIT_FAILURE);
     }
-    int num_cars = argc >= 3 ? atoi(argv[2]) : 512;  // number of cars to simulate. Prefer to read from command line argument, else use default.
+    int num_cars = argc >= 3 ? atoi(argv[2]) : 256;  // number of cars to simulate. Prefer to read from command line argument, else use default.
     if (num_cars <= 0) {
         LOG_ERROR("Invalid input. Number of cars must be greater than 0. Exiting.");
         exit(EXIT_FAILURE);
     }
     Seconds seconds_to_simulate = argc >= 4 ? atoi(argv[3]) : 1e9; // total time (in sim) to simulate, after which the program will exit. Prefer to read from command line argument, else use default.
 
-    Seconds dt = 0.02;                              // time resolution for integration.
+    Seconds dt = 1.0 / PHYSICS_HZ;                              // time resolution for integration.
+    Seconds control_dt = 1.0 / CONTROL_HZ;                      // time resolution for control.
     ClockReading initial_clock_reading = Monday_8_AM; // start clock at 8:00 AM on Monday.
     Weather weather = WEATHER_SUNNY;                // default weather condition.
-    printf("Simulation parameters: City width = %.2f meters, Number of cars = %d, Time resolution dt = %.2f seconds, Initial clock reading = %02d:%02d:%02d, Weather = %s, Seconds to simulate = %.2f\n",
-           city_width, num_cars, dt, initial_clock_reading.hours, initial_clock_reading.minutes, (int)initial_clock_reading.seconds, weather_strings[weather], seconds_to_simulate);
+    printf("Simulation parameters: City width = %.2f meters, Number of cars = %d, Time resolution dt = %.2f seconds, Control time resolution = %.2f seconds, Initial clock reading = %02d:%02d:%02d, Weather = %s, Seconds to simulate = %.2f\n",
+           city_width, num_cars, dt, control_dt, initial_clock_reading.hours, initial_clock_reading.minutes, (int)initial_clock_reading.seconds, weather_strings[weather], seconds_to_simulate);
 
     Simulation* sim = sim_malloc();
     if (!sim) {
@@ -36,7 +40,7 @@ int main(int argc, char* argv[]) {
     }
     LaneId agent_start_lane_id_options[] = {621, 87, 86, 600, ID_NULL}; // Example lane IDs where the agent car can be spawned. The last element must be ID_NULL to indicate the end of options.
     // LaneId* agent_start_lane_id_options = NULL;
-    awesim_setup(sim, city_width, num_cars, dt, initial_clock_reading, weather, false, agent_start_lane_id_options);
+    awesim_setup(sim, city_width, num_cars, dt, initial_clock_reading, weather, false, agent_start_lane_id_options, control_dt, control_dt);
     sim_set_npc_rogue_factor(sim, 0.05); // Set NPC rogue factor between 0.0 (law-abiding) to 1.0 (maximum rogue)
     // Make a file to store map information
     sim_get_driving_assistant(sim, 0)->smart_das_driving_style = SMART_DAS_DRIVING_STYLE_NORMAL;

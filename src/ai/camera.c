@@ -893,6 +893,8 @@ static void render_scene_internal(RGBCamera* camera, Simulation* sim, void** exc
         Meters center_distance = vec_distance(camera->position, car->center);
         if (center_distance > camera->max_distance + CAR_RENDER_DIST_OFFSET) continue;
 
+        car_update_geometry(sim, car);
+
         Coordinates3D b[4], t[4];
         for(int i=0; i<4; i++) {
             b[i] = (Coordinates3D){car->corners[i].x, car->corners[i].y, 0.0};

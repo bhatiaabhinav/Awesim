@@ -25,7 +25,7 @@ CarAccelProfile car_accel_profile_get_effective(CarAccelProfile capable, CarAcce
 struct CarCapabilities {
     CarAccelProfile accel_profile;
     MetersPerSecond top_speed;
-    Seconds reaction_time_delay;
+    int action_repeat; // Number of consecutive steps to repeat the same control for this car. Higher values can reduce the frequency of control changes, making behavior more consistent and less jittery, at the cost of responsiveness. Default is 1 (no repetition). Higher values naturally simulate slower reaction times, which can be desirable for NPC cars.
 };
 typedef struct CarCapabilities CarCapabilities;
 
@@ -43,25 +43,9 @@ typedef enum CarIndicator CarIndicator;
 
 // ---- Car preference profile ------
 
-// Describes the car's personality and personalized reward/cost function and determines the user's happiness only.
+// Describes the car's personality
 struct CarPersonality {
-    int lane;                           // lane preference. The user likes to stay in this lane and every second not in this lane incurs cost.
-    MetersPerSecond turn_speed;         // turn speed preference. Use is upset if the car turns at a speed lower or greater than this speed. cost = (turn_speed - true_speed)^2.
-    double scenic;                      // scenic preference between 0.0 and 1.0. User reward for this = scenic x time spent on scenic roads.
-    Meters distance_to_front_vehicle;   // distance to front vehicle preference. User is happy if this distance is respected. Cost = preferred distance - true distance when true distance is smaller.
-    Meters distance_to_back_vehicle;    // distance to back vehicle preference. User is happy if this distance is respected. Cost = preferred distance - true distance when true distance is smaller.
-    bool run_yellow_light;              // run yellow light preference. User is disappointed if the car slows down on seeing yellow light.
-    bool turn_right_on_red;             // turn right on red preference. User is upset if the car turns right when it is red, despite this flag.
-    double aversion_to_rough_terrain;   // aversion to rough terrain. Cost = aversion x time on rough terrain.
-    double aversion_to_traffic_jam;     // aversion to traffic jam. Being stuck in traffic jam carries cost = aversion x time spent in a traffic jam.
-    double aversion_to_construction_zone;   // aversion to construction zone.   Encountering a traffic signal causes this much cost.
-    double aversion_to_traffic_light;   // aversion to traffic light. Encountering a traffic signal causes this much cost.
-    double aversion_to_lane_change;     // aversion to lane change causes this much cost.
-    MetersPerSecond average_speed_offset;       // user likes to drive at speed limit + this offset for the most part. Cost = (true_speed - preffered_speed)^2.
-    MetersPerSecond min_speed_offset;           // user is upset if car drives below speed limit + this offset. Exponential cost for driving slower than this.
-    MetersPerSecond max_speed_offset;           // user is scared if car drives above speed limit + this offset. Exponential cost for driving faster than this.
     CarAccelProfile acceleration_profile;       // comfort, normal, eco, sport, aggressive.
-    Seconds time_headway;                // time headway preference. User is happy if the car maintains this time headway from the front vehicle. Cost = (time_headway - true_time_headway)^2.
 };
 typedef struct CarPersonality CarPersonality;
 
@@ -144,10 +128,6 @@ struct Car {
 
     bool auto_turn_off_indicators; // Whether the sim should automatically turn off the car's indicators after the requested lane change or turn is completed.
 
-    // history:
-    LaneId prev_lane_id; // Previous lane ID, useful to detect lane changes. This is the lane that the car was at the previous simulation timestep.
-    Meters recent_forward_movement;
-
     // stop zone tracking (reset on lane change, updated by sim_logic):
     MetersPerSecond lowest_speed_in_stop_zone; // Lowest speed recorded while the car was in the stop zone. Set to __FLT_MAX__ when reset (on lane change or init).
     MetersPerSecond lowest_speed_post_stop_line_before_lane_end; // Lowest speed recorded after passing the stop line until the end of the lane. Set to __FLT_MAX__ when reset (on lane change or init).
@@ -197,11 +177,6 @@ bool car_get_request_indicated_lane(const Car* self);
 bool car_get_request_indicated_turn(const Car* self);
 bool car_get_auto_turn_off_indicators(const Car* self);
 
-// Returns the recent forward movement of the car in the current simulation timestep.
-Meters car_get_recent_forward_movement(const Car* self);
-// Returns the previous lane ID of the car.
-LaneId car_get_prev_lane_id(const Car* self);
-
 // setters:
 
 // Sets the fuel tank capacity of the car.
@@ -209,7 +184,7 @@ void car_set_fuel_tank_capacity(Car* self, Liters capacity);
 // Sets the lane of the car.
 void car_set_lane(Car* self, const Lane* lane);
 // Sets the lane progress of the car. The progress should be between 0.0 and 1.0. Will be clipped automatically.
-void car_set_lane_progress(Car* self, double progress, Meters progress_meters, Meters recent_forward_movement);
+void car_set_lane_progress(Car* self, double progress, Meters progress_meters);
 void car_set_lane_rank(Car* self, int rank);
 // Sets the speed of the car. The speed should be between 0.0 and max_speed_capability. Will be clipped automatically.
 void car_set_speed(Car* self, MetersPerSecond speed);
@@ -237,8 +212,9 @@ void car_set_auto_turn_off_indicators(Car* self, bool auto_turn_off);
 void car_reset_all_control_variables(Car* self);
 
 
-// should be called by the sim engine to update the car's geometry based on its lane, lane progress, and dimensions.
 void car_update_geometry(Simulation* sim, Car* car);
+
+void car_update_center_orientation(Simulation* sim, Car* car);  // utility to update just the center and orientation based on lane position, without updating corners and speed/acceleration vectors. Sim calls only this. Call car_update_geometry() from decision-making or rendering logic if corners or speed/acceleration vectors are needed, to avoid unnecessary computation in the sim loop.
 
 Coordinates coords_compute_relative_to_car(const Car* self, Coordinates global_coords);
 Vec2D vec2d_rotate_to_car_frame(const Car* self, Vec2D global_vec);

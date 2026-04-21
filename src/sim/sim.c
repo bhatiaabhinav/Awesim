@@ -107,6 +107,7 @@ void sim_init(Simulation* sim) {
     sim->initial_clock_reading = clock_reading(0, 8, 0, 0);  // 8:00 AM Monday
     sim->num_cars = 0;
     sim->time = 0.0;
+    sim->step_count = 0;
     sim->dt = 0.02;
     sim->weather = WEATHER_SUNNY;
     sim->is_agent_enabled = false; // Agent car is disabled by default

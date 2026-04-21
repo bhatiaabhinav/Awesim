@@ -25,6 +25,7 @@ void lidar_capture_exclude_objects(Lidar* lidar, Simulation* sim, void** exclude
         for (CarId car_id = 0; car_id < sim_get_num_cars(sim); car_id++) {
             Car* car = sim_get_car(sim, car_id);
             if (object_array_contains_object(exclude_objects, car)) continue;
+            car_update_geometry(sim, car); // ensure car geometry is updated before checking for intersection
             for (int edge_idx = 0; edge_idx < 4; edge_idx++) {
                 LineSegment car_edge = line_segment_create(car->corners[edge_idx], car->corners[(edge_idx + 1) % 4]);
                 Coordinates intersection_point;

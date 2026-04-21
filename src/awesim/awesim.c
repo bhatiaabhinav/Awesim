@@ -365,7 +365,7 @@ static bool placement_would_cause_collision(Car* car, Lane* lane, Simulation* si
     return would_collide;
 }
 
-void awesim_setup(Simulation* sim, Meters city_width, int num_cars, Seconds dt, ClockReading initial_clock_reading, Weather weather, bool use_deprecated_map, LaneId* agent_start_lane_id_options) {
+void awesim_setup(Simulation* sim, Meters city_width, int num_cars, Seconds dt, ClockReading initial_clock_reading, Weather weather, bool use_deprecated_map, LaneId* agent_start_lane_id_options, Seconds agent_control_dt, Seconds npc_control_dt) {
     sim_init(sim);
     sim_set_dt(sim, dt);
     sim_set_initial_clock_reading(sim, initial_clock_reading);
@@ -403,7 +403,13 @@ void awesim_setup(Simulation* sim, Meters city_width, int num_cars, Seconds dt, 
         }
         CarPersonality prefs = preferences_sample_random();
         Liters fuel_tank_capacity = __FLT_MAX__; // Default to infinite fuel tank capacity
-        car_init(car, dims, (CarCapabilities){capable_acc_profile, from_mph(120), 0.0}, fuel_tank_capacity, prefs);
+        int action_repeat = (int)round((i == 0 ? agent_control_dt : npc_control_dt) / dt);
+        if (action_repeat <= 0) action_repeat = 1;
+        Seconds actual_control_dt = action_repeat * dt;
+        if (fabs(actual_control_dt - (i == 0 ? agent_control_dt : npc_control_dt)) > 1e-6 && i <= 1) { // Only log for agent and first NPC if there's a mismatch
+            LOG_WARN("%s control_dt (%.4f) is not a multiple of dt (%.4f). Rounded to %.4f (action_repeat = %d)", (i == 0 ? "Agent" : "NPC"), (i == 0 ? agent_control_dt : npc_control_dt), dt, actual_control_dt, action_repeat);
+        }
+        car_init(car, dims, (CarCapabilities){capable_acc_profile, from_mph(120), action_repeat}, fuel_tank_capacity, prefs);
         LOG_TRACE("Car id %d init: Dimensions: width = %.2f meters, length = %.2f meters, height = %.2f meters", car->id, car_get_width(car), car_get_length(car), car_get_height(car));
         Road* random_road;
         Lane* random_lane;
@@ -450,7 +456,7 @@ void awesim_setup(Simulation* sim, Meters city_width, int num_cars, Seconds dt, 
             sim->num_cars = i; // Set the number of cars to the successfully placed ones
             break;
         } else {
-            car_set_lane_progress(car, random_progress, random_progress * random_lane->length, 0.0);
+            car_set_lane_progress(car, random_progress, random_progress * random_lane->length);
             car_set_lane(car, random_lane);
             lane_add_car(random_lane, car, sim);
             // car_set_speed(car, random_lane->speed_limit * 0.5);

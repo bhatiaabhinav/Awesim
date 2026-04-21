@@ -38,8 +38,8 @@ void render_intersection(SDL_Renderer* renderer, const Intersection* intersectio
     // Write intersection number at center
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_Point screen_center = to_screen_coords(intersection->center, WINDOW_SIZE_WIDTH, WINDOW_SIZE_HEIGHT);
-    char intersection_id_str[16];
-    snprintf(intersection_id_str, sizeof(intersection_id_str), "%d", intersection->id);
+    char intersection_id_str[32];   
+    snprintf(intersection_id_str, sizeof(intersection_id_str), "%d (RoW %d)", intersection->id, intersection->cars_at_stop_sign_fcfs_queue[0]);
     render_text(renderer, intersection_id_str, screen_center.x, screen_center.y, 255, 255, 255, 255, 14, ALIGN_CENTER, false, NULL);
 #endif
 }

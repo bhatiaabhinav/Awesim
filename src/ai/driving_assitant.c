@@ -306,6 +306,7 @@ static const bool _defensive_even_if_right_of_way[SMART_DAS_DRIVING_STYLES_COUNT
 static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(DrivingAssistant* das, Car* car, Simulation* sim, SituationalAwareness* situation) {
     Map* map = sim_get_map(sim);
     Seconds dt = sim_get_dt(sim);
+    Seconds control_dt = dt * car->capabilities.action_repeat;
     MetersPerSecondSquared accel = car->capabilities.accel_profile.max_acceleration;
     if (situation->is_an_intersection_upcoming) {
         if (das->smart_das_intersection_approach_engaged) {
@@ -326,7 +327,11 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
             const Lane* next_lane = situation->lane_next_after_turn[das->turn_intent];
             MetersPerSecond next_lane_speed_limit = lane_get_speed_limit(next_lane);
             Meters next_lane_length = next_lane->length;
-            Seconds yield_thw = das->thw + next_lane_length / next_lane_speed_limit + situation->distance_to_end_of_lane / situation->speed; // time headway to consider for yielding at intersection, with some buffer for traversing the intersection and for reaching the intersection
+            Seconds yield_thw = das->thw + next_lane_length / next_lane_speed_limit;
+            if (situation->distance_to_end_of_lane > 0 && car->speed > CREEP_SPEED) {
+                // if we are still approaching the end of lane, we should use a more conservative thw for yielding, because we may not have fully accounted for the time it takes to reach the stop line yet
+                yield_thw += situation->distance_to_end_of_lane / car->speed;
+            }
 
             bool should_brake_for_full_stop = false;
             bool should_brake_for_rolling_stop = false;
@@ -360,7 +365,7 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
             case TRAFFIC_LIGHT_GREEN_YIELD:
                 should_brake_for_full_stop = false;
                 should_brake_for_rolling_stop = false;
-                should_brake_for_yield = is_ok_with_yielding && car_has_something_to_yield_to_at_intersection(car, sim, situation, das->turn_intent, yield_thw, dt);
+                should_brake_for_yield = is_ok_with_yielding && car_has_something_to_yield_to_at_intersection(car, sim, situation, das->turn_intent, yield_thw,  control_dt);
                 should_speed_up_to_make_light = false;
                 break;
             case TRAFFIC_LIGHT_YELLOW:
@@ -374,7 +379,7 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
                 // note: we are not lawfully expected to hard brake on yellows in general. No driving style should do that. Also, we may need to yield here in case we decide to go through the yellow. Also, we won't be speeding up to make the light here, because when combined with yielding, it messes up things.
                 should_brake_for_full_stop = should_brake_for_yellow;
                 should_brake_for_rolling_stop = false;
-                should_brake_for_yield = !should_brake_for_full_stop && is_ok_with_yielding && car_has_something_to_yield_to_at_intersection(car, sim, situation, das->turn_intent, yield_thw, dt);
+                should_brake_for_yield = !should_brake_for_full_stop && is_ok_with_yielding && car_has_something_to_yield_to_at_intersection(car, sim, situation, das->turn_intent, yield_thw, control_dt);
                 should_speed_up_to_make_light = false;
                 break;
             case TRAFFIC_LIGHT_RED:
@@ -395,7 +400,7 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
                 if (yield_mode) {
                     should_brake_for_full_stop = false;
                     should_brake_for_rolling_stop = false;
-                    should_brake_for_yield = car_has_something_to_yield_to_at_intersection(car, sim, situation, das->turn_intent, yield_thw, dt);
+                    should_brake_for_yield = car_has_something_to_yield_to_at_intersection(car, sim, situation, das->turn_intent, yield_thw, control_dt);
                 } else {
                     should_brake_for_full_stop = true;
                     should_brake_for_rolling_stop = false; 
@@ -443,7 +448,7 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
                             Meters perceived_progress;
                             MetersPerSecond perceived_speed;
                             // Add perception dropout for the other vehicle
-                            bool perceived = car_noisy_perceive_other(car, foremost_vehicle, sim, NULL, &perceived_progress, &perceived_speed, NULL, NULL, NULL, NULL, NULL, NULL, false, dt, true);
+                            bool perceived = car_noisy_perceive_other(car, foremost_vehicle, sim, NULL, &perceived_progress, &perceived_speed, NULL, NULL, NULL, NULL, NULL, NULL, false, control_dt, true);
                             if (!perceived) {
                                 foremost_vehicle = NULL;
                             }
@@ -503,7 +508,7 @@ static MetersPerSecondSquared driving_assistant_smart_das_handle_intersection(Dr
             #endif
             bool should_brake = should_brake_for_full_stop || should_brake_for_rolling_stop || should_brake_for_yield;
 
-            if (!should_brake && _defensive_even_if_right_of_way[style] && defensive_yield_despite_right_of_way(car, sim, situation, das->turn_intent, yield_thw / 2, dt)) {
+            if (!should_brake && _defensive_even_if_right_of_way[style] && defensive_yield_despite_right_of_way(car, sim, situation, das->turn_intent, yield_thw / 2, control_dt)) {
                 // even if we have the right of way, if we are defensive and there is something to yield to with a short time headway, we should yield
                 should_brake_for_yield = true;
                 should_speed_up_to_make_light = false; // if we were going to speed up for yellow, now we should not do that because we are going to yield instead
@@ -698,6 +703,7 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
     bool request_turn = false;
     Map* map = sim_get_map(sim);
     Seconds dt = sim_get_dt(sim);
+    Seconds control_dt = dt * car->capabilities.action_repeat;
 
     #ifdef BENCHMARK_DAS_CONTROL
     double _bdas_t0 = _bdas_get_time_us();
@@ -802,10 +808,10 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
     bool trying_brake_pedal = (in_forward_gear && accel < -1e-6) || (in_reverse_gear && accel > 1e-6);
     bool trying_no_pedals = !trying_gas_pedal && !trying_brake_pedal;
 
-    MetersPerSecondSquared pressing_gas_harder_max_change = car->capabilities.accel_profile.max_acceleration * dt / HUMAN_TIME_TO_PRESS_FULL_PEDAL;
-    MetersPerSecondSquared releasing_gas_max_change = car->capabilities.accel_profile.max_acceleration * dt / HUMAN_TIME_TO_RELEASE_FULL_PEDAL;
-    MetersPerSecondSquared pressing_brake_harder_max_change = car->capabilities.accel_profile.max_deceleration * dt / HUMAN_TIME_TO_PRESS_FULL_PEDAL;
-    MetersPerSecondSquared releasing_brake_max_change = car->capabilities.accel_profile.max_deceleration * dt / HUMAN_TIME_TO_RELEASE_FULL_PEDAL;
+    MetersPerSecondSquared pressing_gas_harder_max_change = car->capabilities.accel_profile.max_acceleration * control_dt / HUMAN_TIME_TO_PRESS_FULL_PEDAL;
+    MetersPerSecondSquared releasing_gas_max_change = car->capabilities.accel_profile.max_acceleration * control_dt / HUMAN_TIME_TO_RELEASE_FULL_PEDAL;
+    MetersPerSecondSquared pressing_brake_harder_max_change = car->capabilities.accel_profile.max_deceleration * control_dt / HUMAN_TIME_TO_PRESS_FULL_PEDAL;
+    MetersPerSecondSquared releasing_brake_max_change = car->capabilities.accel_profile.max_deceleration * control_dt / HUMAN_TIME_TO_RELEASE_FULL_PEDAL;
 
     // consider all combinations
     if (in_forward_gear) {
@@ -837,7 +843,7 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
             if (trying_no_pedals) {
                 accel = 0;      // already no pedals, stay there
             } else {
-                double foot_still_in_air_probability = 1 - dt / HUMAN_AVERAGE_DELAY_SWITCHING_PEDALS;
+                double foot_still_in_air_probability = 1 - control_dt / HUMAN_AVERAGE_DELAY_SWITCHING_PEDALS;
                 bool foot_switched = rand_0_to_1() > foot_still_in_air_probability;
                 if (foot_switched) {
                     if (trying_gas_pedal) {
@@ -851,8 +857,8 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
             }
         }
     } else if (in_reverse_gear) {
-        pressing_gas_harder_max_change = car->capabilities.accel_profile.max_acceleration_reverse_gear * dt / HUMAN_TIME_TO_PRESS_FULL_PEDAL;
-        releasing_gas_max_change = car->capabilities.accel_profile.max_acceleration_reverse_gear * dt / HUMAN_TIME_TO_RELEASE_FULL_PEDAL;
+        pressing_gas_harder_max_change = car->capabilities.accel_profile.max_acceleration_reverse_gear * control_dt / HUMAN_TIME_TO_PRESS_FULL_PEDAL;
+        releasing_gas_max_change = car->capabilities.accel_profile.max_acceleration_reverse_gear * control_dt / HUMAN_TIME_TO_RELEASE_FULL_PEDAL;
         if (gas_pedal_pressed) {
             if (trying_gas_pedal) {
                 double max_change = accel < accel_prev ? pressing_gas_harder_max_change : releasing_gas_max_change;
@@ -881,7 +887,7 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
             if (trying_no_pedals) {
                 accel = 0;      // already no pedals, stay there
             } else {
-                double foot_still_in_air_probability = 1 - dt / HUMAN_AVERAGE_DELAY_SWITCHING_PEDALS;
+                double foot_still_in_air_probability = 1 - control_dt / HUMAN_AVERAGE_DELAY_SWITCHING_PEDALS;
                 bool foot_switched = rand_0_to_1() > foot_still_in_air_probability;
                 if (foot_switched) {
                     if (trying_gas_pedal) {
@@ -896,7 +902,7 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
         }
     } else { // fully stopped right now.
         if (accel < 0) {
-            pressing_gas_harder_max_change = car->capabilities.accel_profile.max_acceleration_reverse_gear * dt / HUMAN_TIME_TO_PRESS_FULL_PEDAL;   // adjust for reverse gear
+            pressing_gas_harder_max_change = car->capabilities.accel_profile.max_acceleration_reverse_gear * control_dt / HUMAN_TIME_TO_PRESS_FULL_PEDAL;   // adjust for reverse gear
         }
         if (trying_gas_pedal) {
             accel = accel_prev + fclamp(accel - accel_prev, -pressing_gas_harder_max_change, pressing_gas_harder_max_change);
@@ -958,7 +964,7 @@ bool driving_assistant_control_car(DrivingAssistant* das, Car* car, Simulation* 
         // if merge assistance is active, issue request only when it is safe, else issue right away
         if (das->merge_assistance && lane_indicator != INDICATOR_NONE) {
             Meters buffer = das->buffer;
-            if (car_is_lane_change_dangerous(car, sim, sa, lane_indicator, das->thw, buffer, dt)) {
+            if (car_is_lane_change_dangerous(car, sim, sa, lane_indicator, das->thw, buffer, control_dt)) {
                 LOG_TRACE("Waiting for safe merge for car %d with indicator %d", car->id, lane_indicator);
                 request_lane_change = false;        // Keep indicating but don't execute
             } else {

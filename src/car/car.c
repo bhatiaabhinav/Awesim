@@ -40,8 +40,6 @@ void car_init(Car* car, Dimensions3D dimensions, CarCapabilities capabilities, L
     car->request_indicated_lane = false;
     car->request_indicated_turn = false;
     car->auto_turn_off_indicators = true; // Default to true, can be changed later
-    car->prev_lane_id = ID_NULL; // Initialize previous lane ID to NULL
-    car->recent_forward_movement = 0.0; // Initialize recent forward movement to 0
     car->lowest_speed_in_stop_zone = __FLT_MAX__; // No stop zone visit yet
     car->lowest_speed_post_stop_line_before_lane_end = __FLT_MAX__; // No stop line crossing yet
     reset_stats(car);
@@ -105,21 +103,19 @@ void car_set_fuel_tank_capacity(Car* self, Liters capacity) {
 }
 
 void car_set_lane(Car* self, const Lane* lane) {
-    self->prev_lane_id = self->lane_id; // Store the lane ID at the previous timestep
     self->lane_id = lane->id;
 }
 
-void car_set_lane_progress(Car* self, double progress, Meters progress_meters, Meters recent_forward_movement) {
+void car_set_lane_progress(Car* self, double progress, Meters progress_meters) {
     if (progress < 0.0 || progress > 1.0) {
         LOG_WARN("Car %d, lane %d : Lane progress must be between 0.0 and 1.0. You are trying to set it to %f. Clipping.", self->id, self->lane_id, progress);
+        progress = fclamp(progress, 0.0, 1.0);
     }
-    progress = fclamp(progress, 0.0, 1.0);
     self->lane_progress = progress;
     if (progress_meters < 0.0) {
         progress_meters = 0.0;
     }
     self->lane_progress_meters = progress_meters;
-    self->recent_forward_movement = recent_forward_movement;
 }
 
 void car_set_lane_rank(Car* self, int rank) {
@@ -157,11 +153,13 @@ void car_set_damage(Car* self, const double damage) {
 void car_set_fuel_level(Car* self, Liters fuel_level) {
     if (fuel_level < 0.0) {
         LOG_WARN("Fuel level cannot be negative. You are trying to set it to %f. Clipping.", fuel_level);
+        fuel_level = 0.0;
     }
     if (fuel_level > self->fuel_tank_capacity) {
         LOG_WARN("Fuel level cannot exceed fuel tank capacity (%f liters). You are trying to set it to %f. Clipping.", self->fuel_tank_capacity, fuel_level);
+        fuel_level = self->fuel_tank_capacity;
     }
-    self->fuel_level = fclamp(fuel_level, 0.0, self->fuel_tank_capacity);
+    self->fuel_level = fuel_level;
 }
 
 void car_set_indicator_turn(Car* self, CarIndicator indicator) {
@@ -201,15 +199,6 @@ void car_set_auto_turn_off_indicators(Car* self, bool auto_turn_off) {
     self->auto_turn_off_indicators = auto_turn_off;
 }
 
-
-Meters car_get_recent_forward_movement(const Car* self) {
-    return self->recent_forward_movement;
-}
-
-LaneId car_get_prev_lane_id(const Car* self) {
-    return self->prev_lane_id;
-}
-
 void car_reset_all_control_variables(Car* self) {
     car_set_indicator_lane(self, INDICATOR_NONE);
     car_set_request_indicated_lane(self, false);
@@ -219,7 +208,7 @@ void car_reset_all_control_variables(Car* self) {
 }
 
 static void car_geometry_from_given_position_speed_acc(Simulation* sim, Car* car, Meters lane_progress_meters, MetersPerSecond speed, MetersPerSecondSquared acceleration, Coordinates* out_center, Radians* out_orientation, Vec2D* out_speed_vector, Vec2D* out_acceleration_vector, Coordinates out_corners[4]) {
-    Lane* lane = car_get_lane(car, sim_get_map(sim));
+    Lane* lane = &sim->map.lanes[car->lane_id];
     double lane_progress = lane_progress_meters / lane->length;
     Coordinates center;
     Radians orientation;
@@ -232,18 +221,17 @@ static void car_geometry_from_given_position_speed_acc(Simulation* sim, Car* car
         Vec2D start = lane->start_point;
         Vec2D end = lane->end_point;
         Vec2D delta = vec_sub(end, start);
-        center = vec_add(start, vec_scale(delta, lane_progress));
+        // center = vec_add(start, vec_scale(delta, lane_progress));
+        center = (Coordinates){start.x + delta.x * lane_progress, start.y + delta.y * lane_progress};   // fused multiply-add for better performance and precision
         if (out_center) *out_center = center;
         if (out_orientation) *out_orientation = orientation;
         
         // Linear Lane Vectors — reuse cached cos/sin
         if (out_speed_vector) {
-            out_speed_vector->x = cos_orient * speed;
-            out_speed_vector->y = sin_orient * speed;
+            *out_speed_vector = (Vec2D){cos_orient * speed, sin_orient * speed};
         }
         if (out_acceleration_vector) {
-            out_acceleration_vector->x = cos_orient * acceleration;
-            out_acceleration_vector->y = sin_orient * acceleration;
+            *out_acceleration_vector = (Vec2D){cos_orient * acceleration, sin_orient * acceleration};
         }
         
     } else if (lane->type == QUARTER_ARC_LANE) {
@@ -296,15 +284,16 @@ static void car_geometry_from_given_position_speed_acc(Simulation* sim, Car* car
             // 2. Speed Vector
             if (out_speed_vector) {
                 double effective_speed_scalar = speed * (1.0 + (diff_end - diff_start) * (lane->radius / lane->length) * dir_sign);
-                out_speed_vector->x = cos_orient * effective_speed_scalar;
-                out_speed_vector->y = sin_orient * effective_speed_scalar;
+                *out_speed_vector = (Vec2D){cos_orient * effective_speed_scalar, sin_orient * effective_speed_scalar};
             }
             
             // 3. Acceleration Vector
             if (out_acceleration_vector) {
                 double centripetal = speed * omega_total;
-                out_acceleration_vector->x = cos_orient * acceleration + (-sin_orient) * centripetal;
-                out_acceleration_vector->y = sin_orient * acceleration + cos_orient * centripetal;
+                *out_acceleration_vector = (Vec2D){
+                    cos_orient * acceleration - sin_orient * centripetal,
+                    sin_orient * acceleration + cos_orient * centripetal
+                };
             }
         }
     } else {
@@ -334,6 +323,10 @@ static void car_geometry_from_given_position_speed_acc(Simulation* sim, Car* car
 
 void car_update_geometry(Simulation* sim, Car* car) {
     car_geometry_from_given_position_speed_acc(sim, car, car->lane_progress_meters, car->speed, car->acceleration, &car->center, &car->orientation, &car->true_speed_vector, &car->true_acceleration_vector, car->corners);
+}
+
+void car_update_center_orientation(Simulation* sim, Car* car) {
+    car_geometry_from_given_position_speed_acc(sim, car, car->lane_progress_meters, car->speed, car->acceleration, &car->center, &car->orientation, NULL, NULL, NULL);
 }
 
 
@@ -435,6 +428,9 @@ bool car_noisy_perceive_other(const Car* self, const Car* other, Simulation* sim
     if (speed_noise_on) {
         MetersPerSecond speed_noise_std = cosine_alignment * sim->perception_noise_speed_std_dev * true_speed;
         MetersPerSecond noisy_speed = rand_gaussian(true_speed, speed_noise_std);
+        if (noisy_speed * true_speed < 0) { // do not allow noise to flip the direction of speed
+            noisy_speed = -noisy_speed;
+        }
         if (speed_out) *speed_out = noisy_speed;
     } else {
         if (speed_out) *speed_out = true_speed;

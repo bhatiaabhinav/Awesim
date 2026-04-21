@@ -228,6 +228,7 @@ void render_sim(SDL_Renderer *renderer, Simulation *sim, bool draw_lanes, bool d
 
         for (int i = 0; i < sim->num_cars; i++) {
             Car* car = sim_get_car(sim, i);
+            car_update_geometry(sim, car);
             render_car(renderer, car, map, draw_car_ids, draw_car_speeds);
         }
 

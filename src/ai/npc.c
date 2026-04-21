@@ -37,7 +37,7 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
     #ifdef BENCHMARK_NPC_DECISIONS
     double _bnpc_t0 = _bnpc_get_time_us();
     #endif
-    Seconds dt = sim_get_dt(sim);
+    Seconds control_dt = sim_get_dt(sim) * self->capabilities.action_repeat; // Control decisions are made at the frequency determined by action_repeat
     SituationalAwareness* situation = sim_get_situational_awareness(sim, self->id);
     DrivingAssistant* das = sim_get_driving_assistant(sim, self->id);
 
@@ -50,16 +50,16 @@ void npc_car_make_decisions(Car* self, Simulation* sim) {
     CarIndicator rand_turn = turn_sample_possible(situation);
     CarIndicator rand_lane_change = lane_change_sample_possible(situation);
 
-    turn_indicator = (r1 < dt / 4) ? rand_turn : car_get_indicator_turn(self);
+    turn_indicator = (r1 < control_dt / 4) ? rand_turn : car_get_indicator_turn(self);
     if (!situation->is_turn_possible[turn_indicator]) {
         turn_indicator = rand_turn;
     }
 
     CarIndicator current_lane_indicator = car_get_indicator_lane(self);
     if (current_lane_indicator == INDICATOR_NONE) {
-        lane_change_indicator = (r2 < dt / 5) ? rand_lane_change : INDICATOR_NONE;  // about every 5 seconds we have been travelling straight without indicating, decide to change lanes randomly
+        lane_change_indicator = (r2 < control_dt / 5) ? rand_lane_change : INDICATOR_NONE;  // about every 5 seconds we have been travelling straight without indicating, decide to change lanes randomly
     } else {
-        lane_change_indicator = (r2 < dt / 5) ? INDICATOR_NONE : current_lane_indicator; // about every 5 seconds we have been indicating unsuccessfully, decide to cancel the lane change indicator
+        lane_change_indicator = (r2 < control_dt / 5) ? INDICATOR_NONE : current_lane_indicator; // about every 5 seconds we have been indicating unsuccessfully, decide to cancel the lane change indicator
     }
 
     // make sure turn indicator and lane change indicator are compatible
