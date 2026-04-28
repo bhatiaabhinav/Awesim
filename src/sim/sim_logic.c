@@ -458,13 +458,12 @@ static void sim_update_car(Simulation* self, CarId car_id, Seconds dt) {
     }
 
     // ---- Detect speeding and tailgating violations ----
-    if (self->traffic_violations_logs_queue.enabled[car_id] && ((self->step_count + car_id) % car->capabilities.action_repeat == 0)) {
-        double effective_dt = dt * car->capabilities.action_repeat; // Scale probability by action_repeat
+    if (self->traffic_violations_logs_queue.enabled[car_id]) {
         MetersPerSecond abs_speed = fabs(v);
         MetersPerSecond speed_limit = lane->speed_limit;
         if (abs_speed > speed_limit + OVERSPEEDING_THRESHOLD_MPS) {
             // Probabilistic detection: probability per second * effective_dt
-            if (rand_0_to_1() < OVERSPEEDING_DETECTION_PROBABILITY * effective_dt) {
+            if (rand_0_to_1() < OVERSPEEDING_DETECTION_PROBABILITY * dt) {
                 traffic_violation_log(&self->traffic_violations_logs_queue, car_id, TRAFFIC_VIOLATION_OVERSPEEDING, self->time, abs_speed - speed_limit);
             }
         }
@@ -477,7 +476,7 @@ static void sim_update_car(Simulation* self, CarId car_id, Seconds dt) {
             Meters bumper_to_bumper = distance_to_lead - (car->cached_half_length + sa->lead->cached_half_length);
             Seconds time_headway = bumper_to_bumper / abs_speed;
             if (time_headway < TAILGATING_TIME_HEADWAY_THRESHOLD) {
-                if (rand_0_to_1() < TAILGATING_DETECTION_PROBABILITY * effective_dt) {
+                if (rand_0_to_1() < TAILGATING_DETECTION_PROBABILITY * dt) {
                     traffic_violation_log(&self->traffic_violations_logs_queue, car_id, TRAFFIC_VIOLATION_TAILGATING, self->time, time_headway);
                 }
             }
@@ -574,10 +573,9 @@ void sim_integrate(Simulation* self, Seconds time_period) {
         #endif
         for(int car_id=0; car_id < self->num_cars; car_id++) {
             Car* car = sim_get_car(self, car_id);
-            if ((self->step_count + car_id) % car->capabilities.action_repeat != 0) {
-                continue;
+            if ((self->step_count + car_id) % car->capabilities.action_repeat == 0 || self->traffic_violations_logs_queue.enabled[car_id]) {
+                situational_awareness_build(self, car_id);
             }
-            situational_awareness_build(self, car_id);
         }
         #ifdef BENCHMARK_SIM_LOGIC
         _bench_sa_total_us += _bench_get_time_us() - _bench_sa_start;
