@@ -60,8 +60,8 @@
 #define COLLISIONS_MAX_PER_CAR 2
 
 #define OVERSPEEDING_DETECTION_PROBABILITY 0.05 // Probability of getting caught for speeding in a given second. Will be mulitplied by dt to determine probability of getting caught in a given simulation step. This is a very rough parameter to simulate the deterrence effect of speeding tickets on speeding behavior, and can be tuned to achieve realistic law enforcement levels.
-#define OVERSPEEDING_THRESHOLD_MPS 2.2352 // 5 mph in m/s. Speeding is defined as exceeding the speed limit by more than this threshold.
+#define OVERSPEEDING_THRESHOLD_MPS 1.1176 // 2.5 mph in m/s. Speeding is defined as exceeding the speed limit by more than this threshold.
 
-#define TAILGATING_MIN_SPEED_MPS 4.4704
+#define TAILGATING_MIN_SPEED_MPS 2.2352
 #define TAILGATING_TIME_HEADWAY_THRESHOLD 1.5 // in seconds. Tailgating is defined as having less than this time headway to the lead car while traveling above TAILGATING_MIN_SPEED_MPS and not braking.
 #define TAILGATING_DETECTION_PROBABILITY 0.05 // Probability of getting caught for tailgating in a given second while tailgating. This is a rough parameter to simulate the deterrence effect of tailgating tickets on tailgating behavior, and can be tuned to achieve realistic law enforcement levels.

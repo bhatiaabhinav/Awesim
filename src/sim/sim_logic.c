@@ -462,8 +462,11 @@ static void sim_update_car(Simulation* self, CarId car_id, Seconds dt) {
         MetersPerSecond abs_speed = fabs(v);
         MetersPerSecond speed_limit = lane->speed_limit;
         if (abs_speed > speed_limit + OVERSPEEDING_THRESHOLD_MPS) {
+            // interpolate overspeeding probabality based on OVERSPEEDING_THRESHOLD_MPS+ -> 2OVERSPEEDING_THRESHOLD_MPS+
+            double excess_overspeed = abs_speed - (speed_limit + OVERSPEEDING_THRESHOLD_MPS);
+            double detection_probability = OVERSPEEDING_DETECTION_PROBABILITY * (1.0 + excess_overspeed / OVERSPEEDING_THRESHOLD_MPS);
             // Probabilistic detection: probability per second * effective_dt
-            if (rand_0_to_1() < OVERSPEEDING_DETECTION_PROBABILITY * dt) {
+            if (rand_0_to_1() < detection_probability * dt) {
                 traffic_violation_log(&self->traffic_violations_logs_queue, car_id, TRAFFIC_VIOLATION_OVERSPEEDING, self->time, abs_speed - speed_limit);
             }
         }
@@ -476,7 +479,11 @@ static void sim_update_car(Simulation* self, CarId car_id, Seconds dt) {
             Meters bumper_to_bumper = distance_to_lead - (car->cached_half_length + sa->lead->cached_half_length);
             Seconds time_headway = bumper_to_bumper / abs_speed;
             if (time_headway < TAILGATING_TIME_HEADWAY_THRESHOLD) {
-                if (rand_0_to_1() < TAILGATING_DETECTION_PROBABILITY * dt) {
+                // For time headway in (TAILGATING_TIME_HEADWAY_THRESHOLD / 2, TAILGATING_TIME_HEADWAY_THRESHOLD), scale linearly from
+                // about TAILGATING_DETECTION_PROBABILITY just below the threshold up to 2 * TAILGATING_DETECTION_PROBABILITY at or below half the threshold.
+                double excess_prob = fclamp((TAILGATING_TIME_HEADWAY_THRESHOLD - time_headway) / (TAILGATING_TIME_HEADWAY_THRESHOLD / 2.0), 0.0, 1.0);
+                double detection_probability = TAILGATING_DETECTION_PROBABILITY * (1.0 + excess_prob);
+                if (rand_0_to_1() < detection_probability * dt) {
                     traffic_violation_log(&self->traffic_violations_logs_queue, car_id, TRAFFIC_VIOLATION_TAILGATING, self->time, time_headway);
                 }
             }
